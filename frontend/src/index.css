@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+  background: #030712;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.08), transparent 24%),
+    linear-gradient(180deg, #030712 0%, #07111f 100%);
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.24);
+  color: #ffffff;
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-3xl border border-white/10 bg-[rgba(7,17,31,0.72)] shadow-panel backdrop-blur-xl;
+  }
+
+  .page-title {
+    @apply text-3xl font-semibold text-white md:text-4xl;
+  }
+}
+
+pre,
+code,
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.9);
+}

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: silicon-patient
+    env: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    headers:
+      - path: /
+        headers:
+          - key: Cache-Control
+            value: public, max-age=0, must-revalidate
+      - path: /assets/*
+        headers:
+          - key: Cache-Control
+            value: public, max-age=31536000, immutable
+

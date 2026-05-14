@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "mingw-release",
+      "displayName": "MinGW Release",
+      "description": "MinGW toolchain with CUDA enabled when available",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "C:/msys64/ucrt64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "C:/msys64/ucrt64/bin/g++.exe"
+      }
+    },
+    {
+      "name": "nmake-cuda-release",
+      "displayName": "NMake CUDA Release",
+      "description": "NMake + MSVC + nvcc CUDA build (run from vcvars64 environment)",
+      "generator": "NMake Makefiles",
+      "binaryDir": "${sourceDir}/build-cuda",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2/bin/nvcc.exe",
+        "CMAKE_CUDA_ARCHITECTURES": "86"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mingw-release",
+      "configurePreset": "mingw-release"
+    },
+    {
+      "name": "nmake-cuda-release",
+      "configurePreset": "nmake-cuda-release"
+    }
+  ]
+}

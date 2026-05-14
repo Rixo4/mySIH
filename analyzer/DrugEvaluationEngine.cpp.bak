@@ -1,0 +1,613 @@
+#include "DrugEvaluationEngine.h"
+
+#include <algorithm>
+#include <iomanip>
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <utility>
+#include <vector>
+
+namespace spp::analyzer {
+
+namespace {
+
+float clamp01(float value) {
+    if (!std::isfinite(value)) {
+        return 0.0f;
+    }
+    return std::clamp(value, 0.0f, 1.0f);
+}
+
+float sanitizeDose(float dose) {
+    if (!std::isfinite(dose) || dose < 0.0f) {
+        return 0.0f;
+    }
+    return dose;
+}
+
+float sanitizeRate(float rateHz) {
+    if (!std::isfinite(rateHz) || rateHz < 0.0f) {
+        return 0.0f;
+    }
+    return rateHz;
+}
+
+float computeSuppressionPct(float baselineRate, float currentRate) {
+    if (!std::isfinite(baselineRate) || baselineRate <= 0.0f) {
+        return 0.0f;
+    }
+    const float baseline = baselineRate;
+    return ((baseline - currentRate) / baseline) * 100.0f;
+}
+
+float computeBiologicalEffectPct(const DoseEvalPoint& p, float baselineRate) {
+    const float base = std::max(1.0f, baselineRate);
+    const float rateChange = (p.firingRateHz - base) / base; // fractional change
+
+    const float excitationEffect = std::max(0.0f, rateChange) * 100.0f;
+    const float suppressionEffect = std::max(0.0f, -rateChange) * 100.0f;
+    const float seizureEffect = clamp01(p.seizureRisk) * 100.0f;
+    const float instabilityEffect = clamp01(p.nii) * 100.0f;
+
+    return std::max({excitationEffect, suppressionEffect, seizureEffect, instabilityEffect});
+}
+
+std::string formatNumber(double value, int precision = 2) {
+    if (!std::isfinite(value)) {
+        return "N/A";
+    }
+
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(precision) << value;
+    return out.str();
+}
+
+std::string formatRangeText(float startDose, float endDose) {
+    return formatNumber(startDose) + " - " + formatNumber(endDose);
+}
+
+std::string formatRangesText(const std::vector<DoseRange>& ranges) {
+    if (ranges.empty()) {
+        return "Not observed";
+    }
+
+    std::ostringstream out;
+    for (std::size_t i = 0; i < ranges.size(); ++i) {
+        if (i > 0U) {
+            out << ", ";
+        }
+        out << formatRangeText(ranges[i].startDose, ranges[i].endDose);
+    }
+    return out.str();
+}
+
+float estimateDoseStep(const std::vector<DoseEvalPoint>& points) {
+    if (points.size() < 2U) {
+        return 0.0f;
+    }
+
+    float minPositiveDiff = std::numeric_limits<float>::infinity();
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        const float diff = points[i].dose - points[i - 1U].dose;
+        if (diff > 1.0e-5f) {
+            minPositiveDiff = std::min(minPositiveDiff, diff);
+        }
+    }
+
+    if (!std::isfinite(minPositiveDiff)) {
+        return 0.0f;
+    }
+    return minPositiveDiff;
+}
+
+std::vector<DoseRange> buildDoseRanges(
+    const std::vector<DoseEvalPoint>& points,
+    const std::vector<bool>& mask,
+    float doseStep
+) {
+    std::vector<DoseRange> ranges;
+    if (points.empty() || mask.size() != points.size()) {
+        return ranges;
+    }
+
+    const float step = (doseStep > 0.0f) ? doseStep : 1.0f;
+    const float maxContiguousGap = 1.50f * step + 1.0e-5f;
+
+    std::size_t i = 0U;
+    while (i < points.size()) {
+        while (i < points.size() && !mask[i]) {
+            ++i;
+        }
+        if (i >= points.size()) {
+            break;
+        }
+
+        std::size_t j = i;
+        while (j + 1U < points.size() &&
+               mask[j + 1U] &&
+               (points[j + 1U].dose - points[j].dose) <= maxContiguousGap) {
+            ++j;
+        }
+
+        ranges.push_back(DoseRange{points[i].dose, points[j].dose});
+        i = j + 1U;
+    }
+
+    return ranges;
+}
+
+double computeBestSigmoidR2(const std::vector<double>& dose, const std::vector<double>& effect01) {
+    if (dose.size() != effect01.size() || dose.size() < 4U) {
+        return 0.0;
+    }
+
+    const auto [dminIt, dmaxIt] = std::minmax_element(dose.begin(), dose.end());
+    const double dMin = *dminIt;
+    const double dMax = *dmaxIt;
+
+    double meanY = 0.0;
+    for (double y : effect01) {
+        meanY += y;
+    }
+    meanY /= static_cast<double>(effect01.size());
+
+    double sst = 0.0;
+    for (double y : effect01) {
+        const double dy = y - meanY;
+        sst += dy * dy;
+    }
+    if (sst <= 1.0e-12) {
+        return 1.0;
+    }
+
+    double bestSse = std::numeric_limits<double>::infinity();
+    constexpr double kMin = 0.02;
+    constexpr double kMax = 2.50;
+    constexpr double kStep = 0.02;
+    const double dStep = std::max(0.25, (dMax - dMin) / 120.0);
+
+    for (double k = kMin; k <= kMax + 1.0e-9; k += kStep) {
+        for (double d50 = dMin; d50 <= dMax + 1.0e-9; d50 += dStep) {
+            double numer = 0.0;
+            double denom = 0.0;
+            for (std::size_t i = 0; i < dose.size(); ++i) {
+                const double z = std::clamp(-k * (dose[i] - d50), -60.0, 60.0);
+                const double s = 1.0 / (1.0 + std::exp(z));
+                numer += effect01[i] * s;
+                denom += s * s;
+            }
+            if (denom <= 1.0e-12) {
+                continue;
+            }
+            const double emax = std::clamp(numer / denom, 0.0, 1.0);
+
+            double sse = 0.0;
+            for (std::size_t i = 0; i < dose.size(); ++i) {
+                const double z = std::clamp(-k * (dose[i] - d50), -60.0, 60.0);
+                const double s = 1.0 / (1.0 + std::exp(z));
+                const double pred = emax * s;
+                const double err = effect01[i] - pred;
+                sse += err * err;
+            }
+            bestSse = std::min(bestSse, sse);
+        }
+    }
+
+    if (!std::isfinite(bestSse)) {
+        return 0.0;
+    }
+    return std::clamp(1.0 - (bestSse / (sst + 1.0e-12)), -1.0, 1.0);
+}
+
+CurveBehavior classifyCurveBehaviorFromR2(double r2, float maxEffectPct) {
+    if (maxEffectPct < 20.0f) {
+        return CurveBehavior::NonResponsive;
+    }
+    if (r2 >= 0.95) {
+        return CurveBehavior::Sigmoid;
+    }
+    if (r2 >= 0.80) {
+        return CurveBehavior::WeakSigmoidal;
+    }
+    return CurveBehavior::Flat;
+}
+
+std::string classifyCurveText(double r2, float maxEffectPct) {
+    return DrugEvaluationEngine::toString(classifyCurveBehaviorFromR2(r2, maxEffectPct));
+}
+
+std::string classifyResponseStrength(float maxEffectPct) {
+    if (maxEffectPct < 20.0f) {
+        return "None";
+    }
+    if (maxEffectPct < 40.0f) {
+        return "Moderate";
+    }
+    if (maxEffectPct < 60.0f) {
+        return "Moderate-to-Strong";
+    }
+    return "Strong";
+}
+
+std::string classifyStabilityScore(const std::vector<float>& effectPct) {
+    if (effectPct.empty()) {
+        return "LOW";
+    }
+
+    double mean = 0.0;
+    for (float value : effectPct) {
+        mean += static_cast<double>(value);
+    }
+    mean /= static_cast<double>(effectPct.size());
+
+    double variance = 0.0;
+    for (float value : effectPct) {
+        const double delta = static_cast<double>(value) - mean;
+        variance += delta * delta;
+    }
+    variance /= static_cast<double>(effectPct.size());
+
+    const double stddev = std::sqrt(variance);
+    if (stddev <= 2.5) {
+        return "HIGH";
+    }
+    if (stddev <= 8.0) {
+        return "MEDIUM";
+    }
+    return "LOW";
+}
+
+std::string confidenceFromStabilityScore(const std::string& stabilityScore) {
+    if (stabilityScore == "HIGH") {
+        return "HIGH";
+    }
+    if (stabilityScore == "MEDIUM") {
+        return "MEDIUM";
+    }
+    return "LOW";
+}
+
+std::string classifyDecisionReason(
+    bool noResponse,
+    bool toxicSignal,
+    bool overSuppression,
+    bool lowStability,
+    bool fragmentedWindow,
+    bool promising
+) {
+    if (noResponse) {
+        return toxicSignal
+                   ? "Toxicity observed without therapeutic benefit"
+                   : "No meaningful therapeutic response observed within tested dose range";
+    }
+
+    if (promising) {
+        return "Dose-dependent therapeutic response observed within stable therapeutic band";
+    }
+
+    if (toxicSignal) {
+        return "Therapeutic response observed before toxicity; narrow safety window requires caution";
+    }
+
+    if (overSuppression) {
+        return "Excessive suppression observed at higher doses";
+    }
+
+    if (lowStability) {
+        return "Low inter-run stability: variability is high despite therapeutic response";
+    }
+
+    if (fragmentedWindow) {
+        return "Fragmented therapeutic response reduces dosing reliability";
+    }
+
+    return "Therapeutic response observed but requires further validation";
+}
+
+std::string classifyRiskText(bool toxicSignal, bool noResponse, bool promising) {
+    if (noResponse) {
+        return toxicSignal ? "HIGH" : "LOW";
+    }
+    if (promising) {
+        return "LOW";
+    }
+    return "MODERATE";
+}
+
+} // namespace
+
+DrugEvaluationReport DrugEvaluationEngine::evaluate(std::vector<DoseEvalPoint> points) {
+    DrugEvaluationReport report;
+    if (points.empty()) {
+        return report;
+    }
+
+    for (auto& p : points) {
+        p.dose = sanitizeDose(p.dose);
+        p.firingRateHz = sanitizeRate(p.firingRateHz);
+        p.seizureRisk = clamp01(p.seizureRisk);
+        p.nii = clamp01(p.nii);
+    }
+
+    std::sort(points.begin(), points.end(), [](const DoseEvalPoint& a, const DoseEvalPoint& b) {
+        return a.dose < b.dose;
+    });
+
+    report.doseMin = points.front().dose;
+    report.doseMax = points.back().dose;
+    report.doseStep = estimateDoseStep(points);
+    report.baselineFiringRateHz = points.front().firingRateHz;
+
+    const float baselineRate = std::max(1.0e-6f, report.baselineFiringRateHz);
+
+    std::vector<bool> ineffectiveMask(points.size(), false);
+    std::vector<bool> therapeuticMask(points.size(), false);
+    std::vector<bool> overSuppressionMask(points.size(), false);
+
+    std::vector<double> dose;
+    std::vector<double> effect01;
+    dose.reserve(points.size());
+    effect01.reserve(points.size());
+
+    float maxEffectPct = -std::numeric_limits<float>::infinity();
+    float minEffectPct = std::numeric_limits<float>::infinity();
+    std::size_t peakEffectIndex = 0U;
+    std::vector<float> effectPct;
+    effectPct.reserve(points.size());
+    bool toxicityDetected = false;
+    std::size_t toxicThresholdIndex = points.size();
+
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const auto& p = points[i];
+        const float effect = computeBiologicalEffectPct(p, baselineRate);
+        if (effect > maxEffectPct) {
+            maxEffectPct = effect;
+            peakEffectIndex = i;
+        }
+        minEffectPct = std::min(minEffectPct, effect);
+        effectPct.push_back(effect);
+
+        if (!toxicityDetected && (p.seizureRisk >= 0.70f || p.nii >= 0.70f)) {
+            toxicityDetected = true;
+            toxicThresholdIndex = i;
+        }
+
+        dose.push_back(static_cast<double>(p.dose));
+        effect01.push_back(std::clamp(static_cast<double>(effect) / 100.0, 0.0, 1.0));
+    }
+
+    report.maxEffectPct = std::isfinite(maxEffectPct) ? maxEffectPct : 0.0f;
+    report.minEffectPct = std::isfinite(minEffectPct) ? minEffectPct : 0.0f;
+    report.noResponse = report.maxEffectPct < 20.0f;
+    report.stabilityScoreText = classifyStabilityScore(effectPct);
+
+    report.hasToxicThreshold = toxicityDetected;
+    report.toxicThresholdDose = toxicityDetected ? points[toxicThresholdIndex].dose : 0.0f;
+
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const float effect = effectPct[i];
+
+        if (effect < 20.0f) {
+            ineffectiveMask[i] = true;
+        } else if (effect <= 60.0f) {
+            therapeuticMask[i] = true;
+        } else {
+            overSuppressionMask[i] = true;
+        }
+    }
+
+    const auto ineffectiveRanges = buildDoseRanges(points, ineffectiveMask, report.doseStep);
+    const auto therapeuticRanges = buildDoseRanges(points, therapeuticMask, report.doseStep);
+    const auto overSuppressionRanges = buildDoseRanges(points, overSuppressionMask, report.doseStep);
+
+    report.safeRanges = ineffectiveRanges;
+    report.effectiveRanges = therapeuticRanges;
+    report.therapeuticWindows = therapeuticRanges;
+    report.hasSuppressionThreshold = !therapeuticRanges.empty() && !report.noResponse;
+    report.suppressionThresholdDose = report.hasSuppressionThreshold ? therapeuticRanges.front().startDose : 0.0f;
+    const bool overSuppressionDetected = !overSuppressionRanges.empty();
+
+    if (report.noResponse) {
+        report.curveBehavior = CurveBehavior::NonResponsive;
+        report.curveTypeText = "Flat / Non-responsive";
+        report.modelFitText = "N/A";
+        report.responseStrengthText = "None";
+        report.effectiveRangeText = "Not observed";
+        report.windowQualityText = "Not observed";
+        report.ineffectiveZoneText = formatRangeText(report.doseMin, report.doseMax);
+        report.therapeuticZoneText = "Not observed";
+        report.overSuppressionText = "Not observed";
+        report.onsetDoseText = "Not observed";
+        report.peakEfficiencyText = "Not observed";
+        report.saturationTrendText = "Not observed";
+        report.finalDecision = DrugEvalDecision::LimitedEfficacy;
+        report.recommendationText = "LIMITED EFFICACY";
+        report.riskLevelText = toxicityDetected ? "HIGH" : "LOW";
+        report.reasonText = toxicityDetected
+                                ? std::string("Toxicity observed without therapeutic benefit")
+                                : std::string("No meaningful therapeutic response observed within tested dose range");
+        report.confidenceText = confidenceFromStabilityScore(report.stabilityScoreText);
+        return report;
+    }
+
+    const double r2 = computeBestSigmoidR2(dose, effect01);
+    report.sigmoidR2 = r2;
+    report.curveBehavior = classifyCurveBehaviorFromR2(r2, report.maxEffectPct);
+    report.curveTypeText = DrugEvaluationEngine::toString(report.curveBehavior);
+    report.modelFitText = formatNumber(report.sigmoidR2, 2);
+    report.responseStrengthText = classifyResponseStrength(report.maxEffectPct);
+    report.effectiveRangeText = therapeuticRanges.empty() ? std::string("Not observed") : formatRangesText(therapeuticRanges);
+    const bool singlePointTherapeuticWindow =
+        (therapeuticRanges.size() == 1U) &&
+        (std::fabs(therapeuticRanges.front().endDose - therapeuticRanges.front().startDose) <=
+         std::max(1.0e-6f, 0.25f * std::max(1.0e-6f, report.doseStep)));
+    report.windowQualityText = therapeuticRanges.empty()
+                                   ? std::string("Not observed")
+                                   : (singlePointTherapeuticWindow
+                                          ? std::string("Narrow")
+                                          : (therapeuticRanges.size() == 1U ? std::string("Continuous")
+                                                                            : std::string("Fragmented")));
+    report.ineffectiveZoneText = formatRangesText(ineffectiveRanges);
+    report.therapeuticZoneText = therapeuticRanges.empty() ? std::string("Not observed") : formatRangesText(therapeuticRanges);
+    report.overSuppressionText = overSuppressionRanges.empty() ? std::string("Not observed") : formatRangesText(overSuppressionRanges);
+    report.onsetDoseText = therapeuticRanges.empty()
+                               ? std::string("Not observed")
+                               : std::string("~") + formatNumber(therapeuticRanges.front().startDose, 2);
+    const bool peakInToxicRange = toxicityDetected && (points[peakEffectIndex].dose >= report.toxicThresholdDose);
+    report.peakEfficiencyText = std::string("~") + formatNumber(points[peakEffectIndex].dose, 2) +
+                                (peakInToxicRange ? std::string(" (within toxic range)") : std::string(""));
+    report.saturationTrendText = (peakEffectIndex + 1U >= points.size())
+                                     ? std::string("Not observed within tested range")
+                                     : std::string("Observed beyond ") + formatNumber(points[peakEffectIndex].dose, 2);
+
+    const bool therapeuticWindowExists = !therapeuticRanges.empty();
+    const bool fragmentedWindow = therapeuticRanges.size() > 1U;
+    const bool lowStability = report.stabilityScoreText == "LOW";
+    const bool promising = report.curveBehavior == CurveBehavior::Sigmoid && therapeuticWindowExists && !lowStability;
+
+    const bool toxicityBeforeTherapy =
+        toxicityDetected &&
+        (!therapeuticWindowExists ||
+         report.toxicThresholdDose <= therapeuticRanges.front().startDose);
+
+    const bool toxicityAfterTherapy =
+        toxicityDetected &&
+        therapeuticWindowExists &&
+        report.toxicThresholdDose > therapeuticRanges.front().endDose;
+
+    if (toxicityBeforeTherapy) {
+        report.finalDecision = DrugEvalDecision::NotRecommended;
+    } else if (toxicityAfterTherapy) {
+        report.finalDecision = DrugEvalDecision::Caution;
+    } else if (overSuppressionDetected) {
+        report.finalDecision = DrugEvalDecision::Caution;
+    } else if (lowStability) {
+        report.finalDecision = DrugEvalDecision::Caution;
+    } else if (fragmentedWindow) {
+        report.finalDecision = DrugEvalDecision::Caution;
+    } else if (promising) {
+        report.finalDecision = DrugEvalDecision::Promising;
+    } else {
+        report.finalDecision = DrugEvalDecision::Caution;
+    }
+
+    report.recommendationText = DrugEvaluationEngine::toString(report.finalDecision);
+    report.riskLevelText = classifyRiskText(toxicityDetected, report.noResponse, report.finalDecision == DrugEvalDecision::Promising);
+
+    // Provide a more informative reason when toxicity is present but a therapeutic
+    // window exists before toxicity — prefer a cautionary wording.
+    if (toxicityDetected && therapeuticWindowExists && report.finalDecision == DrugEvalDecision::Caution) {
+        report.reasonText = "Therapeutic response observed before toxicity; narrow safety window requires caution";
+    } else if (toxicityDetected && therapeuticWindowExists && report.finalDecision == DrugEvalDecision::Promising) {
+        report.reasonText = "Therapeutic window observed prior to toxic threshold; promising response with caution";
+    } else {
+        report.reasonText = classifyDecisionReason(
+            report.noResponse,
+            toxicityDetected,
+            overSuppressionDetected,
+            lowStability,
+            fragmentedWindow,
+            report.finalDecision == DrugEvalDecision::Promising
+        );
+    }
+    report.confidenceText = confidenceFromStabilityScore(report.stabilityScoreText);
+
+    return report;
+}
+
+std::string DrugEvaluationEngine::buildReportText(const DrugEvaluationReport& report) {
+    std::ostringstream out;
+
+    out << "==================================================\n";
+    out << "SILICON PATIENT - DRUG EVALUATION REPORT\n";
+    out << "==================================================\n\n";
+
+    out << "[Dose Range]\n";
+    out << "Tested Range         : " << formatRangeText(report.doseMin, report.doseMax) << "\n";
+    out << "Step Size            : " << formatNumber(report.doseStep, 2) << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Response Characteristics]\n";
+    out << "Curve Type           : " << report.curveTypeText << "\n";
+    out << "Model Fit (R^2)      : " << report.modelFitText << "\n";
+    out << "Max Effect           : " << formatNumber(report.maxEffectPct, 0) << " %\n";
+    out << "Response Strength    : " << report.responseStrengthText << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Safety Analysis]\n";
+    out << "Toxic Threshold      : "
+        << (report.hasToxicThreshold ? formatNumber(report.toxicThresholdDose, 2)
+                                      : std::string(">") + formatNumber(report.doseMax, 2) + " (Not observed)")
+        << "\n";
+    out << "Safety Observation   : "
+        << (report.hasToxicThreshold ? std::string("Toxicity observed within tested range")
+                                      : std::string("No toxicity within tested range"))
+        << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Therapeutic Window]\n";
+    out << "Effective Range      : " << report.effectiveRangeText << "\n";
+    out << "Window Quality       : " << report.windowQualityText << "\n";
+    out << "Optimal Zone         : Moderate, controlled suppression (20-60%)\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Dose Classification Summary]\n";
+    out << "Ineffective Zone     : " << report.ineffectiveZoneText << "\n";
+    out << "Therapeutic Zone     : " << report.therapeuticZoneText << "\n";
+    out << "Over-Suppression     : " << report.overSuppressionText << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Pharmacodynamic Interpretation]\n";
+    out << "Onset Dose           : " << report.onsetDoseText << "\n";
+    out << "Peak Efficiency      : " << report.peakEfficiencyText << "\n";
+    out << "Saturation Trend     : " << report.saturationTrendText << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[Stability Analysis]\n";
+    out << "Run Count            : Not provided\n";
+    out << "Rate Variability     : Not provided\n";
+    out << "Toxicity Variance    : Not provided\n";
+    out << "Stability Score      : " << report.stabilityScoreText << "\n\n";
+
+    out << "--------------------------------------------------\n\n";
+    out << "[FINAL DECISION]\n";
+    out << "Recommendation       : " << report.recommendationText << "\n";
+    out << "Risk Level           : " << report.riskLevelText << "\n";
+    out << "Reason               : " << report.reasonText << "\n";
+    out << "Confidence           : " << report.confidenceText << "\n\n";
+
+    out << "==================================================\n";
+    return out.str();
+}
+
+std::string DrugEvaluationEngine::toString(CurveBehavior behavior) {
+    switch (behavior) {
+        case CurveBehavior::Sigmoid:
+            return "Sigmoidal";
+        case CurveBehavior::WeakSigmoidal:
+            return "Weak Sigmoidal";
+        case CurveBehavior::Flat:
+            return "Irregular / Non-sigmoidal";
+        case CurveBehavior::NonResponsive:
+            return "Flat / Non-responsive";
+        default:
+            return "Irregular / Non-sigmoidal";
+    }
+}
+
+std::string DrugEvaluationEngine::toString(DrugEvalDecision decision) {
+    switch (decision) {
+        case DrugEvalDecision::Promising:
+            return "PROMISING";
+        case DrugEvalDecision::Caution:
+            return "CAUTION";
+        case DrugEvalDecision::LimitedEfficacy:
+            return "LIMITED EFFICACY";
+        case DrugEvalDecision::NotRecommended:
+        default:
+            return "NOT RECOMMENDED";
+    }
+}
+
+} // namespace spp::analyzer

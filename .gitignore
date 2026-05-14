@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Build outputs
+build/
+build-cuda/
+build-vs-cuda/
+docs/
+backend/runs/
+output_*/
+outtmp_*/
+
+# Logs and generated artifacts
+*.log
+*.db
+.nojekyll
+DEPLOYMENT.md
+vercel.json

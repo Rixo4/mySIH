@@ -1,0 +1,1 @@
+-I"/home/saneesh/Downloads/startup-main" -isystem "/usr/local/cuda-13.2/targets/x86_64-linux/include"

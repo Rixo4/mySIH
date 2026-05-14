@@ -1,0 +1,105 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Lidocaine
+Mechanism           : Sodium Channel Blocker
+Na IC50             : 1.2 µM
+K IC50              : >100 µM (minimal effect)
+Ca IC50             : >100 µM (minimal effect)
+Hill Coefficient    : 1.0
+
+==================================================
+
+[Dose Sweep]
+Tested Range        : 0.10 - 10.00 µM
+Step Size           : 0.50 µM
+Total Points        : 20
+
+--------------------------------------------------
+
+[Biological Response]
+
+Suppression Score     : 44.8 %
+Excitation Score      : 1.2 %
+Neural Silence Score  : 0.0 %
+Seizure Risk Score    : 28.5 %
+Stabilization Score   : 5.2 %
+
+Dominant State        : Controlled Suppression
+
+Primary Observation   :
+Moderate firing rate suppression within expected therapeutic range.
+Network maintains baseline responsiveness and remains functional.
+
+--------------------------------------------------
+
+[Dose-Dependent Behavior]
+
+Onset Dose            : ~0.85 µM
+Peak Effect Dose      : ~4.50 µM
+Toxic Dose            : ~7.20 µM
+
+Response Trend        : Increasing response
+Window Analysis       : Continuous
+
+--------------------------------------------------
+
+[Toxicity Analysis]
+
+Toxicity Score        : 28.5 %
+
+Toxicity Type         : Seizure Risk
+
+Toxicity Trigger      :
+Increased seizure probability at higher doses before complete loss of function.
+
+Safety Summary        :
+Moderate toxicity signal. Therapeutic suppression exists but is followed by
+rising seizure probability at high doses. Recommend careful dose titration
+and monitoring. Safety window exists between therapeutic and toxic doses.
+
+--------------------------------------------------
+
+[Mechanistic Interpretation]
+
+Dominant Channel Effect :
+Sodium channel blocking
+
+Network Impact :
+Firing Rate      : ↓ (decreased by ~45%)
+Synchronization  : ~ (stable, no change)
+NII              : ~ (stable, network remains ordered)
+
+--------------------------------------------------
+
+[Final Decision]
+
+Recommendation        : CAUTION (MODERATE RISK)
+Risk Level            : MODERATE
+Reason                : Therapeutic suppression observed but with toxicity threshold
+Confidence            : MEDIUM
+
+==================================================
+
+NOTES FOR CLINICIAN:
+
+1. EFFICACY: Lidocaine produces dose-dependent suppression of neural firing,
+   with onset at ~0.85 µM and peak effect around 4.5 µM.
+
+2. SAFETY WINDOW: There is a therapeutic window between 0.85-7.2 µM where
+   suppression is therapeutic without excessive toxicity signals.
+
+3. TOXICITY CONCERN: Seizure risk increases at higher doses (>7 µM), suggesting
+   a potential toxicity mechanism. This may represent paradoxical seizure
+   precipitation at excessive sodium channel blockade.
+
+4. NETWORK STABILITY: Synchronization and network stability metrics remain
+   relatively stable, indicating the drug suppresses activity without causing
+   network fragmentation or desynchronization.
+
+5. RECOMMENDATION: Monitor carefully during dose titration. Therapeutic benefit
+   can be achieved, but risk increases significantly above 7 µM.
+
+==================================================
