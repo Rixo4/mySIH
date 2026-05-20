@@ -31,6 +31,24 @@ double safeNonNegativeD(double value) {
     return value;
 }
 
+double reductionPercent(double baseline, double current) {
+    if (!std::isfinite(baseline) || !std::isfinite(current) || baseline <= 1.0e-6) {
+        return 0.0;
+    }
+    return ((baseline - current) / baseline) * 100.0;
+}
+
+double increasePercent(double baseline, double current) {
+    if (!std::isfinite(baseline) || !std::isfinite(current) || baseline <= 1.0e-6) {
+        return 0.0;
+    }
+    return ((current - baseline) / baseline) * 100.0;
+}
+
+bool stabilityScoreIsMediumOrHigh(const std::string& stabilityScore) {
+    return stabilityScore == "MEDIUM" || stabilityScore == "HIGH";
+}
+
 // Helper functions for text generation
 std::string primaryChangeTextForState(
     BiologicalState state,
@@ -64,6 +82,7 @@ std::string generateReasonForState(
 BiologicalState detectBiologicalState(
     double baselineRate,
     double baselineSync,
+    double baselineBurst,
     double baselineNii,
     double baselineSeizure,
     double baselineIsiCv,
@@ -78,11 +97,22 @@ BiologicalState detectBiologicalState(
     const double currentRate = safeNonNegativeD(finalObs.meanFiringRateHz);
     const double rateChange = (currentRate - baselineRate) / std::max(1.0, baselineRate); // fractional change
     const double currentSync = safeNonNegativeD(finalObs.synchronizationIndex);
+    const double currentBurst = safeNonNegativeD(finalObs.burstIndex);
     const double syncChange = currentSync - baselineSync;
+    const double syncReductionPct = reductionPercent(baselineSync, currentSync);
+    const double burstReductionPct = reductionPercent(baselineBurst, currentBurst);
     const double currentNii = safeNonNegativeD(finalObs.nii);
     const double niiChange = currentNii - baselineNii;
+    const double niiReductionPct = reductionPercent(baselineNii, currentNii);
     const double currentSeiz = safeNonNegativeD(finalObs.seizureProbabilityPct) / 100.0; // normalized 0..1
     const double seizChange = currentSeiz - (baselineSeizure / 100.0);
+    const double seizureReductionPct = reductionPercent(baselineSeizure, safeNonNegativeD(finalObs.seizureProbabilityPct));
+    const bool meaningfulCaBlock = finalObs.blockCa >= kMeaningfulKBlockThreshold;
+    const bool calciumStabilizationObserved = meaningfulCaBlock &&
+                                              (syncReductionPct >= 15.0 ||
+                                               niiReductionPct >= 15.0 ||
+                                               seizureReductionPct >= 15.0 ||
+                                               burstReductionPct >= 15.0);
 
     // Scan entire sweep for extreme instability and to apply K-block rules
     bool sawToxicInstability = false;
@@ -91,6 +121,10 @@ BiologicalState detectBiologicalState(
         const double oRateChange = (oRate - baselineRate) / std::max(1.0, baselineRate);
         const double oNiiChange = safeNonNegativeD(obs.nii) - baselineNii;
         const double oSeizChange = safeNonNegativeD(obs.seizureProbabilityPct) / 100.0 - (baselineSeizure / 100.0);
+        const double oSyncReductionPct = reductionPercent(baselineSync, safeNonNegativeD(obs.synchronizationIndex));
+        const double oNiiReductionPct = reductionPercent(baselineNii, safeNonNegativeD(obs.nii));
+        const double oSeizureReductionPct = reductionPercent(baselineSeizure, safeNonNegativeD(obs.seizureProbabilityPct));
+        const double oBurstReductionPct = reductionPercent(baselineBurst, safeNonNegativeD(obs.burstIndex));
 
         if (oNiiChange > 0.40 || oSeizChange > 0.40) {
             sawToxicInstability = true;
@@ -102,6 +136,14 @@ BiologicalState detectBiologicalState(
             if (oRateChange > 0.25 || oNiiChange > 0.20 || oSeizChange > 0.20) {
                 return BiologicalState::Hyperexcitability;
             }
+        }
+
+        if (obs.blockCa >= kMeaningfulKBlockThreshold &&
+            (oSyncReductionPct >= 15.0 ||
+             oNiiReductionPct >= 15.0 ||
+             oSeizureReductionPct >= 15.0 ||
+             oBurstReductionPct >= 15.0)) {
+            return BiologicalState::NetworkStabilization;
         }
     }
 
@@ -121,8 +163,8 @@ BiologicalState detectBiologicalState(
         return BiologicalState::ControlledSuppression;
     }
 
-    // NETWORK_STABILIZATION: sync decrease and nii decrease and seizure not increased
-    if (syncChange < -0.10 && niiChange < 0.0 && seizChange <= 0.0) {
+    // NETWORK_STABILIZATION: meaningful calcium block plus measurable reductions in instability markers
+    if (calciumStabilizationObserved) {
         // Meaningful K-block alone is not enough; require excitability markers.
         if ((finalObs.blockK >= kMeaningfulKBlockThreshold) &&
             (rateChange > 0.25 || niiChange > 0.20 || seizChange > 0.20)) {
@@ -261,7 +303,7 @@ std::string primaryChangeTextForState(
         case BiologicalState::ToxicInstability:
             return "Extreme instability: network metrics (NII, seizure) spiked beyond tolerance";
         case BiologicalState::NetworkStabilization:
-            return "Reduced synchronization and instability suggest network stabilization";
+            return "Calcium-channel blockade reduced synchronization and neural instability";
         case BiologicalState::ControlledSuppression:
             return "Moderate sodium-channel suppression observed with controlled activity";
         case BiologicalState::LimitedEffect:
@@ -285,7 +327,7 @@ std::string safetyInterpretationForState(
         case BiologicalState::ToxicInstability:
             return "Extreme network instability without prior therapeutic window";
         case BiologicalState::NetworkStabilization:
-            return "Network stabilization observed without toxic instability; favorable safety profile";
+            return "Calcium-channel blockade reduced synchronization and neural instability without toxic excitation";
         case BiologicalState::ControlledSuppression:
             if (toxicityBeforeTherapy) {
                 return "Toxicity appears before therapeutic response";
@@ -319,7 +361,7 @@ std::string generateReasonForState(
         case BiologicalState::ToxicInstability:
             return "Extreme network instability detected; unacceptable toxicity without therapeutic benefit";
         case BiologicalState::NetworkStabilization:
-            return "Reduced synchronization and instability suggest network stabilization";
+            return "Calcium-channel blockade reduced synchronization and neural instability";
         case BiologicalState::ControlledSuppression:
             if (toxicityBeforeTherapy) {
                 return "Toxicity appears before therapeutic response; unacceptable safety risk";
@@ -421,6 +463,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     bool sawHighDoseEffect = false;
     bool hasOnsetDose = false;
     double onsetDose = 0.0;
+    bool sawNetworkStabilization = false;
+    bool sawHyperexcitability = false;
+    bool sawNeuralSilencing = false;
+    bool sawMeaningfulCaBlock = false;
+    double peakCalciumEffectMagnitude = 0.0;
     double maxSyncDelta = 0.0;
     double maxBurstDelta = 0.0;
     double maxNiiDelta = 0.0;
@@ -455,6 +502,16 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const double syncDeltaLocal = static_cast<double>(syncValue) - baselineSync;
         const double niiDeltaLocal = static_cast<double>(niiValue) - baselineNii;
         const double seizureDeltaLocal = static_cast<double>(seizurePct) / 100.0 - (baselineSeizure / 100.0);
+        const double syncReductionPct = reductionPercent(baselineSync, static_cast<double>(syncValue));
+        const double niiReductionPct = reductionPercent(baselineNii, static_cast<double>(niiValue));
+        const double burstReductionPct = reductionPercent(baselineBurst, static_cast<double>(burstValue));
+        const double seizureReductionPct = reductionPercent(baselineSeizure, static_cast<double>(seizurePct));
+        const bool meaningfulCaBlock = obs.blockCa >= kMeaningfulKBlockThreshold;
+        const bool calciumStabilization = meaningfulCaBlock &&
+                                          (syncReductionPct >= 15.0 ||
+                                           niiReductionPct >= 15.0 ||
+                                           seizureReductionPct >= 15.0 ||
+                                           burstReductionPct >= 15.0);
 
         // Per-dose biological state detection (mirrors global detector rules)
         BiologicalState perDoseState = BiologicalState::LimitedEffect;
@@ -464,6 +521,8 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
             perDoseState = BiologicalState::Hyperexcitability;
         } else if (static_cast<double>(meanRate) < 0.10 * baselineRate) {
             perDoseState = BiologicalState::NeuralSilencing;
+        } else if (calciumStabilization) {
+            perDoseState = BiologicalState::NetworkStabilization;
         } else if (rateChangeFrac > +0.25 || syncDeltaLocal > +0.15 || niiDeltaLocal > +0.20 || seizureDeltaLocal > +0.20) {
             perDoseState = BiologicalState::Hyperexcitability;
         } else if (rateChangeFrac < -0.20 && rateChangeFrac > -0.70 && niiDeltaLocal <= +0.10) {
@@ -497,7 +556,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const double excitationEffectPct = std::max(0.0, signedRateChangePct);
         const double stabilizationEffectPct =
             (perDoseState == BiologicalState::NetworkStabilization)
-                ? 100.0 * std::clamp(std::max({-syncDeltaLocal, -niiDeltaLocal, -seizureDeltaLocal}), 0.0, 1.0)
+                ? std::max({syncReductionPct, niiReductionPct, seizureReductionPct, burstReductionPct})
                 : 0.0;
         const double effectMagnitudePct = std::clamp(
             std::max({suppressionEffectPct, excitationEffectPct, stabilizationEffectPct}),
@@ -587,6 +646,16 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
              perDoseState == BiologicalState::ToxicInstability ||
              perDoseState == BiologicalState::Hyperexcitability);
         const bool overSuppressionHere = suppressionEffectPct > 60.0;
+
+        if (perDoseState == BiologicalState::NetworkStabilization) {
+            sawNetworkStabilization = true;
+            sawMeaningfulCaBlock = sawMeaningfulCaBlock || meaningfulCaBlock;
+            peakCalciumEffectMagnitude = std::max(peakCalciumEffectMagnitude, std::max(0.0, stabilizationEffectPct));
+        } else if (perDoseState == BiologicalState::Hyperexcitability) {
+            sawHyperexcitability = true;
+        } else if (perDoseState == BiologicalState::NeuralSilencing) {
+            sawNeuralSilencing = true;
+        }
 
         if (toxicStateHere || overSuppressionHere) {
             overSuppressionDoses.push_back(static_cast<double>(dose));
@@ -701,11 +770,26 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                               (report.toxicityVariability >= 10.0f);
     const bool fragmentedWindow = therapeuticRanges.size() > 1U;
     const auto finalObs = sorted.back();
+    const double finalSyncReductionPct = reductionPercent(baselineSync, safeNonNegativeD(finalObs.synchronizationIndex));
+    const double finalNiiReductionPct = reductionPercent(baselineNii, safeNonNegativeD(finalObs.nii));
+    const double finalNiiIncreasePct = increasePercent(baselineNii, safeNonNegativeD(finalObs.nii));
+    const double finalSeizureReductionPct = reductionPercent(baselineSeizure, safeNonNegativeD(finalObs.seizureProbabilityPct));
+    const double finalBurstReductionPct = reductionPercent(baselineBurst, safeNonNegativeD(finalObs.burstIndex));
+    const bool finalMeaningfulCaBlock = finalObs.blockCa >= kMeaningfulKBlockThreshold;
+    const double finalCalciumEffectMagnitude = std::max({finalSyncReductionPct, finalNiiReductionPct, finalSeizureReductionPct, finalBurstReductionPct});
+    report.syncReductionPct = std::max(0.0, finalSyncReductionPct);
+    report.niiReductionPct = std::max(0.0, finalNiiReductionPct);
+    report.niiIncreasePct = std::max(0.0, finalNiiIncreasePct);
+    report.seizureReductionPct = std::max(0.0, finalSeizureReductionPct);
+    report.burstReductionPct = std::max(0.0, finalBurstReductionPct);
+    report.calciumEffectMagnitude = std::max(0.0, std::max(peakCalciumEffectMagnitude, finalCalciumEffectMagnitude));
+    report.meaningfulCaBlock = finalMeaningfulCaBlock;
 
     // UNIVERSAL BIOLOGICAL STATE DETECTION (multi-dimensional, not suppression-biased)
     report.biologicalState = detectBiologicalState(
         baselineRate,
         baselineSync,
+        baselineBurst,
         baselineNii,
         baselineSeizure,
         baselineIsiCv,
@@ -716,6 +800,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.effectiveRangeMin,
         report.effectiveRangeMax
     );
+
+    const bool stabilizingResponseObserved = sawNetworkStabilization && !sawHyperexcitability && !sawNeuralSilencing && (sawMeaningfulCaBlock || finalMeaningfulCaBlock);
+    if (stabilizingResponseObserved) {
+        report.biologicalState = BiologicalState::NetworkStabilization;
+    }
 
     // Compute deltas for reporting (used in decision logic)
     const double finalSyncDelta = safeNonNegativeD(finalObs.synchronizationIndex) - baselineSync;
@@ -729,6 +818,20 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     const bool toxicInstabilityDetected = (report.biologicalState == BiologicalState::ToxicInstability);
     const bool networkStabilizationObserved = (report.biologicalState == BiologicalState::NetworkStabilization);
     const bool controlledSuppressionObserved = (report.biologicalState == BiologicalState::ControlledSuppression);
+    report.responseMode = stabilizingResponseObserved ? "STABILIZING_RESPONSE" : "STANDARD_RESPONSE";
+    if (stabilizingResponseObserved) {
+        report.curveType = report.sigmoidR2 >= 0.95 ? "Sigmoidal Stabilization" : "Stabilizing Response";
+    }
+    if (stabilizingResponseObserved) {
+        report.biologicalStateText = toString(report.biologicalState);
+        report.primaryChangeText = "Calcium-channel blockade reduced synchronization and neural instability";
+        report.safetyInterpretationText = "Calcium-channel blockade reduced synchronization and neural instability without toxic excitation";
+        report.seizureTrendText = finalSeizureReductionPct > 0.0
+                                      ? std::string("Seizure-risk markers decreased with dose")
+                                      : (finalSeizureReductionPct < 0.0
+                                             ? std::string("Seizure-risk markers increased with dose")
+                                             : std::string("Seizure-risk markers remained broadly stable"));
+    }
 
     const bool toxicityBeforeTherapy =
         report.hasToxicThreshold &&
@@ -741,14 +844,16 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
     const bool stableTherapeuticWindow = therapeuticWindowExists && !lowStability && !sawHighDoseEffect && !fragmentedWindow;
 
-    report.biologicalStateText = toString(report.biologicalState);
-    report.primaryChangeText = primaryChangeTextForState(report.biologicalState, report.maxRateChangePct, finalSyncDelta, finalNiiDelta, finalSeizureDelta);
-    report.safetyInterpretationText = safetyInterpretationForState(report.biologicalState, toxicityBeforeTherapy, toxicityAfterTherapy, lowStability, networkStabilizationObserved);
-    report.seizureTrendText = finalSeizureDelta > 0.0
-                                  ? std::string("Seizure-risk markers increased with dose")
-                                  : (finalSeizureDelta < 0.0
-                                         ? std::string("Seizure-risk markers decreased with dose")
-                                         : std::string("Seizure-risk markers remained broadly stable"));
+    if (!stabilizingResponseObserved) {
+        report.biologicalStateText = toString(report.biologicalState);
+        report.primaryChangeText = primaryChangeTextForState(report.biologicalState, report.maxRateChangePct, finalSyncDelta, finalNiiDelta, finalSeizureDelta);
+        report.safetyInterpretationText = safetyInterpretationForState(report.biologicalState, toxicityBeforeTherapy, toxicityAfterTherapy, lowStability, networkStabilizationObserved);
+        report.seizureTrendText = finalSeizureDelta > 0.0
+                                      ? std::string("Seizure-risk markers increased with dose")
+                                      : (finalSeizureDelta < 0.0
+                                             ? std::string("Seizure-risk markers decreased with dose")
+                                             : std::string("Seizure-risk markers remained broadly stable"));
+    }
 
     // Decision engine strictly driven by biological state and therapeutic window rules
     if (neuralSilencingDetected) {
@@ -771,6 +876,18 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.riskLevel = "HIGH";
         report.reason = "Toxicity appears before a therapeutic window; unsafe dose-response ordering";
         report.overallTier = DrugRiskTier::Toxic;
+    } else if (stabilizingResponseObserved) {
+        if (stabilityScoreIsMediumOrHigh(report.stabilityScore)) {
+            report.recommendation = "PROMISING";
+            report.riskLevel = "LOW";
+            report.reason = "Calcium-channel blockade reduced synchronization and neural instability without toxic excitation";
+            report.overallTier = DrugRiskTier::Safe;
+        } else {
+            report.recommendation = "CAUTION";
+            report.riskLevel = "MODERATE";
+            report.reason = "Calcium-channel blockade showed stabilizing response, but variability requires caution";
+            report.overallTier = DrugRiskTier::ModerateRisk;
+        }
     } else if (stableTherapeuticWindow || (networkStabilizationObserved && !report.hasToxicThreshold && !lowStability)) {
         report.recommendation = "PROMISING";
         report.riskLevel = "LOW";

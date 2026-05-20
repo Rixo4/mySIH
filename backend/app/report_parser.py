@@ -43,6 +43,9 @@ def _simulate_summary(raw_text: str) -> dict[str, Any]:
 def _dose_eval_summary(raw_text: str) -> dict[str, Any]:
     model_fit = _extract_labeled_value(raw_text, "Model Fit (R^2)")
     max_effect = _extract_labeled_value(raw_text, "Max Effect")
+    effective_range = _extract_labeled_value(raw_text, "Effective Range")
+    stabilization_range = _extract_labeled_value(raw_text, "Stabilization Range")
+    response_mode = _extract_labeled_value(raw_text, "Response Mode")
 
     return {
         # Drug input section
@@ -54,16 +57,24 @@ def _dose_eval_summary(raw_text: str) -> dict[str, Any]:
         "hill": _to_float(_extract_labeled_value(raw_text, "Hill")),
         "runs": _to_float(_extract_labeled_value(raw_text, "Runs")),
         "curve_type": _extract_labeled_value(raw_text, "Curve Type"),
+        "response_mode": response_mode,
         "model_fit_r2": _to_float(model_fit),
         "max_effect": _to_float(max_effect),
         "response_strength": _extract_labeled_value(raw_text, "Response Strength"),
         "toxic_threshold": _extract_labeled_value(raw_text, "Toxic Threshold"),
-        "effective_range": _extract_labeled_value(raw_text, "Effective Range"),
+        "effective_range": effective_range or stabilization_range,
+        "stabilization_range": stabilization_range,
         "stability_score": _extract_labeled_value(raw_text, "Stability Score"),
         "recommendation": _extract_labeled_value(raw_text, "Recommendation"),
         "risk_level": _extract_labeled_value(raw_text, "Risk Level"),
         "confidence": _extract_labeled_value(raw_text, "Confidence"),
         "reason": _extract_labeled_value(raw_text, "Reason"),
+        "sync_reduction_pct": _to_float(_extract_labeled_value(raw_text, "Sync Reduction")),
+        "nii_reduction_pct": _to_float(_extract_labeled_value(raw_text, "NII Reduction")),
+        "nii_increase_pct": _to_float(_extract_labeled_value(raw_text, "NII Increase")),
+        "seizure_reduction_pct": _to_float(_extract_labeled_value(raw_text, "Seizure Reduction")),
+        "burst_reduction_pct": _to_float(_extract_labeled_value(raw_text, "Burst Reduction")),
+        "calcium_effect_magnitude": _to_float(_extract_labeled_value(raw_text, "Calcium Effect")),
     }
 
 

@@ -1796,23 +1796,33 @@ std::string buildDrugEvaluationReportText(
     const std::string riskLevel = report.riskLevel;
     const std::string reason = report.reason;
     const std::string confidence = report.confidence;
+        const std::string responseMode = report.responseMode;
 
     const bool excitatoryMode = (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
-    const bool stabilizationMode = (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
+        const bool stabilizationMode = (responseMode == "STABILIZING_RESPONSE") || (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
     const std::string windowSectionTitle = excitatoryMode
                                                ? std::string("Excitatory Response Range")
-                                               : std::string("Therapeutic Window");
+                                 : (stabilizationMode ? std::string("Stabilization Response Range")
+                                             : std::string("Therapeutic Window"));
     const std::string effectiveRangeLabel = excitatoryMode
                                                 ? std::string("Excitatory Range")
-                                                : std::string("Effective Range");
+                                  : (stabilizationMode ? std::string("Stabilization Range")
+                                              : std::string("Effective Range"));
     const std::string zoneLabel = excitatoryMode
                                       ? std::string("Excitatory Zone")
-                                      : std::string("Therapeutic Zone");
+                           : (stabilizationMode ? std::string("Stabilization Zone")
+                                       : std::string("Therapeutic Zone"));
     const std::string optimalZoneText = excitatoryMode
                                             ? std::string("Transient excitatory regime before seizure-risk escalation")
                                             : (stabilizationMode
-                                                   ? std::string("Stabilization regime with reduced synchronization/instability")
+                                  ? std::string("Calcium-channel blockade reduced synchronization and neural instability")
                                                    : std::string("Moderate, controlled suppression (20-60%)"));
+        const std::string windowQualityText = noResponse || therapeuticRanges.empty()
+                                ? std::string("Not observed")
+                                : (stabilizationMode
+                                    ? (therapeuticRanges.size() > 1U ? std::string("Fragmented")
+                                                      : std::string("Continuous"))
+                                    : windowQuality);
 
     out << "==================================================\n";
     out << "SILICON PATIENT - DRUG EVALUATION REPORT\n";
@@ -1835,6 +1845,7 @@ std::string buildDrugEvaluationReportText(
 
     out << "[Response Characteristics]\n";
     appendLine("Curve Type", curveType);
+    appendLine("Response Mode", responseMode);
     appendLine("Model Fit (R^2)", noResponse ? std::string("N/A") : formatRuntimeNumber(report.sigmoidR2, 2));
     appendLine("Max Effect", formatRuntimeNumber(maxEffect, 0) + " %");
     appendLine("Response Strength", responseStrength);
@@ -1847,7 +1858,7 @@ std::string buildDrugEvaluationReportText(
 
     out << "[" << windowSectionTitle << "]\n";
     appendLine(effectiveRangeLabel, effectiveRange);
-    appendLine("Window Quality", windowQuality);
+    appendLine("Window Quality", windowQualityText);
     appendLine("Optimal Zone", optimalZoneText);
     out << "\n--------------------------------------------------\n\n";
 
@@ -1856,6 +1867,18 @@ std::string buildDrugEvaluationReportText(
     appendLine(zoneLabel, therapeuticZone);
     appendLine("Over-Suppression", overSuppressionZone);
     out << "\n--------------------------------------------------\n\n";
+
+    if (stabilizationMode) {
+        out << "[Calcium Stabilization Metrics]\n";
+        appendLine("Sync Reduction", formatRuntimeNumber(report.syncReductionPct, 1) + " %");
+        const bool niiReductionObserved = report.niiReductionPct > 0.0;
+        appendLine(niiReductionObserved ? "NII Reduction" : "NII Increase",
+                   formatRuntimeNumber(niiReductionObserved ? report.niiReductionPct : report.niiIncreasePct, 1) + " %");
+        appendLine("Seizure Reduction", formatRuntimeNumber(report.seizureReductionPct, 1) + " %");
+        appendLine("Burst Reduction", formatRuntimeNumber(report.burstReductionPct, 1) + " %");
+        appendLine("Calcium Effect", formatRuntimeNumber(report.calciumEffectMagnitude, 1) + " %");
+        out << "\n--------------------------------------------------\n\n";
+    }
 
     out << "[Pharmacodynamic Interpretation]\n";
     appendLine("Onset Dose", onsetDose);
