@@ -77,6 +77,8 @@ def _record_to_run_response(record: RunRecord) -> dict[str, Any]:
         "created_at": record.created_at,
         "error": record.error_message,
         "stderr": None,
+        "user_id": getattr(record, "user_id", None),
+        "company_id": getattr(record, "company_id", None),
     }
 
 
@@ -87,6 +89,8 @@ def execute_engine_run(
     drug_name: str | None = None,
     runs_override: int | None = None,
     engine_input_mode: str = "default_internal_engine_config",
+    user_id: int | None = None,
+    company_id: int | None = None,
 ) -> dict[str, Any]:
     settings = get_settings()
 
@@ -170,6 +174,9 @@ def execute_engine_run(
         drug_name=drug_name,
         status=engine_result.status,
         engine_input_mode=engine_input_mode,
+        # Link run to user/company for multi-tenant isolation
+        user_id=user_id,
+        company_id=company_id,
         recommendation=recommendation,
         risk_level=risk_level,
         confidence=confidence,
@@ -208,6 +215,8 @@ def list_runs(db: Session) -> list[dict[str, Any]]:
             "risk_level": row.risk_level,
             "confidence": row.confidence,
             "created_at": row.created_at,
+            "user_id": getattr(row, "user_id", None),
+            "company_id": getattr(row, "company_id", None),
         }
         for row in rows
     ]
@@ -254,4 +263,6 @@ def get_run_detail_or_none(db: Session, run_id: str) -> dict[str, Any] | None:
         "error_message": row.error_message,
         "duration_seconds": row.duration_seconds,
         "created_at": row.created_at,
+        "user_id": getattr(row, "user_id", None),
+        "company_id": getattr(row, "company_id", None),
     }

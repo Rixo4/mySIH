@@ -21,6 +21,19 @@ export const api = axios.create({
 // Frontend default timeout is in milliseconds. Increased to 1 hour to allow long engine runs.
 api.defaults.timeout = 3600000;
 
+let currentAccessToken: string | null = null;
+export function setAccessToken(token: string | null) {
+  currentAccessToken = token;
+}
+
+api.interceptors.request.use((cfg) => {
+  if (currentAccessToken) {
+    cfg.headers = cfg.headers ?? {};
+    cfg.headers.Authorization = `Bearer ${currentAccessToken}`;
+  }
+  return cfg;
+});
+
 export async function getHealth(): Promise<HealthResponse> {
   const response = await api.get<HealthResponse>('/health');
   return response.data;

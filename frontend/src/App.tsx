@@ -3,11 +3,15 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'rea
 import { AppLayout } from './components/AppLayout';
 import { getHealth } from './api/client';
 import { DashboardPage } from './pages/DashboardPage';
+import { LoginPage } from './pages/LoginPage';
+import { SignupPage } from './pages/SignupPage';
 import { DrugEvaluationPage } from './pages/DrugEvaluationPage';
 import { SimulationPage } from './pages/SimulationPage';
 import { RunHistoryPage } from './pages/RunHistoryPage';
 import { ReportDetailPage } from './pages/ReportDetailPage';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { RunTaskProvider, useRunTask } from './context/RunTaskContext';
+import { AuthProvider } from './context/AuthContext';
 
 const titleMap: Array<{ prefix: string; title: string }> = [
   { prefix: '/dose-eval', title: 'Drug Evaluation' },
@@ -58,18 +62,23 @@ export default function App() {
 
   return (
     <RunTaskProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Shell backendConnected={backendConnected} />}>
-            <Route path="/" element={<DashboardPage backendConnected={backendConnected} />} />
-            <Route path="/dose-eval" element={<DrugEvaluationPage />} />
-            <Route path="/simulation" element={<SimulationPage />} />
-            <Route path="/history" element={<RunHistoryPage />} />
-            <Route path="/reports/:runId" element={<ReportDetailPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Shell backendConnected={backendConnected} />}>
+              <Route path="/" element={<DashboardPage backendConnected={backendConnected} />} />
+              <Route path="/dose-eval" element={<ProtectedRoute><DrugEvaluationPage /></ProtectedRoute>} />
+              <Route path="/simulation" element={<ProtectedRoute><SimulationPage /></ProtectedRoute>} />
+              <Route path="/history" element={<RunHistoryPage />} />
+              <Route path="/reports/:runId" element={<ProtectedRoute><ReportDetailPage /></ProtectedRoute>} />
+              <Route path="/history" element={<ProtectedRoute><RunHistoryPage /></ProtectedRoute>} />
+            </Route>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </RunTaskProvider>
   );
 }

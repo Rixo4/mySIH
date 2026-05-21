@@ -8,6 +8,12 @@ Production-ready FastAPI backend for the SILICON PATIENT PLATFORM C++/CUDA engin
 2. Create and activate a Python 3.11+ virtual environment.
 3. Install dependencies.
 
+Install new auth dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
 ## 2. Install Requirements
 
 ```bash
@@ -30,6 +36,7 @@ Optional settings:
 ```env
 SPP_DATABASE_URL=sqlite:///./silicon_patient.db
 SPP_ENGINE_TIMEOUT_SECONDS=900
+REDIS_URL=redis://localhost:6379/0
 ```
 
 ## 4. Start Backend
@@ -81,6 +88,19 @@ curl -X POST http://localhost:8000/api/internal/validate
 ```
 
 Note: this endpoint is gated by the environment variable `SPP_DEVELOPER_MODE`. Set `SPP_DEVELOPER_MODE=1` in your `.env` to enable developer-only internal benchmarks.
+
+## 7. Manual Auth Checklist
+
+1. `POST /auth/signup` with a strong password, then confirm the user exists in `users`.
+2. Re-submit the same email and confirm duplicate signup is rejected.
+3. Try a weak password and confirm validation fails.
+4. `POST /auth/login` with valid credentials and confirm an access token is returned.
+5. `POST /auth/login` with invalid credentials and confirm the response is only `Invalid credentials`.
+6. Call protected routes without a bearer token and confirm `401`.
+7. Call protected routes with a valid bearer token and confirm access.
+8. Call `POST /auth/refresh` and confirm a new access token is issued.
+9. Call `POST /auth/logout` and confirm the refresh cookie is cleared.
+10. Verify users cannot access runs outside their company or role.
 
 ### List Runs
 
