@@ -8,9 +8,11 @@ export function formatDateTime(value?: string | null): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat('en-US', {
+  // Display times in Indian Standard Time for consistent IST timestamps in the UI.
+  return new Intl.DateTimeFormat('en-IN', {
     dateStyle: 'medium',
-    timeStyle: 'short'
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata'
   }).format(date);
 }
 
