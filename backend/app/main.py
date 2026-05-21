@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, HTTPException
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -70,12 +71,19 @@ def dose_eval(payload: DoseEvalRequest, db: Session = Depends(get_db)) -> RunRes
     return RunResponse(**result)
 
 
-@app.post("/api/validate", response_model=RunResponse)
-def validate(db: Session = Depends(get_db)) -> RunResponse:
+# Internal developer-only endpoint: run the Internal Biological Benchmark Suite.
+# This route is intentionally placed under /api/internal to avoid exposure as a
+# public workflow. Use only in developer or research environments.
+@app.post("/api/internal/validate", response_model=RunResponse)
+def internal_validate(db: Session = Depends(get_db)) -> RunResponse:
+    # Only allow this developer endpoint when SPP_DEVELOPER_MODE=1 is set
+    if os.getenv("SPP_DEVELOPER_MODE", "0") != "1":
+        raise HTTPException(status_code=404, detail="Not found")
+
     result = execute_engine_run(
         db=db,
-        report_type="validate",
-        input_payload={"mode": "validate"},
+        report_type="internal-benchmark",
+        input_payload={"mode": "internal-benchmark"},
         drug_name=None,
         engine_input_mode="default_internal_engine_config",
     )

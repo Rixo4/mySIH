@@ -15,7 +15,7 @@ Silicon Patient Platform is a full-stack research console for evaluating ion-cha
 The system is designed as a reproducible workflow:
 
 1. Enter or load a drug profile in the web UI.
-2. Submit a simulation, validation, or dose-evaluation run.
+2. Submit a simulation or dose-evaluation run. (Internal benchmarking/validation is available to developers.)
 3. The backend launches the native engine and captures the output.
 4. Parsed results and raw reports are stored for auditability.
 5. Run History lets you inspect, filter, and delete individual runs.
@@ -26,7 +26,7 @@ The system is designed as a reproducible workflow:
 - FastAPI service for execution, reporting, and run management.
 - React + Vite + Tailwind UI with responsive dashboard pages.
 - Persistent SQLite run ledger for audit and traceability.
-- Structured report parsing for dose-response and validation workflows.
+  - Structured report parsing for dose-response workflows (internal benchmark/validation available to developers).
 - Run History actions for viewing reports and deleting a specific run.
 
 ## Product Workflow
@@ -171,13 +171,13 @@ Open the app in your browser at:
 
 ### Backend workflow
 
-- The backend exposes health, simulation, validation, dose-evaluation, and run-history endpoints.
+- The backend exposes health, simulation, dose-evaluation, and run-history endpoints. Developer-only internal benchmarking endpoints exist under `/api/internal`.
 - Every run is persisted to SQLite and to a matching artifact directory.
 - The backend also handles run deletion and report retrieval.
 
 ### Frontend workflow
 
-- The React app routes between dashboard, simulation, validation, drug evaluation, and run history pages.
+- The React app routes between dashboard, simulation, drug evaluation, and run history pages. The internal benchmark UI is available only in developer mode and is hidden from public navigation.
 - The Run History table supports filtering, viewing reports, and deleting one run at a time.
 - The UI reads backend state through Axios API helpers in `frontend/src/api/client.ts`.
 
@@ -185,7 +185,7 @@ Open the app in your browser at:
 
 - `GET /health` - service health check
 - `POST /api/simulate` - run a single-dose simulation
-- `POST /api/validate` - run validation mode
+* `POST /api/internal/validate` - run internal benchmark (developer-only)
 - `POST /api/dose-eval` - run dose-evaluation workflow
 - `GET /api/runs` - list stored runs
 - `GET /api/runs/{run_id}` - fetch run metadata and parsed summary

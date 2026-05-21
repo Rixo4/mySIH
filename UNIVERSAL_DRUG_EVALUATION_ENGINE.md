@@ -62,7 +62,7 @@ The Silicon Patient Platform now features a **universal biological drug evaluati
 
 ---
 
-## Validation Targets (All Tests Pass)
+## Internal Benchmark Targets (All Tests Pass)
 
 ### Test 1: Lidocaine
 **Profile**: Sodium channel blocker

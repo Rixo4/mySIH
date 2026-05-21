@@ -73,11 +73,14 @@ curl -X POST http://localhost:8000/api/dose-eval \
   }'
 ```
 
-### Validate
+### Internal Benchmark (developer-only)
 
 ```bash
-curl -X POST http://localhost:8000/api/validate
+# Developer-only internal benchmark endpoint
+curl -X POST http://localhost:8000/api/internal/validate
 ```
+
+Note: this endpoint is gated by the environment variable `SPP_DEVELOPER_MODE`. Set `SPP_DEVELOPER_MODE=1` in your `.env` to enable developer-only internal benchmarks.
 
 ### List Runs
 

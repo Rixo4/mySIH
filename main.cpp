@@ -249,7 +249,8 @@ void printHelp() {
            << "Usage:\n"
            << "  silicon_patient.exe --simulate\n"
            << "  silicon_patient.exe --dose-eval\n"
-           << "  silicon_patient.exe --validate\n"
+           // Note: internal benchmark mode is developer-only and hidden from public help.
+           // To run internal benchmarks set `SPP_DEVELOPER_MODE=1` and invoke `--internal-benchmark`.
            << "  silicon_patient.exe --analyze\n";
 }
 
@@ -2398,11 +2399,17 @@ void runSingleSimulationMode(const RuntimeInput& input) {
     exportSingleRunArtifacts(input, summary);
 }
 
-void runBiologicalValidationSuite() {
+// Internal benchmark harness: Internal Biological Benchmark Suite
+// Purpose: regression testing, biological verification, literature matching,
+// scientific reproducibility, and internal QA. This is an internal developer
+// tool and is not exposed as part of the public user workflow. To run this
+// suite from the CLI set the environment variable `SPP_DEVELOPER_MODE=1`
+// and invoke the hidden flag `--internal-benchmark`.
+void runInternalBiologicalBenchmarkSuite() {
     const auto suiteStart = std::chrono::steady_clock::now();
 
     RuntimeInput baseInput;
-    baseInput.drug_name = "ValidationSuite";
+    baseInput.drug_name = "InternalBiologicalBenchmarkSuite";
 
 #ifdef SPP_USE_CUDA
     baseInput.config.neuron_count = 420;
@@ -2425,7 +2432,7 @@ void runBiologicalValidationSuite() {
     baseInput.config.inhibitory_weight_scale = 1.00;
     baseInput.config.export_csv = false;
 
-    const std::string outputDir = "output_validation_full";
+    const std::string outputDir = "output_internal_benchmark_full";
     std::filesystem::create_directories(outputDir);
     baseInput.config.output_folder = outputDir;
 
@@ -2487,7 +2494,7 @@ void runBiologicalValidationSuite() {
 
     std::cout << '\n';
     printDivider('=');
-    std::cout << "SILICON PATIENT VALIDATION REPORT\n";
+    std::cout << "SILICON PATIENT - INTERNAL BIOLOGICAL BENCHMARK REPORT\n";
     printDivider('=');
     printSection("Run Context");
     printMetricLine("Seed Mode", fixedSeedMode ? "fixed-seed" : "random-seed");
@@ -3129,13 +3136,13 @@ void runBiologicalValidationSuite() {
         biologicalValidationPass && runtimeConstraintPass;
 
     {
-        const std::string reportPath = outputDir + "/validation_report.txt";
+        const std::string reportPath = outputDir + "/internal_benchmark_report.txt";
         std::ofstream reportOut(reportPath, std::ios::out | std::ios::trunc);
         if (!reportOut.is_open()) {
             throw std::runtime_error("Unable to open validation report file: " + reportPath);
         }
 
-        reportOut << "Silicon Patient Platform - Quantitative Validation Report\n";
+        reportOut << "Silicon Patient Platform - Internal Biological Benchmark Report\n";
         reportOut << "Fixed Seed Mode: " << (fixedSeedMode ? "true" : "false") << "\n\n";
 
         for (const auto& block : reportBlocks) {
@@ -3145,7 +3152,7 @@ void runBiologicalValidationSuite() {
         reportOut << "PERFORMANCE CONSTRAINT (<5 min GPU): "
                   << (runtimeConstraintPass ? "PASS" : "FAIL")
                   << " (runtime=" << std::fixed << std::setprecision(2) << suiteSeconds << " s)\n";
-        reportOut << "OVERALL VALIDATION STATUS: " << (overallPass ? "PASS" : "FAIL") << "\n";
+        reportOut << "OVERALL BENCHMARK STATUS: " << (overallPass ? "PASS" : "FAIL") << "\n";
     }
 
     {
@@ -3203,7 +3210,7 @@ void runBiologicalValidationSuite() {
 
     printSection("Artifacts");
     printMetricLine("Output Directory", outputDir);
-    printMetricLine("Files", "validation_report.txt, time_metrics.csv, dose_curve_fit.csv, run_metadata.txt");
+    printMetricLine("Files", "internal_benchmark_report.txt, time_metrics.csv, dose_curve_fit.csv, run_metadata.txt");
 }
 
 } // namespace
@@ -3225,8 +3232,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (mode == "--validate") {
-            runBiologicalValidationSuite();
+        if (mode == "--internal-benchmark") {
+            const auto devFlag = readEnvVar("SPP_DEVELOPER_MODE");
+            if (!devFlag.has_value() || toLower(devFlag.value()) != "1") {
+                std::cerr << "Internal benchmark mode is developer-only. Set SPP_DEVELOPER_MODE=1 to enable.\n";
+                return 1;
+            }
+            runInternalBiologicalBenchmarkSuite();
             return 0;
         }
 
