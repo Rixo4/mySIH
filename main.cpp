@@ -1726,6 +1726,45 @@ std::string buildDrugEvaluationReportText(
         return text.str();
     };
 
+    const auto buildRangesFromDoses = [&](const std::vector<double>& doses) {
+        std::vector<std::pair<double, double>> ranges;
+        if (doses.empty()) {
+            return ranges;
+        }
+
+        double step = report.stepDose;
+        if (!(step > 0.0) && doses.size() >= 2U) {
+            step = std::numeric_limits<double>::infinity();
+            for (std::size_t i = 1U; i < doses.size(); ++i) {
+                const double diff = doses[i] - doses[i - 1U];
+                if (diff > 1.0e-6) {
+                    step = std::min(step, diff);
+                }
+            }
+            if (!std::isfinite(step)) {
+                step = 1.0;
+            }
+        }
+        if (!(step > 0.0)) {
+            step = 1.0;
+        }
+
+        const double maxGap = 1.50 * step + 1.0e-5;
+
+        std::size_t i = 0U;
+        while (i < doses.size()) {
+            std::size_t j = i;
+            while (j + 1U < doses.size() && (doses[j + 1U] - doses[j]) <= maxGap) {
+                ++j;
+            }
+
+            ranges.emplace_back(doses[i], doses[j]);
+            i = j + 1U;
+        }
+
+        return ranges;
+    };
+
     double maxEffect = -std::numeric_limits<double>::infinity();
     std::size_t peakIndex = 0U;
     for (std::size_t i = 0U; i < features.size(); ++i) {
@@ -1746,6 +1785,7 @@ std::string buildDrugEvaluationReportText(
     const auto therapeuticRanges = buildDoseRanges([](double effectPct) {
         return effectPct >= 20.0 && effectPct <= 60.0;
     });
+    const auto excitatoryRiskRanges = buildRangesFromDoses(report.excitatoryRiskDoses);
     const auto overSuppressionRanges = buildDoseRanges([](double effectPct) {
         return effectPct > 60.0;
     });
@@ -1780,6 +1820,7 @@ std::string buildDrugEvaluationReportText(
     const std::string ineffectiveZone = noResponse ? formatRange(report.minTestedDose, report.maxTestedDose) : formatRanges(ineffectiveRanges);
     const std::string therapeuticZone = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : formatRanges(therapeuticRanges);
     const std::string overSuppressionZone = noResponse ? std::string("Not observed") : formatRanges(overSuppressionRanges);
+    const std::string excitatoryRiskZone = excitatoryRiskRanges.empty() ? std::string("Not observed") : formatRanges(excitatoryRiskRanges);
     const std::string onsetDose = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : ("~" + formatRuntimeNumber(therapeuticRanges.front().first));
     const bool peakInToxicRange = toxicityDetected && (features[peakIndex].dose >= report.toxicMinDose);
     const std::string peakEfficiency = noResponse
@@ -1865,7 +1906,13 @@ std::string buildDrugEvaluationReportText(
     out << "[Dose Classification Summary]\n";
     appendLine("Ineffective Zone", ineffectiveZone);
     appendLine(zoneLabel, therapeuticZone);
-    appendLine("Over-Suppression", overSuppressionZone);
+    if (excitatoryMode) {
+        appendLine("Severe Excitability Zone", excitatoryRiskZone);
+    } else if (stabilizationMode) {
+        appendLine("Saturated Stabilization Zone", overSuppressionZone);
+    } else {
+        appendLine("Over-Suppression", overSuppressionZone);
+    }
     out << "\n--------------------------------------------------\n\n";
 
     if (stabilizationMode) {

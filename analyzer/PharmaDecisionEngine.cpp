@@ -477,6 +477,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     std::vector<double> yEffect;
     std::vector<double> therapeuticDoses;
     std::vector<double> safeDoses;
+    std::vector<double> excitatoryRiskDoses;
     std::vector<double> overSuppressionDoses;
 
     for (std::size_t i = 0; i < sorted.size(); ++i) {
@@ -641,11 +642,12 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                 report.effectiveMinDose = dose;
             }
         }
-        const bool toxicStateHere =
-            (perDoseState == BiologicalState::NeuralSilencing ||
-             perDoseState == BiologicalState::ToxicInstability ||
-             perDoseState == BiologicalState::Hyperexcitability);
-        const bool overSuppressionHere = suppressionEffectPct > 60.0;
+        const bool excitatoryRiskHere =
+            (perDoseState == BiologicalState::Hyperexcitability ||
+             perDoseState == BiologicalState::ToxicInstability);
+        const bool overSuppressionHere =
+            (suppressionEffectPct > 60.0) ||
+            (perDoseState == BiologicalState::NeuralSilencing);
 
         if (perDoseState == BiologicalState::NetworkStabilization) {
             sawNetworkStabilization = true;
@@ -657,8 +659,15 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
             sawNeuralSilencing = true;
         }
 
-        if (toxicStateHere || overSuppressionHere) {
+        if (excitatoryRiskHere) {
+            excitatoryRiskDoses.push_back(static_cast<double>(dose));
+        }
+
+        if (overSuppressionHere) {
             overSuppressionDoses.push_back(static_cast<double>(dose));
+        }
+
+        if (excitatoryRiskHere || overSuppressionHere) {
             if (!sawHighDoseEffect) {
                 sawHighDoseEffect = true;
                 report.hasToxicThreshold = true;
@@ -702,6 +711,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
     std::sort(safeDoses.begin(), safeDoses.end());
     std::sort(therapeuticDoses.begin(), therapeuticDoses.end());
+    std::sort(excitatoryRiskDoses.begin(), excitatoryRiskDoses.end());
     std::sort(overSuppressionDoses.begin(), overSuppressionDoses.end());
 
     safeDoses.erase(
@@ -716,6 +726,12 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         }),
         therapeuticDoses.end()
     );
+    excitatoryRiskDoses.erase(
+        std::unique(excitatoryRiskDoses.begin(), excitatoryRiskDoses.end(), [](double a, double b) {
+            return std::fabs(a - b) <= 1.0e-6;
+        }),
+        excitatoryRiskDoses.end()
+    );
     overSuppressionDoses.erase(
         std::unique(overSuppressionDoses.begin(), overSuppressionDoses.end(), [](double a, double b) {
             return std::fabs(a - b) <= 1.0e-6;
@@ -725,7 +741,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
     const auto safeRanges = contiguousRanges(safeDoses, report.stepDose);
     const auto therapeuticRanges = contiguousRanges(therapeuticDoses, report.stepDose);
+    const auto excitatoryRiskRanges = contiguousRanges(excitatoryRiskDoses, report.stepDose);
     const auto overSuppressionRanges = contiguousRanges(overSuppressionDoses, report.stepDose);
+
+    report.excitatoryRiskDoses = excitatoryRiskDoses;
 
     if (!safeRanges.empty()) {
         const auto widestSafe = std::max_element(safeRanges.begin(), safeRanges.end(), [](const Range& a, const Range& b) {

@@ -114,6 +114,8 @@ struct PharmaDecisionReport {
     bool hasToxicThreshold = false;
     float toxicMinDose = 0.0f;
 
+    std::vector<double> excitatoryRiskDoses;
+
     bool hasEffectiveDose = false;
     float effectiveMinDose = 0.0f;
 
