@@ -43,7 +43,7 @@ export function RunHistoryTable({
           <option value="all">All Types</option>
           <option value="dose-eval">Drug Evaluation</option>
           <option value="simulate">Simulation</option>
-          <option value="validate">Validation</option>
+          {/* Validation/internal benchmark runs are not shown as a public filter */}
         </select>
         <select
           value={riskFilter}

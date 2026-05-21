@@ -1,11 +1,10 @@
-import { Activity, Beaker, History, LayoutDashboard, Microscope } from 'lucide-react';
+import { Activity, Beaker, History, LayoutDashboard } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
   { to: '/', label: 'Home', icon: LayoutDashboard },
   { to: '/dose-eval', label: 'Drug', icon: Beaker },
   { to: '/simulation', label: 'Sim', icon: Activity },
-  { to: '/validation', label: 'Valid', icon: Microscope },
   { to: '/history', label: 'Runs', icon: History }
 ];
 

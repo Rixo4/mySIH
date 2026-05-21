@@ -32,7 +32,8 @@ export async function runSimulation(payload?: SingleSimulationRequest): Promise<
 }
 
 export async function runValidation(): Promise<BackendRunResponse> {
-  const response = await api.post<BackendRunResponse>('/api/validate');
+  // Internal developer endpoint - not part of public workflows
+  const response = await api.post<BackendRunResponse>('/api/internal/validate');
   return response.data;
 }
 

@@ -19,6 +19,9 @@ backend/runs/
 output_*/
 outtmp_*/
 
+# Local build directory used during validation builds
+build-validate/
+
 # Logs and generated artifacts
 *.log
 *.db

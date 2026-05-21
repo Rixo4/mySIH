@@ -90,9 +90,6 @@ export function DashboardPage({ backendConnected }: DashboardPageProps) {
           <Link to="/dose-eval" className="inline-flex items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-midnight-950 transition hover:scale-[1.01]">
             Run Drug Evaluation <ArrowRight className="h-4 w-4" />
           </Link>
-          <Link to="/validation" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-cyan-400/30 hover:bg-cyan-500/10">
-            Run Biological Validation
-          </Link>
         </div>
       </motion.section>
 
@@ -105,7 +102,7 @@ export function DashboardPage({ backendConnected }: DashboardPageProps) {
       <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         <MetricCard label="Engine Status" value={backendConnected ? 'Online' : 'Offline'} helper="Backend health check from /health" icon={<FlaskConical className="h-5 w-5" />} />
         <MetricCard label="CUDA Mode" value="Enabled" helper="CUDA-enabled simulation pipeline" icon={<ShieldCheck className="h-5 w-5" />} />
-        <MetricCard label="Validation Status" value={`${validationTestsPassed} PASS`} helper="Biological validation suite" icon={<Gauge className="h-5 w-5" />} />
+        {/* Validation is an internal benchmark suite and is hidden from user dashboard */}
         <MetricCard label="Last Drug Decision" value={(latestDrugDecision?.recommendation ?? 'CAUTION / PROMISING').toString()} helper={latestDrugDecision?.risk_level ?? 'Awaiting latest run'} icon={<Beaker className="h-5 w-5" />} />
         <MetricCard label="Average Runtime" value={loading ? 'Loading…' : averageRuntime ? formatDuration(averageRuntime) : '—'} helper="Recent engine response time" icon={<Timer className="h-5 w-5" />} />
         <MetricCard label="Total Runs" value={loading ? 'Loading…' : String(runs.length)} helper="Stored run history records" icon={<Activity className="h-5 w-5" />} />

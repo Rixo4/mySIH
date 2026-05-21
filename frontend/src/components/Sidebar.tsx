@@ -1,11 +1,10 @@
-import { Activity, Beaker, FlaskConical, LayoutDashboard, History, Microscope } from 'lucide-react';
+import { Activity, Beaker, FlaskConical, LayoutDashboard, History } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/dose-eval', label: 'Drug Evaluation', icon: Beaker },
   { to: '/simulation', label: 'Simulation', icon: Activity },
-  { to: '/validation', label: 'Validation', icon: Microscope },
   { to: '/history', label: 'Run History', icon: History }
 ];
 

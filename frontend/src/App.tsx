@@ -5,7 +5,6 @@ import { getHealth } from './api/client';
 import { DashboardPage } from './pages/DashboardPage';
 import { DrugEvaluationPage } from './pages/DrugEvaluationPage';
 import { SimulationPage } from './pages/SimulationPage';
-import { ValidationPage } from './pages/ValidationPage';
 import { RunHistoryPage } from './pages/RunHistoryPage';
 import { ReportDetailPage } from './pages/ReportDetailPage';
 import { RunTaskProvider, useRunTask } from './context/RunTaskContext';
@@ -13,7 +12,7 @@ import { RunTaskProvider, useRunTask } from './context/RunTaskContext';
 const titleMap: Array<{ prefix: string; title: string }> = [
   { prefix: '/dose-eval', title: 'Drug Evaluation' },
   { prefix: '/simulation', title: 'Single Simulation' },
-  { prefix: '/validation', title: 'Biological Validation' },
+  // Validation UI is an internal benchmark and removed from public navigation.
   { prefix: '/history', title: 'Run History' },
   { prefix: '/reports', title: 'Report Detail' },
   { prefix: '/', title: 'Dashboard' }
@@ -65,7 +64,6 @@ export default function App() {
             <Route path="/" element={<DashboardPage backendConnected={backendConnected} />} />
             <Route path="/dose-eval" element={<DrugEvaluationPage />} />
             <Route path="/simulation" element={<SimulationPage />} />
-            <Route path="/validation" element={<ValidationPage />} />
             <Route path="/history" element={<RunHistoryPage />} />
             <Route path="/reports/:runId" element={<ReportDetailPage />} />
           </Route>
