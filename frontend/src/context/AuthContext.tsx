@@ -1,43 +1,53 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, type ReactNode } from 'react';
 import { api, setAccessToken as setApiAccessToken } from '../api/client';
-  useEffect(() => {
-    // attempt silent refresh on load
-    api.post('/auth/refresh')
-      .then((res) => {
-        const token = res.data?.access_token || res.data?.accessToken || null;
-        setAccessToken(token);
-        setApiAccessToken(token);
-      })
-      .catch(() => {
-        setAccessToken(null);
-        setApiAccessToken(null);
-      });
-  }, []);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-      setAccessToken(token);
-    }).catch(() => {
-      setAccessToken(null);
-    });
-  }, []);
+
+type AuthContextValue = {
+  accessToken: string | null;
+  setAccessToken: (token: string | null) => void;
+  login: (email: string, password: string) => Promise<void>;
+  signup: (full_name: string, email: string, password: string, company_name?: string) => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+const ACCESS_TOKEN_STORAGE_KEY = 'spp.accessToken';
+
+function readStoredAccessToken() {
+  try {
+    return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function updateAccessToken(token: string | null, setAccessTokenState: (value: string | null) => void) {
+  setAccessTokenState(token);
+  setApiAccessToken(token);
+  try {
+    if (token) {
+      window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+    } else {
+      window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures and keep the in-memory token in sync.
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [accessToken, setAccessTokenState] = useState<string | null>(() => {
+    const token = readStoredAccessToken();
+    if (token) {
+      setApiAccessToken(token);
+    }
+    return token;
+  });
 
   async function login(email: string, password: string) {
     const res = await api.post('/auth/login', { email, password });
     const token = res.data?.access_token || res.data?.accessToken || null;
-    setAccessToken(token);
-    setApiAccessToken(token);
+    updateAccessToken(token, setAccessTokenState);
   }
 
   async function signup(full_name: string, email: string, password: string, company_name?: string) {
@@ -46,10 +56,24 @@ import { api, setAccessToken as setApiAccessToken } from '../api/client';
 
   async function logout() {
     await api.post('/auth/logout');
-    setAccessToken(null);
+    updateAccessToken(null, setAccessTokenState);
   }
 
-  const value: AuthContextValue = { accessToken, setAccessToken, login, signup, logout };
+  const value: AuthContextValue = {
+    accessToken,
+    setAccessToken: (token) => updateAccessToken(token, setAccessTokenState),
+    login,
+    signup,
+    logout
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
 }

@@ -11,7 +11,7 @@ import { RunHistoryPage } from './pages/RunHistoryPage';
 import { ReportDetailPage } from './pages/ReportDetailPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RunTaskProvider, useRunTask } from './context/RunTaskContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
 const titleMap: Array<{ prefix: string; title: string }> = [
   { prefix: '/dose-eval', title: 'Drug Evaluation' },
@@ -42,6 +42,14 @@ function Shell({ backendConnected }: { backendConnected: boolean }) {
   );
 }
 
+function PublicOnlyRoute({ children }: { children: JSX.Element }) {
+  const { accessToken } = useAuth();
+  if (accessToken) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   const [backendConnected, setBackendConnected] = useState(false);
 
@@ -66,16 +74,15 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<Shell backendConnected={backendConnected} />}>
-              <Route path="/" element={<DashboardPage backendConnected={backendConnected} />} />
+              <Route path="/" element={<ProtectedRoute><DashboardPage backendConnected={backendConnected} /></ProtectedRoute>} />
               <Route path="/dose-eval" element={<ProtectedRoute><DrugEvaluationPage /></ProtectedRoute>} />
               <Route path="/simulation" element={<ProtectedRoute><SimulationPage /></ProtectedRoute>} />
-              <Route path="/history" element={<RunHistoryPage />} />
               <Route path="/reports/:runId" element={<ProtectedRoute><ReportDetailPage /></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><RunHistoryPage /></ProtectedRoute>} />
             </Route>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+            <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

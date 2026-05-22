@@ -1,5 +1,7 @@
-import { BadgeCheck, DatabaseZap, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, DatabaseZap, LogIn, LogOut, ShieldCheck, UserPlus } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { StatusBadge } from './StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 interface TopbarProps {
   pageTitle: string;
@@ -10,6 +12,14 @@ interface TopbarProps {
 }
 
 export function Topbar({ pageTitle, backendConnected, engineOnline, cudaEnabled = true, validationRunning = false }: TopbarProps) {
+  const { accessToken, logout } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await logout();
+    navigate('/');
+  }
+
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-midnight-950/80 backdrop-blur-xl">
       <div className="flex flex-col gap-4 px-5 py-4 xl:flex-row xl:items-center xl:justify-between xl:px-8">
@@ -21,6 +31,30 @@ export function Topbar({ pageTitle, backendConnected, engineOnline, cudaEnabled 
           <StatusBadge label="Backend" value={backendConnected ? 'Connected' : 'Disconnected'} />
           <StatusBadge label="Engine" value={engineOnline ? 'Online' : 'Unknown'} />
           {validationRunning ? <StatusBadge label="Validation" value="Running" /> : null}
+          {accessToken ? (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white ring-1 ring-white/10 transition hover:bg-white/10"
+            >
+              <LogOut className="h-4 w-4" /> Logout
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white ring-1 ring-white/10 transition hover:bg-white/10"
+              >
+                <LogIn className="h-4 w-4" /> Login
+              </Link>
+              <Link
+                to="/signup"
+                className="inline-flex items-center gap-2 rounded-full bg-cyan-500 px-3 py-1 text-xs font-semibold text-midnight-950 transition hover:bg-cyan-400"
+              >
+                <UserPlus className="h-4 w-4" /> Sign up
+              </Link>
+            </div>
+          )}
           <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200 ring-1 ring-emerald-400/20">
             <BadgeCheck className="h-4 w-4" /> CUDA Enabled
           </span>

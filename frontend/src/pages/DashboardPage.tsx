@@ -5,6 +5,7 @@ import { Activity, ArrowRight, Beaker, CirclePlay, FlaskConical, Gauge, ShieldCh
 import { getRuns, getRunDetail } from '../api/client';
 import { MetricCard } from '../components/MetricCard';
 import { StatusBadge } from '../components/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 import { formatDuration } from '../lib/format';
 import type { RunDetailResponse, RunListItem } from '../types';
 
@@ -24,12 +25,21 @@ function FlowNode({ label, icon: Icon }: { label: string; icon: typeof CirclePla
 }
 
 export function DashboardPage({ backendConnected }: DashboardPageProps) {
+  const { accessToken } = useAuth();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [latestDetails, setLatestDetails] = useState<RunDetailResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!accessToken) {
+      setRuns([]);
+      setLatestDetails([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
 
     async function load() {
@@ -59,7 +69,7 @@ export function DashboardPage({ backendConnected }: DashboardPageProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accessToken]);
 
   const averageRuntime = useMemo(() => {
     const durations = latestDetails.map((item) => item.duration_seconds).filter((value): value is number => typeof value === 'number');

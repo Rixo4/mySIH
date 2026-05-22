@@ -4,9 +4,11 @@ import { History } from 'lucide-react';
 import { deleteRun, getRuns } from '../api/client';
 import { RunHistoryTable } from '../components/RunHistoryTable';
 import { StatusBadge } from '../components/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 import type { RunListItem } from '../types';
 
 export function RunHistoryPage() {
+  const { accessToken } = useAuth();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +18,13 @@ export function RunHistoryPage() {
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!accessToken) {
+      setRuns([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
     async function load() {
       try {
@@ -38,7 +47,7 @@ export function RunHistoryPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accessToken]);
 
   const filteredRuns = useMemo(
     () =>
