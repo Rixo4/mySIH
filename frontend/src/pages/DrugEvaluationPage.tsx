@@ -11,6 +11,13 @@ import { buildDoseChartData } from '../lib/charts';
 import type { BackendRunResponse, DrugEvalRequest, ReportChartPoint } from '../types';
 import { useRunTask } from '../context/RunTaskContext';
 
+type SummaryMetric = {
+  label: string;
+  key: string;
+  helper: string;
+  icon?: React.ReactNode;
+};
+
 function validatePayload(payload: DrugEvalRequest): string | null {
   if (!payload.drug_name.trim()) {
     return 'Invalid drug input';
@@ -35,9 +42,78 @@ function validatePayload(payload: DrugEvalRequest): string | null {
   return null;
 }
 
-function getSummaryValue(result: BackendRunResponse | null, key: string): string {
+function getSummaryValue(result: BackendRunResponse | null, key: string): string | null {
   const value = result?.parsed_summary?.[key];
-  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '—';
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const lowered = normalized.toLowerCase();
+  if (['null', 'undefined', 'n/a', 'na', 'none', '-', '—'].includes(lowered)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function getResponseMode(result: BackendRunResponse | null): string {
+  const responseMode = getSummaryValue(result, 'response_mode');
+  return responseMode ? responseMode.toUpperCase() : '';
+}
+
+function buildSummaryMetrics(responseMode: string): SummaryMetric[] {
+  const sharedMetrics: SummaryMetric[] = [
+    { label: 'Recommendation', key: 'recommendation', helper: 'Decision returned by backend parser', icon: <Sigma className="h-5 w-5" /> },
+    { label: 'Risk Level', key: 'risk_level', helper: 'Clinical risk classification' },
+    { label: 'Confidence', key: 'confidence', helper: 'Decision confidence band' }
+  ];
+
+  const excitatoryMetrics: SummaryMetric[] = [
+    { label: 'Response Strength', key: 'response_strength', helper: 'Excitability signal from backend report' },
+    { label: 'Max Effect', key: 'max_effect', helper: 'Peak observed response magnitude' },
+    { label: 'Model Fit', key: 'model_fit_r2', helper: 'Dose-response fit quality' }
+  ];
+
+  const suppressiveMetrics: SummaryMetric[] = [
+    { label: 'Therapeutic Window', key: 'effective_range', helper: 'Dose interval with desired effect' },
+    { label: 'Toxic Threshold', key: 'toxic_threshold', helper: 'Highest safe threshold observed' },
+    { label: 'Stability Score', key: 'stability_score', helper: 'Batch variability assessment' }
+  ];
+
+  const stabilizingMetrics: SummaryMetric[] = [
+    { label: 'Stabilization Range', key: 'stabilization_range', helper: 'Dose interval with stabilization effect' },
+    { label: 'Sync Reduction', key: 'sync_reduction_pct', helper: 'Synchronization decrease across runs' },
+    { label: 'NII Reduction', key: 'nii_reduction_pct', helper: 'Network instability improvement' },
+    { label: 'NII Increase', key: 'nii_increase_pct', helper: 'Network instability increase observed' },
+    { label: 'Seizure Reduction', key: 'seizure_reduction_pct', helper: 'Seizure burden reduction' },
+    { label: 'Burst Reduction', key: 'burst_reduction_pct', helper: 'Burst activity reduction' },
+    { label: 'Calcium Effect', key: 'calcium_effect_magnitude', helper: 'Calcium-channel effect magnitude' },
+    { label: 'Stability Score', key: 'stability_score', helper: 'Batch variability assessment' }
+  ];
+
+  if (responseMode === 'EXCITATORY_RESPONSE') {
+    return [...sharedMetrics, ...excitatoryMetrics];
+  }
+
+  if (responseMode === 'SUPPRESSIVE_RESPONSE') {
+    return [...sharedMetrics, ...suppressiveMetrics];
+  }
+
+  if (responseMode === 'STABILIZING_RESPONSE') {
+    return [...sharedMetrics, ...stabilizingMetrics];
+  }
+
+  return sharedMetrics;
 }
 
 export function DrugEvaluationPage() {
@@ -53,6 +129,8 @@ export function DrugEvaluationPage() {
   const loading = drugEvaluationState.status === 'running';
   const result = drugEvaluationState.result;
   const error = drugEvaluationState.error;
+  const responseMode = getResponseMode(result);
+  const summaryMetrics = useMemo(() => buildSummaryMetrics(responseMode), [responseMode]);
 
   const [activeStep, setActiveStep] = useState(0);
   const [clientError, setClientError] = useState<string | null>(null);
@@ -115,7 +193,10 @@ export function DrugEvaluationPage() {
               Enter the ion-channel profile, dose sweep, and execution settings. The backend will run the live CUDA engine and return a structured report.
             </p>
           </div>
-          <StatusBadge label="Execution Mode" value={engineMode === 'fast' ? 'FAST' : 'ACCURATE'} />
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <StatusBadge label="Execution Mode" value={engineMode === 'fast' ? 'FAST' : 'ACCURATE'} />
+            <StatusBadge label="Response Mode" value={responseMode || 'UNSPECIFIED'} />
+          </div>
         </div>
 
         <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
@@ -150,12 +231,14 @@ export function DrugEvaluationPage() {
               <Rocket className="h-5 w-5 text-cyan-300" />
             </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <MetricCard label="Recommendation" value={getSummaryValue(result, 'recommendation')} helper="Decision returned by backend parser" icon={<Sigma className="h-5 w-5" />} />
-              <MetricCard label="Risk Level" value={getSummaryValue(result, 'risk_level')} helper="Clinical risk classification" />
-              <MetricCard label="Confidence" value={getSummaryValue(result, 'confidence')} helper="Decision confidence band" />
-              <MetricCard label="Therapeutic Window" value={getSummaryValue(result, 'effective_range')} helper="Dose interval with desired effect" />
-              <MetricCard label="Toxic Threshold" value={getSummaryValue(result, 'toxic_threshold')} helper="Highest safe threshold observed" />
-              <MetricCard label="Stability Score" value={getSummaryValue(result, 'stability_score')} helper="Batch variability assessment" />
+              {summaryMetrics.map((metric) => {
+                const value = getSummaryValue(result, metric.key);
+                if (!value) {
+                  return null;
+                }
+
+                return <MetricCard key={metric.key} label={metric.label} value={value} helper={metric.helper} icon={metric.icon} />;
+              })}
             </div>
           </div>
 

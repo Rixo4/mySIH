@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,13 +37,29 @@ def _resolve_from_backend_root(path_value: str) -> Path:
 
 def _default_engine_path() -> Path:
     candidates = [
+        PROJECT_ROOT / "build-validate" / "silicon_patient",
         PROJECT_ROOT / "build-linux" / "silicon_patient",
         PROJECT_ROOT / "build-cuda" / "silicon_patient.exe",
         PROJECT_ROOT / "build-cuda" / "silicon_patient",
     ]
 
     for candidate in candidates:
-        if candidate.exists():
+        if not candidate.exists():
+            continue
+
+        if not os.access(candidate, os.X_OK):
+            continue
+
+        if os.name != "nt":
+            try:
+                ldd_result = subprocess.run(["ldd", str(candidate)], capture_output=True, text=True, check=False)
+            except OSError:
+                return candidate
+
+            combined_output = f"{ldd_result.stdout}\n{ldd_result.stderr}"
+            if "not found" in combined_output:
+                continue
+
             return candidate.resolve()
 
     return _resolve_from_backend_root("../build-cuda/silicon_patient.exe")
