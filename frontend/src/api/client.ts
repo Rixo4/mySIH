@@ -14,6 +14,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 export const api = axios.create({
   baseURL,
   timeout: 900000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -74,5 +75,26 @@ export async function getRunReport(runId: string): Promise<string> {
 
 export async function deleteRun(runId: string): Promise<DeleteRunResponse> {
   const response = await api.delete<DeleteRunResponse>(`/api/runs/${encodeURIComponent(runId)}`);
+  return response.data;
+}
+
+export interface SignupResponse {
+  detail: string;
+  email?: string;
+  otp?: string;
+}
+
+export interface GenericAuthResponse {
+  detail: string;
+  otp?: string;
+}
+
+export async function verifyEmail(email: string, code: string): Promise<GenericAuthResponse> {
+  const response = await api.post<GenericAuthResponse>('/auth/verify-email', { email, code });
+  return response.data;
+}
+
+export async function resendVerificationCode(email: string): Promise<GenericAuthResponse> {
+  const response = await api.post<GenericAuthResponse>('/auth/resend-verification-code', { email });
   return response.data;
 }

@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from .auth import require_roles, require_user, router as auth_router
+from .db_migrations import ensure_auth_schema
 from .config import get_settings
 from .database import Base, engine, get_db
 from .schemas import (
@@ -55,6 +56,23 @@ def on_startup() -> None:
     ensure_directory(settings.runs_dir)
     ensure_directory(settings.reports_dir)
     Base.metadata.create_all(bind=engine)
+    ensure_auth_schema(engine)
+    # Production hardening checks
+    env = os.getenv("ENVIRONMENT", "development")
+    if env == "production":
+        # SECRET_KEY must be set and not the dev fallback
+        secret = os.getenv("SECRET_KEY") or os.getenv("SPP_SECRET_KEY")
+        if not secret or secret == "silicon-patient-dev-secret-key":
+            raise RuntimeError("SECRET_KEY must be set to a strong value in production")
+
+        # Require secure cookie for auth refresh in production
+        cookie_secure = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
+        if not cookie_secure:
+            raise RuntimeError("AUTH_COOKIE_SECURE must be 'true' in production")
+
+        samesite = os.getenv("AUTH_COOKIE_SAMESITE", "lax").lower()
+        if samesite == "lax":
+            raise RuntimeError("AUTH_COOKIE_SAMESITE must be 'strict' or 'none' in production")
 
 
 @app.get("/health", response_model=HealthResponse)

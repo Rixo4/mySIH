@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, type ReactNode } from 'react';
-import { api, setAccessToken as setApiAccessToken } from '../api/client';
+import { api, resendVerificationCode, setAccessToken as setApiAccessToken, verifyEmail } from '../api/client';
 
 type AuthContextValue = {
   accessToken: string | null;
   setAccessToken: (token: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
-  signup: (full_name: string, email: string, password: string, company_name?: string) => Promise<void>;
+  signup: (full_name: string, email: string, password: string, company_name?: string) => Promise<{ detail: string; otp?: string; email?: string }>;
+  verifyEmail: (email: string, code: string) => Promise<{ detail: string; otp?: string }>;
+  resendVerificationCode: (email: string) => Promise<{ detail: string; otp?: string }>;
   logout: () => Promise<void>;
 };
 
@@ -51,7 +53,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signup(full_name: string, email: string, password: string, company_name?: string) {
-    await api.post('/auth/signup', { full_name, email, password, company_name });
+    const res = await api.post('/auth/signup', { full_name, email, password, company_name });
+    return res.data;
+  }
+
+  async function verifyEmailAddress(email: string, code: string) {
+    return verifyEmail(email, code);
+  }
+
+  async function resendVerificationCodeForEmail(email: string) {
+    return resendVerificationCode(email);
   }
 
   async function logout() {
@@ -64,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken: (token) => updateAccessToken(token, setAccessTokenState),
     login,
     signup,
+    verifyEmail: verifyEmailAddress,
+    resendVerificationCode: resendVerificationCodeForEmail,
     logout
   };
 

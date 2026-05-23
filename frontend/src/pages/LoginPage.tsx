@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 export function LoginPage() {
@@ -41,6 +42,11 @@ export function LoginPage() {
       await auth.login(email, password);
       nav('/');
     } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
+      if (detail === 'Email verification required') {
+        nav('/verify-email', { state: { email, message: detail } });
+        return;
+      }
       setError('Invalid credentials');
     } finally {
       setSubmitting(false);

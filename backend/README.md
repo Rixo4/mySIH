@@ -37,6 +37,15 @@ Optional settings:
 SPP_DATABASE_URL=sqlite:///./silicon_patient.db
 SPP_ENGINE_TIMEOUT_SECONDS=900
 REDIS_URL=redis://localhost:6379/0
+AUTH_COOKIE_SECURE=false
+AUTH_COOKIE_SAMESITE=lax
+SPP_DEVELOPER_MODE=1
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-user
+SMTP_PASSWORD=your-pass
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_USE_TLS=true
 ```
 
 ## 4. Start Backend
@@ -91,16 +100,20 @@ Note: this endpoint is gated by the environment variable `SPP_DEVELOPER_MODE`. S
 
 ## 7. Manual Auth Checklist
 
-1. `POST /auth/signup` with a strong password, then confirm the user exists in `users`.
+1. `POST /auth/signup` with a new email and confirm the user is created with `is_email_verified=false`.
 2. Re-submit the same email and confirm duplicate signup is rejected.
 3. Try a weak password and confirm validation fails.
-4. `POST /auth/login` with valid credentials and confirm an access token is returned.
-5. `POST /auth/login` with invalid credentials and confirm the response is only `Invalid credentials`.
-6. Call protected routes without a bearer token and confirm `401`.
-7. Call protected routes with a valid bearer token and confirm access.
-8. Call `POST /auth/refresh` and confirm a new access token is issued.
-9. Call `POST /auth/logout` and confirm the refresh cookie is cleared.
-10. Verify users cannot access runs outside their company or role.
+4. Confirm the signup response says `Account created. Please verify your email.`
+5. `POST /auth/login` before verification and confirm the response is `Email verification required`.
+6. `POST /auth/verify-email` with the correct 6-digit code and confirm the user becomes verified.
+7. `POST /auth/verify-email` with a wrong or expired code and confirm a generic invalid/expired message.
+8. `POST /auth/resend-verification-code` and confirm it returns the generic resend message.
+9. `POST /auth/login` after verification and confirm an access token is returned.
+10. Call protected routes without a bearer token and confirm `401`.
+11. Call protected routes with a valid bearer token and confirm access.
+12. Call `POST /auth/refresh` and confirm a new access token is issued.
+13. Call `POST /auth/logout` and confirm the refresh cookie is cleared.
+14. Verify users cannot access runs outside their company or role.
 
 ### List Runs
 

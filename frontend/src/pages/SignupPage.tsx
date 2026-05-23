@@ -39,8 +39,8 @@ export function SignupPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await auth.signup(fullName, email, password, company || undefined);
-      nav('/login');
+      const result = await auth.signup(fullName, email, password, company || undefined);
+      nav('/verify-email', { state: { email, message: result.detail } });
     } catch (err) {
       setError('Unable to create account');
     } finally {

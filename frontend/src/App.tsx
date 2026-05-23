@@ -5,6 +5,7 @@ import { getHealth } from './api/client';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { DrugEvaluationPage } from './pages/DrugEvaluationPage';
 import { SimulationPage } from './pages/SimulationPage';
 import { RunHistoryPage } from './pages/RunHistoryPage';
@@ -82,6 +83,7 @@ export default function App() {
             </Route>
             <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
             <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+            <Route path="/verify-email" element={<PublicOnlyRoute><VerifyEmailPage /></PublicOnlyRoute>} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>

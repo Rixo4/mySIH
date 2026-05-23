@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -13,8 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
+from .email_service import send_email
 from .database import get_db
-from .models import AuditLog, Company, RefreshToken, User
+from .models import AuditLog, Company, EmailVerificationCode, RefreshToken, User
 from .ratelimit import get_rate_limiter
 from .utils import utc_now
 
@@ -42,12 +44,74 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def hash_otp(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+
+def generate_email_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def build_verification_email(code: str) -> tuple[str, str]:
+    subject = "Silicon Patient Platform Email Verification"
+    body = (
+        f"Your Silicon Patient Platform verification code is: {code}\n"
+        "This code expires in 10 minutes.\n"
+        "If you did not request this, ignore this email."
+    )
+    return subject, body
+
+
+def is_developer_mode() -> bool:
+    return os.getenv("SPP_DEVELOPER_MODE", "0") == "1"
+
+
+def issue_email_verification_code(db: Session, user: User) -> str:
+    now = utc_now()
+    code = generate_email_otp()
+
+    existing_codes = db.execute(
+        select(EmailVerificationCode).where(
+            EmailVerificationCode.user_id == user.id,
+            EmailVerificationCode.email == user.email,
+            EmailVerificationCode.used_at.is_(None),
+        )
+    ).scalars().all()
+    for row in existing_codes:
+        row.used_at = now
+        db.add(row)
+
+    code_row = EmailVerificationCode(
+        user_id=user.id,
+        email=user.email,
+        code_hash=hash_otp(code),
+        expires_at=now + timedelta(minutes=10),
+        used_at=None,
+        attempts=0,
+        created_at=now,
+    )
+    db.add(code_row)
+    db.commit()
+
+    subject, body = build_verification_email(code)
+    send_email(user.email, subject, body)
+    return code
+
+
+def to_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def create_access_token(data: dict, expires_minutes: int = 15) -> str:
@@ -98,6 +162,15 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class EmailVerificationRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
 class MeResponse(BaseModel):
     id: int
     full_name: str
@@ -143,12 +216,27 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
 
     pwd_hash = get_password_hash(payload.password)
     now = utc_now()
-    user = User(full_name=payload.full_name, email=payload.email, password_hash=pwd_hash, role="researcher", company_id=(company.id if company else None), is_active=True, created_at=now, updated_at=now)
+    user = User(
+        full_name=payload.full_name,
+        email=payload.email,
+        password_hash=pwd_hash,
+        role="researcher",
+        company_id=(company.id if company else None),
+        is_active=True,
+        is_email_verified=False,
+        email_verified_at=None,
+        created_at=now,
+        updated_at=now,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
     audit(db, user.id, user.company_id, "signup", request)
-    return {"id": user.id, "email": user.email}
+    otp = issue_email_verification_code(db, user)
+    response = {"detail": "Account created. Please verify your email.", "email": user.email}
+    if is_developer_mode():
+        response["otp"] = otp
+    return response
 
 
 @router.post("/login")
@@ -178,6 +266,10 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         audit(db, user.id, user.company_id, "login_blocked", request)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    if not user.is_email_verified:
+        audit(db, user.id, user.company_id, "login_unverified", request)
+        raise HTTPException(status_code=403, detail="Email verification required")
+
     claims = {"sub": str(user.id), "email": user.email, "role": user.role, "company_id": user.company_id}
     access = create_access_token(claims, expires_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")))
     refresh = create_refresh_token(claims, expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")))
@@ -195,6 +287,9 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     cookie_secure = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
     samesite = os.getenv("AUTH_COOKIE_SAMESITE", "lax")
     response.set_cookie("spp_refresh_token", refresh, httponly=True, secure=cookie_secure, samesite=samesite, max_age=7 * 24 * 3600)
+    # Set CSRF cookie for double-submit protection (not HttpOnly so client can read)
+    csrf_token = secrets.token_urlsafe(32)
+    response.set_cookie("spp_csrf", csrf_token, httponly=False, secure=cookie_secure, samesite=samesite, max_age=7 * 24 * 3600)
 
     return TokenResponse(access_token=access)
 
@@ -222,6 +317,11 @@ def _verify_refresh_token(db: Session, token: str) -> User | None:
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
     token = request.cookies.get("spp_refresh_token") or request.headers.get("x-refresh-token")
     if not token:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # If using cookie-based refresh, require CSRF header to mitigate CSRF attacks
+    if request.cookies.get("spp_refresh_token") and not request.headers.get("x-csrf-token"):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if request.cookies.get("spp_refresh_token") and request.headers.get("x-csrf-token") != request.cookies.get("spp_csrf"):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     user = _verify_refresh_token(db, token)
     if user is None:
@@ -262,7 +362,77 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
             audit(db, rec.user_id, None, "logout", request)
 
     response.delete_cookie("spp_refresh_token")
+    response.delete_cookie("spp_csrf")
     return {"detail": "ok"}
+
+
+@router.post("/verify-email")
+def verify_email(payload: EmailVerificationRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    stmt = select(User).where(User.email == payload.email)
+    user = db.execute(stmt).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    code_stmt = (
+        select(EmailVerificationCode)
+        .where(
+            EmailVerificationCode.user_id == user.id,
+            EmailVerificationCode.email == payload.email,
+            EmailVerificationCode.used_at.is_(None),
+        )
+        .order_by(EmailVerificationCode.created_at.desc())
+    )
+    code_row = db.execute(code_stmt).scalars().first()
+    expires_at = to_utc(code_row.expires_at) if code_row is not None else None
+    if code_row is None or expires_at is None or expires_at < utc_now() or code_row.attempts >= 5:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    if code_row.code_hash != hash_otp(payload.code):
+        code_row.attempts += 1
+        db.add(code_row)
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    now = utc_now()
+    user.is_email_verified = True
+    user.email_verified_at = now
+    user.updated_at = now
+    code_row.used_at = now
+    db.add(user)
+    db.add(code_row)
+
+    remaining_codes = db.execute(
+        select(EmailVerificationCode).where(
+            EmailVerificationCode.user_id == user.id,
+            EmailVerificationCode.email == payload.email,
+            EmailVerificationCode.used_at.is_(None),
+        )
+    ).scalars().all()
+    for row in remaining_codes:
+        row.used_at = now
+        db.add(row)
+
+    db.commit()
+    audit(db, user.id, user.company_id, "email_verified", request)
+    return {"detail": "Email verified successfully"}
+
+
+@router.post("/resend-verification-code")
+def resend_verification_code(payload: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+    email_key = f"resend:email:{payload.email}"
+    ip_key = f"resend:ip:{client_ip}"
+    if limiter.incr_with_expire(email_key, window=3600) > 3 or limiter.incr_with_expire(ip_key, window=3600) > 3:
+        return {"detail": "If an account needs verification, a code has been sent."}
+
+    stmt = select(User).where(User.email == payload.email)
+    user = db.execute(stmt).scalar_one_or_none()
+    if user is not None and not user.is_email_verified:
+        otp = issue_email_verification_code(db, user)
+        if is_developer_mode():
+            return {"detail": "If an account needs verification, a code has been sent.", "otp": otp}
+
+    return {"detail": "If an account needs verification, a code has been sent."}
 
 
 def get_user_from_access_token(db: Session, token: str) -> User | None:
@@ -317,11 +487,80 @@ def request_password_reset(payload: dict, request: Request, db: Session = Depend
     cnt = limiter.incr_with_expire(pr_key, window=3600)
     if cnt > 3:
         return {"detail": "ok"}
+    # Expect payload {"email": "..."}
+    email = payload.get("email") if isinstance(payload, dict) else None
+    if not email:
+        return {"detail": "ok"}
 
+    stmt = select(User).where(User.email == email)
+    user = db.execute(stmt).scalar_one_or_none()
+    if user is None:
+        return {"detail": "ok"}
+
+    # create reset token
+    token = secrets.token_urlsafe(32)
+    token_h = hash_token(token)
+    from datetime import timedelta
+
+    expires_at = utc_now() + timedelta(hours=1)
+    from .models import PasswordResetToken
+
+    pr = PasswordResetToken(user_id=user.id, token_hash=token_h, expires_at=expires_at, used_at=None, created_at=utc_now())
+    db.add(pr)
+    db.commit()
+    # In production: send token via email. In developer mode, return it for testing.
+    if os.getenv("SPP_DEVELOPER_MODE", "0") == "1":
+        return {"detail": "ok", "reset_token": token}
     return {"detail": "ok"}
 
 
 @router.post("/reset-password")
 def reset_password(payload: dict, request: Request, db: Session = Depends(get_db)) -> dict:
-    # payload should contain token and new_password; implement later
+    token = payload.get("token") if isinstance(payload, dict) else None
+    new_password = payload.get("new_password") if isinstance(payload, dict) else None
+    if not token or not new_password:
+        raise HTTPException(status_code=400, detail="Invalid request")
+
+    # validate password strength (same rules as signup)
+    if len(new_password) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
+    if not any(c.islower() for c in new_password):
+        raise HTTPException(status_code=400, detail="Password must include a lowercase letter")
+    if not any(c.isupper() for c in new_password):
+        raise HTTPException(status_code=400, detail="Password must include an uppercase letter")
+    if not any(c.isdigit() for c in new_password):
+        raise HTTPException(status_code=400, detail="Password must include a number")
+    if not any(not c.isalnum() for c in new_password):
+        raise HTTPException(status_code=400, detail="Password must include a special character")
+    common = {"password", "12345678", "qwerty", "letmein", "password123!", "admin123!", "welcome123!"}
+    if new_password.lower() in common:
+        raise HTTPException(status_code=400, detail="Password too weak")
+
+    # find reset token
+    from .models import PasswordResetToken
+    stmt = select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token))
+    pr = db.execute(stmt).scalar_one_or_none()
+    expires_at = to_utc(pr.expires_at) if pr is not None else None
+    if pr is None or pr.used_at is not None or expires_at is None or expires_at < utc_now():
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    # rotate user password
+    stmt2 = select(User).where(User.id == pr.user_id)
+    user = db.execute(stmt2).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    user.password_hash = get_password_hash(new_password)
+    user.updated_at = utc_now()
+    pr.used_at = utc_now()
+    db.add(user)
+    db.add(pr)
+    # revoke existing refresh tokens
+    existing_tokens = db.execute(select(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))).scalars().all()
+    for token_row in existing_tokens:
+        token_row.revoked_at = utc_now()
+        db.add(token_row)
+
+    db.commit()
+    audit(db, user.id, user.company_id, "password_reset", request)
     return {"detail": "ok"}
