@@ -229,6 +229,4 @@ This makes the project audit-friendly and easy to inspect after a run completes.
 
 
 
-## License
 
-This project is released under the terms of the LICENSE file in this repository.
