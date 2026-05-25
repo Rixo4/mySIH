@@ -98,7 +98,7 @@ struct PharmaDecisionReport {
     std::string primaryChangeText = "Not observed";
     std::string safetyInterpretationText = "Not observed";
     std::string seizureTrendText = "Not observed";
-        std::string responseMode = "STANDARD_RESPONSE";
+        std::string responseMode = "SUPPRESSIVE_RESPONSE";
         double syncReductionPct = 0.0;
         double niiReductionPct = 0.0;
         double niiIncreasePct = 0.0;
@@ -114,7 +114,9 @@ struct PharmaDecisionReport {
     bool hasToxicThreshold = false;
     float toxicMinDose = 0.0f;
 
+    std::vector<double> overSuppressionDoses;
     std::vector<double> excitatoryRiskDoses;
+    std::vector<double> stabilizationSaturationDoses;
 
     bool hasEffectiveDose = false;
     float effectiveMinDose = 0.0f;

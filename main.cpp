@@ -1786,10 +1786,9 @@ std::string buildDrugEvaluationReportText(
     const auto therapeuticRanges = buildDoseRanges([](double effectPct) {
         return effectPct >= 20.0 && effectPct <= 60.0;
     });
+    const auto overSuppressionRanges = buildRangesFromDoses(report.overSuppressionDoses);
     const auto excitatoryRiskRanges = buildRangesFromDoses(report.excitatoryRiskDoses);
-    const auto overSuppressionRanges = buildDoseRanges([](double effectPct) {
-        return effectPct > 60.0;
-    });
+    const auto stabilizationSaturationRanges = buildRangesFromDoses(report.stabilizationSaturationDoses);
 
     const bool overSuppressionDetected = !overSuppressionRanges.empty();
     const bool fragmentedWindow = therapeuticRanges.size() > 1U;
@@ -1822,6 +1821,7 @@ std::string buildDrugEvaluationReportText(
     const std::string therapeuticZone = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : formatRanges(therapeuticRanges);
     const std::string overSuppressionZone = noResponse ? std::string("Not observed") : formatRanges(overSuppressionRanges);
     const std::string excitatoryRiskZone = excitatoryRiskRanges.empty() ? std::string("Not observed") : formatRanges(excitatoryRiskRanges);
+    const std::string stabilizationSaturationZone = stabilizationSaturationRanges.empty() ? std::string("Not observed") : formatRanges(stabilizationSaturationRanges);
     const std::string onsetDose = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : ("~" + formatRuntimeNumber(therapeuticRanges.front().first));
     const bool peakInToxicRange = toxicityDetected && (features[peakIndex].dose >= report.toxicMinDose);
     const std::string peakEfficiency = noResponse
@@ -1838,10 +1838,14 @@ std::string buildDrugEvaluationReportText(
     const std::string riskLevel = report.riskLevel;
     const std::string reason = report.reason;
     const std::string confidence = report.confidence;
-        const std::string responseMode = report.responseMode;
+    const std::string responseMode = report.responseMode;
 
-    const bool excitatoryMode = (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
-        const bool stabilizationMode = (responseMode == "STABILIZING_RESPONSE") || (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
+    const bool excitatoryMode =
+        (responseMode == "EXCITATORY_RESPONSE") ||
+        (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
+    const bool stabilizationMode =
+        (responseMode == "STABILIZING_RESPONSE") ||
+        (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
     const std::string windowSectionTitle = excitatoryMode
                                                ? std::string("Excitatory Response Range")
                                  : (stabilizationMode ? std::string("Stabilization Response Range")
@@ -1907,10 +1911,10 @@ std::string buildDrugEvaluationReportText(
     out << "[Dose Classification Summary]\n";
     appendLine("Ineffective Zone", ineffectiveZone);
     appendLine(zoneLabel, therapeuticZone);
-    if (excitatoryMode) {
+    if (responseMode == "EXCITATORY_RESPONSE" || excitatoryMode) {
         appendLine("Severe Excitability Zone", excitatoryRiskZone);
-    } else if (stabilizationMode) {
-        appendLine("Saturated Stabilization Zone", overSuppressionZone);
+    } else if (responseMode == "STABILIZING_RESPONSE" || stabilizationMode) {
+        appendLine("Saturated Stabilization Zone", stabilizationSaturationZone);
     } else {
         appendLine("Over-Suppression", overSuppressionZone);
     }

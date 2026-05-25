@@ -479,6 +479,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     std::vector<double> safeDoses;
     std::vector<double> excitatoryRiskDoses;
     std::vector<double> overSuppressionDoses;
+    std::vector<double> stabilizationSaturationDoses;
 
     for (std::size_t i = 0; i < sorted.size(); ++i) {
         const DoseObservation& obs = sorted[i];
@@ -648,6 +649,9 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const bool overSuppressionHere =
             (suppressionEffectPct > 60.0) ||
             (perDoseState == BiologicalState::NeuralSilencing);
+        const bool stabilizationSaturationHere =
+            (perDoseState == BiologicalState::NetworkStabilization) &&
+            (stabilizationEffectPct > 60.0);
 
         if (perDoseState == BiologicalState::NetworkStabilization) {
             sawNetworkStabilization = true;
@@ -665,6 +669,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
         if (overSuppressionHere) {
             overSuppressionDoses.push_back(static_cast<double>(dose));
+        }
+
+        if (stabilizationSaturationHere) {
+            stabilizationSaturationDoses.push_back(static_cast<double>(dose));
         }
 
         if (excitatoryRiskHere || overSuppressionHere) {
@@ -713,6 +721,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     std::sort(therapeuticDoses.begin(), therapeuticDoses.end());
     std::sort(excitatoryRiskDoses.begin(), excitatoryRiskDoses.end());
     std::sort(overSuppressionDoses.begin(), overSuppressionDoses.end());
+    std::sort(stabilizationSaturationDoses.begin(), stabilizationSaturationDoses.end());
 
     safeDoses.erase(
         std::unique(safeDoses.begin(), safeDoses.end(), [](double a, double b) {
@@ -738,13 +747,22 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         }),
         overSuppressionDoses.end()
     );
+    stabilizationSaturationDoses.erase(
+        std::unique(stabilizationSaturationDoses.begin(), stabilizationSaturationDoses.end(), [](double a, double b) {
+            return std::fabs(a - b) <= 1.0e-6;
+        }),
+        stabilizationSaturationDoses.end()
+    );
 
     const auto safeRanges = contiguousRanges(safeDoses, report.stepDose);
     const auto therapeuticRanges = contiguousRanges(therapeuticDoses, report.stepDose);
     const auto excitatoryRiskRanges = contiguousRanges(excitatoryRiskDoses, report.stepDose);
     const auto overSuppressionRanges = contiguousRanges(overSuppressionDoses, report.stepDose);
+    const auto stabilizationSaturationRanges = contiguousRanges(stabilizationSaturationDoses, report.stepDose);
 
+    report.overSuppressionDoses = overSuppressionDoses;
     report.excitatoryRiskDoses = excitatoryRiskDoses;
+    report.stabilizationSaturationDoses = stabilizationSaturationDoses;
 
     if (!safeRanges.empty()) {
         const auto widestSafe = std::max_element(safeRanges.begin(), safeRanges.end(), [](const Range& a, const Range& b) {
@@ -837,7 +855,13 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     const bool toxicInstabilityDetected = (report.biologicalState == BiologicalState::ToxicInstability);
     const bool networkStabilizationObserved = (report.biologicalState == BiologicalState::NetworkStabilization);
     const bool controlledSuppressionObserved = (report.biologicalState == BiologicalState::ControlledSuppression);
-    report.responseMode = stabilizingResponseObserved ? "STABILIZING_RESPONSE" : "STANDARD_RESPONSE";
+    if (stabilizingResponseObserved) {
+        report.responseMode = "STABILIZING_RESPONSE";
+    } else if (hyperexcitabilityDetected || toxicInstabilityDetected || !excitatoryRiskRanges.empty()) {
+        report.responseMode = "EXCITATORY_RESPONSE";
+    } else {
+        report.responseMode = "SUPPRESSIVE_RESPONSE";
+    }
     if (stabilizingResponseObserved) {
         report.curveType = report.sigmoidR2 >= 0.95 ? "Sigmoidal Stabilization" : "Stabilizing Response";
     }
