@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(IST)
 
 
 def generate_run_id() -> str:
-    ts = utc_now().strftime("%Y%m%dT%H%M%SZ")
+    ts = utc_now().strftime("%Y%m%dT%H%M%SIST")
     return f"run_{ts}_{uuid4().hex[:10]}"
 
 

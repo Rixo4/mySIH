@@ -144,7 +144,7 @@ def get_runs(db: Session = Depends(get_db), user=Depends(require_user)) -> RunsL
     if user.role == "admin":
         filtered = rows
     else:
-        filtered = [r for r in rows if r.get("user_id") == user.id or r.get("company_id") == user.company_id]
+        filtered = [r for r in rows if r.get("user_id") == user.id]
     return RunsListResponse(runs=filtered)
 
 
@@ -157,9 +157,8 @@ def get_run_detail(run_id: str, db: Session = Depends(get_db), user=Depends(requ
 
     if detail is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    # enforce company isolation
     if user.role != "admin":
-        if detail.get("company_id") is not None and detail.get("company_id") != user.company_id:
+        if detail.get("user_id") != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
     return RunDetailResponse(**detail)
@@ -176,15 +175,21 @@ def get_run_report(run_id: str, db: Session = Depends(get_db), user=Depends(requ
         raise HTTPException(status_code=404, detail="Run not found")
 
     if user.role != "admin":
-        if record.company_id is not None and record.company_id != user.company_id:
+        if record.user_id != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
     return PlainTextResponse(record.raw_report or "")
 
 
 @app.delete("/api/runs/{run_id}", response_model=DeleteRunResponse)
-def remove_run(run_id: str, db: Session = Depends(get_db)) -> DeleteRunResponse:
+def remove_run(run_id: str, db: Session = Depends(get_db), user=Depends(require_user)) -> DeleteRunResponse:
     try:
+        record = get_run_or_none(db, run_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if user.role != "admin" and record.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
         deleted = delete_run(db, run_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

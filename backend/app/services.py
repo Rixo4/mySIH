@@ -12,6 +12,7 @@ from .config import get_settings
 from .engine_runner import run_engine
 from .models import RunRecord
 from .report_parser import parse_report
+from .visualization import build_visualization_payload
 from .utils import ensure_directory, generate_run_id, loads_or_default, sanitize_run_id, utc_now, write_json_file, write_text_file
 
 
@@ -66,12 +67,14 @@ def _save_run_artifacts(
 
 def _record_to_run_response(record: RunRecord) -> dict[str, Any]:
     parsed_summary = loads_or_default(record.parsed_json, {})
+    visualization_data = parsed_summary.get("visualization_data") if isinstance(parsed_summary, dict) else None
     return {
         "run_id": record.run_id,
         "status": record.status,
         "report_type": record.report_type,
         "engine_input_mode": record.engine_input_mode,
         "parsed_summary": parsed_summary,
+        "visualization_data": visualization_data,
         "raw_report": record.raw_report,
         "duration_seconds": record.duration_seconds,
         "created_at": record.created_at,
@@ -149,6 +152,9 @@ def execute_engine_run(
 
     raw_report = engine_result.stdout or ""
     parsed_summary = parse_report(report_type, raw_report)
+    visualization_data = build_visualization_payload(report_type=report_type, input_payload=safe_input_payload, parsed_summary=parsed_summary)
+    if visualization_data is not None:
+        parsed_summary = {**parsed_summary, "visualization_data": visualization_data}
     recommendation, risk_level, confidence = _extract_decision_fields(parsed_summary)
 
     metadata = _build_run_metadata(
@@ -248,6 +254,9 @@ def get_run_detail_or_none(db: Session, run_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
 
+    parsed_summary = loads_or_default(row.parsed_json, {})
+    visualization_data = parsed_summary.get("visualization_data") if isinstance(parsed_summary, dict) else None
+
     return {
         "run_id": row.run_id,
         "report_type": row.report_type,
@@ -258,7 +267,8 @@ def get_run_detail_or_none(db: Session, run_id: str) -> dict[str, Any] | None:
         "risk_level": row.risk_level,
         "confidence": row.confidence,
         "raw_report": row.raw_report,
-        "parsed_summary": loads_or_default(row.parsed_json, {}),
+        "parsed_summary": parsed_summary,
+        "visualization_data": visualization_data,
         "input_payload": loads_or_default(row.input_json, {}),
         "error_message": row.error_message,
         "duration_seconds": row.duration_seconds,

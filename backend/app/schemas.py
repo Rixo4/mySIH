@@ -60,6 +60,7 @@ class RunResponse(BaseModel):
     report_type: str
     engine_input_mode: str
     parsed_summary: dict[str, Any] | None
+    visualization_data: dict[str, Any] | None = None
     raw_report: str | None
     duration_seconds: float | None
     created_at: datetime
@@ -89,6 +90,7 @@ class RunDetailResponse(BaseModel):
     confidence: str | None
     raw_report: str | None
     parsed_summary: dict[str, Any] | None
+    visualization_data: dict[str, Any] | None = None
     input_payload: dict[str, Any] | None
     error_message: str | None
     duration_seconds: float | None
