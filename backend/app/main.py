@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import uuid
+import logging
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,22 +10,36 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from .auth import require_roles, require_user, router as auth_router
+from .logging import configure_logging
 from .db_migrations import ensure_auth_schema
 from .config import get_settings
 from .database import Base, engine, get_db
+from .database import SessionLocal
+from .models import SimulationJob
+from . import models as _models_registry  # noqa: F401
+from .orchestration import enqueue_scientific_simulation, get_queue_stats, job_owner_matches, serialize_simulation_job
 from .schemas import (
     DeleteRunResponse,
     DoseEvalRequest,
     HealthResponse,
+    QueuedSimulationJobResponse,
+    QueueStatsResponse,
+    ScientificSimulationStatusResponse,
+    ScientificSimulationSubmitResponse,
     RunDetailResponse,
     RunResponse,
     SingleDoseSimulationRequest,
     RunsListResponse,
+    SimulationJobStatusResponse,
 )
-from .services import delete_run, execute_engine_run, get_run_detail_or_none, get_run_or_none, list_runs
+from .services import delete_run, get_run_detail_or_none, get_run_or_none, list_runs
 from .utils import ensure_directory
+from .queue.queues import simulation_queue
+from .jobs.simulation_jobs import run_simulation_job
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+configure_logging(settings.log_level)
 
 app = FastAPI(title=settings.service_name, version="1.0.0")
 
@@ -79,63 +95,136 @@ def on_startup() -> None:
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service=settings.service_name)
 
+@app.get("/api/queue/stats", response_model=QueueStatsResponse)
+def get_queue_stats_endpoint(db: Session = Depends(get_db), user=Depends(require_user)) -> QueueStatsResponse:
+    stats = get_queue_stats(db)
+    return QueueStatsResponse(**stats)
 
-@app.post("/api/simulate", response_model=RunResponse)
-def simulate(payload: SingleDoseSimulationRequest | None = None, db: Session = Depends(get_db), user=Depends(require_roles("admin", "researcher"))) -> RunResponse:
+
+def _submit_scientific_job(
+    *,
+    payload: SingleDoseSimulationRequest | None,
+    user,
+) -> tuple[str, str]:
     input_payload = payload.model_dump() if payload is not None else {"mode": "simulate"}
-    # Per-user rate limiting for simulation runs
-    from .ratelimit import get_rate_limiter
+    with SessionLocal() as orchestration_db:
+        simulation_job = enqueue_scientific_simulation(
+            orchestration_db,
+            payload=input_payload,
+            report_type="simulate",
+            engine_input_mode="default_internal_engine_config",
+            user_id=user.id if user is not None else None,
+            company_id=user.company_id if user is not None else None,
+            drug_name=payload.drug_name if payload is not None else None,
+        )
+    logger.info("simulation_job_enqueued", extra={"simulation_job_id": str(simulation_job.id)})
+    return str(simulation_job.id), simulation_job.status.value
 
-    rl = get_rate_limiter()
-    sim_key = f"sim:user:{user.id}"
-    sim_count = rl.incr_with_expire(sim_key, window=60)
-    if sim_count > int(os.getenv("SIMULATION_RATE_PER_MINUTE", "10")):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    result = execute_engine_run(
-        db=db,
-        report_type="simulate",
-        input_payload=input_payload,
-        drug_name=payload.drug_name if payload is not None else None,
-        engine_input_mode="default_internal_engine_config",
-        user_id=user.id,
-        company_id=user.company_id,
+@app.post("/queue-test")
+def queue_test():
+    """Test endpoint for queue infrastructure validation."""
+    payload = {
+        "drug": "test_drug",
+        "timestamp": "2026-05-26T00:00:00Z"
+    }
+
+    job = simulation_queue.enqueue(
+        run_simulation_job,
+        payload
     )
-    return RunResponse(**result)
+
+    return {
+        "job_id": job.id,
+        "status": "QUEUED"
+    }
 
 
-@app.post("/api/dose-eval", response_model=RunResponse)
-def dose_eval(payload: DoseEvalRequest, db: Session = Depends(get_db), user=Depends(require_roles("admin", "researcher"))) -> RunResponse:
-    result = execute_engine_run(
-        db=db,
+@app.post("/simulate")
+def simulate_background_job(payload: SingleDoseSimulationRequest | None = None, user=Depends(require_roles("admin", "researcher"))) -> ScientificSimulationSubmitResponse:
+    job_id, _ = _submit_scientific_job(payload=payload, user=user)
+    return ScientificSimulationSubmitResponse(job_id=job_id, status="QUEUED")
+
+
+@app.post("/api/simulate/async")
+def simulate_async(payload: SingleDoseSimulationRequest | None = None, user=Depends(require_roles("admin", "researcher"))) -> QueuedSimulationJobResponse:
+    simulation_job_id, job_status = _submit_scientific_job(payload=payload, user=user)
+    return QueuedSimulationJobResponse(job_id=simulation_job_id, status=job_status, queue_name=simulation_queue.name)
+
+
+@app.post("/api/simulate/sync", response_model=ScientificSimulationSubmitResponse)
+def simulate_sync(payload: SingleDoseSimulationRequest | None = None, user=Depends(require_roles("admin", "researcher"))) -> ScientificSimulationSubmitResponse:
+    job_id, _ = _submit_scientific_job(payload=payload, user=user)
+    return ScientificSimulationSubmitResponse(job_id=job_id, status="QUEUED")
+
+
+@app.get("/api/jobs/{job_id}", response_model=ScientificSimulationStatusResponse)
+def get_job_status_rq(job_id: str, db: Session = Depends(get_db), user=Depends(require_user)) -> ScientificSimulationStatusResponse:
+    return get_scientific_job_status(job_id=job_id, db=db, user=user)
+
+
+@app.get("/jobs/{job_id}", response_model=ScientificSimulationStatusResponse)
+def get_scientific_job_status(job_id: str, db: Session = Depends(get_db), user=Depends(require_user)) -> ScientificSimulationStatusResponse:
+    try:
+        parsed_id = uuid.UUID(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid job id") from exc
+
+    job = db.get(SimulationJob, parsed_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job_owner_matches(job, user_id=user.id, company_id=user.company_id, user_role=user.role):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    payload = serialize_simulation_job(job)
+    return ScientificSimulationStatusResponse(
+        job_id=payload["job_id"],
+        status=payload["status"],
+        progress=payload["progress"],
+        created_at=payload["created_at"],
+        started_at=payload["started_at"],
+        completed_at=payload["completed_at"],
+        result_run_id=payload.get("result_run_id"),
+        error_message=payload.get("error_message"),
+        runtime_seconds=payload.get("runtime_seconds"),
+        queue_latency_seconds=payload.get("queue_latency_seconds"),
+    )
+
+
+@app.post("/api/dose-eval", response_model=ScientificSimulationSubmitResponse)
+def dose_eval(payload: DoseEvalRequest, db: Session = Depends(get_db), user=Depends(require_roles("admin", "researcher"))) -> ScientificSimulationSubmitResponse:
+    simulation_job = enqueue_scientific_simulation(
+        db,
+        payload=payload.model_dump(by_alias=True),
         report_type="dose-eval",
-        input_payload=payload.model_dump(by_alias=True),
-        drug_name=payload.drug_name,
-        runs_override=payload.runs,
         engine_input_mode="user_config",
         user_id=user.id,
         company_id=user.company_id,
+        drug_name=payload.drug_name,
+        runs_override=payload.runs,
     )
-    return RunResponse(**result)
+    return ScientificSimulationSubmitResponse(job_id=str(simulation_job.id), status="QUEUED")
 
 
 # Internal developer-only endpoint: run the Internal Biological Benchmark Suite.
 # This route is intentionally placed under /api/internal to avoid exposure as a
 # public workflow. Use only in developer or research environments.
-@app.post("/api/internal/validate", response_model=RunResponse)
-def internal_validate(db: Session = Depends(get_db)) -> RunResponse:
+@app.post("/api/internal/validate", response_model=ScientificSimulationSubmitResponse)
+def internal_validate(db: Session = Depends(get_db)) -> ScientificSimulationSubmitResponse:
     # Only allow this developer endpoint when SPP_DEVELOPER_MODE=1 is set
     if os.getenv("SPP_DEVELOPER_MODE", "0") != "1":
         raise HTTPException(status_code=404, detail="Not found")
 
-    result = execute_engine_run(
-        db=db,
-        report_type="internal-benchmark",
-        input_payload={"mode": "internal-benchmark"},
-        drug_name=None,
+    simulation_job = enqueue_scientific_simulation(
+        db,
+        payload={"mode": "internal-benchmark"},
+        report_type="validate",
         engine_input_mode="default_internal_engine_config",
+        user_id=None,
+        company_id=None,
     )
-    return RunResponse(**result)
+    return ScientificSimulationSubmitResponse(job_id=str(simulation_job.id), status="QUEUED")
 
 
 @app.get("/api/runs", response_model=RunsListResponse)

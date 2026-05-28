@@ -1,8 +1,19 @@
-import React, { createContext, useContext, useState, type ReactNode } from 'react';
-import { api, resendVerificationCode, setAccessToken as setApiAccessToken, verifyEmail } from '../api/client';
+import React, { createContext, useEffect, useContext, useState, type ReactNode } from 'react';
+import axios from 'axios';
+import { api, getMe, resendVerificationCode, setAccessToken as setApiAccessToken, setUnauthorizedHandler, verifyEmail, tryRefresh } from '../api/client';
+
+export type AuthUser = {
+  id: number;
+  full_name: string;
+  email: string;
+  role: string;
+  company_id: number | null;
+  company_name: string | null;
+};
 
 type AuthContextValue = {
   accessToken: string | null;
+  user: AuthUser | null;
   setAccessToken: (token: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
   signup: (full_name: string, email: string, password: string, company_name?: string) => Promise<{ detail: string; otp?: string; email?: string }>;
@@ -14,6 +25,16 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const ACCESS_TOKEN_STORAGE_KEY = 'spp.accessToken';
+const USER_STORAGE_KEY = 'spp.userProfile';
+
+function readStoredUser() {
+  try {
+    const raw = window.localStorage.getItem(USER_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as AuthUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 function readStoredAccessToken() {
   try {
@@ -37,6 +58,19 @@ function updateAccessToken(token: string | null, setAccessTokenState: (value: st
   }
 }
 
+function updateStoredUser(user: AuthUser | null, setUserState: (value: AuthUser | null) => void) {
+  setUserState(user);
+  try {
+    if (user) {
+      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures and keep the in-memory profile in sync.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessTokenState] = useState<string | null>(() => {
     const token = readStoredAccessToken();
@@ -45,11 +79,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return token;
   });
+  const [user, setUserState] = useState<AuthUser | null>(() => readStoredUser());
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      updateStoredUser(null, setUserState);
+      updateAccessToken(null, setAccessTokenState);
+    });
+
+    return () => {
+      setUnauthorizedHandler(null);
+    };
+  }, []);
+
+  // Attempt to restore session from refresh cookie on mount if we don't have an access token.
+  useEffect(() => {
+    let active = true;
+    if (!accessToken) {
+      (async () => {
+        try {
+          const token = await tryRefresh();
+          if (active && token) {
+            updateAccessToken(token, setAccessTokenState);
+            try {
+              const profile = await getMe();
+              updateStoredUser(profile, setUserState);
+            } catch {
+              // ignore profile load failures; effect will retry
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accessToken) {
+      updateStoredUser(null, setUserState);
+      return;
+    }
+
+    let active = true;
+
+    async function loadUser() {
+      try {
+        const profile = await getMe();
+        if (active) {
+          updateStoredUser(profile, setUserState);
+        }
+      } catch (err) {
+        if (active) {
+          if (axios.isAxiosError(err) && err.response?.status === 401) {
+            updateStoredUser(null, setUserState);
+            updateAccessToken(null, setAccessTokenState);
+            return;
+          }
+          if (!user) {
+            updateStoredUser(null, setUserState);
+          }
+        }
+      }
+    }
+
+    loadUser();
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken]);
 
   async function login(email: string, password: string) {
     const res = await api.post('/auth/login', { email, password });
     const token = res.data?.access_token || res.data?.accessToken || null;
     updateAccessToken(token, setAccessTokenState);
+    if (token) {
+      try {
+        const profile = await getMe();
+        updateStoredUser(profile, setUserState);
+      } catch {
+        // Keep the token even if profile hydration fails; the effect will retry.
+      }
+    }
   }
 
   async function signup(full_name: string, email: string, password: string, company_name?: string) {
@@ -66,12 +181,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    await api.post('/auth/logout');
-    updateAccessToken(null, setAccessTokenState);
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      updateStoredUser(null, setUserState);
+      updateAccessToken(null, setAccessTokenState);
+    }
   }
 
   const value: AuthContextValue = {
     accessToken,
+    user,
     setAccessToken: (token) => updateAccessToken(token, setAccessTokenState),
     login,
     signup,

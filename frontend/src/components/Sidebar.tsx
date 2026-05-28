@@ -1,5 +1,6 @@
 import { Activity, Beaker, FlaskConical, LayoutDashboard, History } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -9,6 +10,9 @@ const navItems = [
 ];
 
 export function Sidebar() {
+  const { user } = useAuth();
+  const userLabel = user?.full_name?.trim() || user?.email?.split('@')[0] || 'Signed in user';
+
   return (
     <aside className="flex h-full w-full flex-col border-r border-white/10 bg-[rgba(4,10,22,0.94)] backdrop-blur-xl xl:w-72">
       <div className="border-b border-white/10 px-5 py-6 xl:px-6">
@@ -18,7 +22,7 @@ export function Sidebar() {
           </div>
           <div>
             <p className="text-sm font-semibold text-white">Silicon Patient</p>
-            <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Pharma AI Console</p>
+            <p className="text-xs uppercase tracking-[0.32em] text-slate-400">{userLabel}</p>
           </div>
         </div>
       </div>

@@ -29,6 +29,8 @@ build-validate/
 # Logs and generated artifacts
 *.log
 *.db
+.env
+backend/.env
 .nojekyll
 DEPLOYMENT.md
 vercel.json

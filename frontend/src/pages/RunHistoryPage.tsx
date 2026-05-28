@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import type { RunListItem } from '../types';
 
 export function RunHistoryPage() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +84,8 @@ export function RunHistoryPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.32em] text-cyan-300/70">Run History</p>
-            <h2 className="mt-2 text-3xl font-semibold text-white">Audit-ready run ledger</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">Filter engine runs by type, risk, and recommendation. Open any row to inspect the full report and metadata.</p>
+            <h2 className="mt-2 text-3xl font-semibold text-white">{user?.full_name ? `${user.full_name}'s run ledger` : 'Audit-ready run ledger'}</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">Your history stays isolated to your account. Filter engine runs by type, risk, and recommendation, then open any row to inspect the full report and metadata.</p>
           </div>
           <StatusBadge label="Runs" value={`${runs.length} Stored`} />
         </div>

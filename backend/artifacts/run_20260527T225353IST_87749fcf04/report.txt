@@ -1,0 +1,72 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-NA-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 0.10
+K IC50              : 999.99
+Ca IC50             : 1000.00
+Hill                : 3.20
+Runs                : 2.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 20.00
+Step Size            : 2.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Sigmoidal
+Response Mode        : SUPPRESSIVE_RESPONSE
+Model Fit (R^2)      : 1.00
+Max Effect           : 100 %
+Response Strength    : Strong
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : 2.00
+Safety Observation   : Toxicity observed within tested range
+
+--------------------------------------------------
+
+[Therapeutic Window]
+Effective Range      : Not observed
+Window Quality       : Not observed
+Optimal Zone         : Moderate, controlled suppression (20-60%)
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 0.00
+Therapeutic Zone     : Not observed
+Over-Suppression     : 2.00 - 20.00
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : Not observed
+Peak Efficiency      : ~4.00 (within toxic range)
+Saturation Trend     : Observed beyond 4.00
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 2
+Rate Variability     : 3.12
+Toxicity Variance    : 28.51
+Stability Score      : LOW
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : NOT RECOMMENDED
+Risk Level           : HIGH
+Reason               : Strong sodium-channel block caused neural silencing
+Confidence           : LOW
+
+==================================================

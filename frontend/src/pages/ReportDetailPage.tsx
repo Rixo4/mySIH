@@ -105,12 +105,14 @@ export function ReportDetailPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            {Object.entries(detail.parsed_summary ?? {}).map(([key, value]) => (
-              <div key={key} className="glass-card p-5">
-                <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/70">{humanizeLabel(key)}</p>
-                <p className="mt-2 text-xl font-semibold text-white">{typeof value === 'string' ? value : JSON.stringify(value)}</p>
-              </div>
-            ))}
+            {Object.entries(detail.parsed_summary ?? {})
+              .filter(([key]) => key !== 'visualization_data' && key !== 'visualizationData')
+              .map(([key, value]) => (
+                <div key={key} className="glass-card p-5">
+                  <p className="text-xs uppercase tracking-[0.28em] text-cyan-300/70">{humanizeLabel(key)}</p>
+                  <p className="mt-2 text-xl font-semibold text-white">{typeof value === 'string' ? value : JSON.stringify(value)}</p>
+                </div>
+              ))}
           </div>
 
           {report ? <ReportViewer title={`${humanizeLabel(detail.report_type)} Report`} report={report} /> : null}

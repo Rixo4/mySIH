@@ -1,12 +1,9 @@
-import { motion } from 'framer-motion';
 import type { ChangeEvent, FormEvent } from 'react';
-import type { ChannelInput, DrugEvalRequest, EngineMode } from '../types';
+import type { ChannelInput, DrugEvalRequest } from '../types';
 
 interface DrugInputFormProps {
   value: DrugEvalRequest;
-  engineMode: EngineMode;
   loading?: boolean;
-  onModeChange: (mode: EngineMode) => void;
   onChange: (next: DrugEvalRequest) => void;
   onSubmit: (payload: DrugEvalRequest) => void;
   error?: string | null;
@@ -25,7 +22,7 @@ function updateChannel(value: DrugEvalRequest, channel: 'Na' | 'K' | 'Ca', key: 
   };
 }
 
-export function DrugInputForm({ value, engineMode, loading = false, onModeChange, onChange, onSubmit, error }: DrugInputFormProps) {
+export function DrugInputForm({ value, loading = false, onChange, onSubmit, error }: DrugInputFormProps) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onSubmit(value);
@@ -146,7 +143,7 @@ export function DrugInputForm({ value, engineMode, loading = false, onModeChange
 
       <section className="glass-card p-6">
         <h3 className="text-lg font-semibold text-white">Execution Settings</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="mt-4 grid gap-4">
           <label className="space-y-2 text-sm">
             <span className="text-slate-300">Number of Runs</span>
             <input
@@ -159,26 +156,6 @@ export function DrugInputForm({ value, engineMode, loading = false, onModeChange
               className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/10"
             />
           </label>
-          <div className="space-y-2 text-sm">
-            <span className="text-slate-300">Mode</span>
-            <div className="grid grid-cols-2 gap-3">
-              {(['fast', 'accurate'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onModeChange(mode)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
-                    engineMode === mode
-                      ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-100'
-                      : 'border-white/10 bg-slate-950/60 text-slate-300 hover:border-cyan-400/20 hover:bg-white/5'
-                  }`}
-                >
-                  <p className="font-medium capitalize">{mode}</p>
-                  <p className="mt-1 text-xs text-slate-400">{mode === 'fast' ? 'Shorter batch for demos' : 'Higher confidence batch'}</p>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 

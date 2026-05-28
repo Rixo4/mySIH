@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: silicon_patient
+      POSTGRES_USER: silicon_patient
+      POSTGRES_PASSWORD: silicon_patient
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U silicon_patient -d silicon_patient"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://silicon_patient:silicon_patient@postgres:5432/silicon_patient
+      REDIS_URL: redis://redis:6379/0
+      ENGINE_PATH: /app/build-validate/silicon_patient
+      LOG_LEVEL: INFO
+      MAX_CONCURRENT_SIMULATIONS: 2
+      SIMULATION_TIMEOUT_SECONDS: 3600
+      ALLOWED_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/libcudart.so.12:/lib/x86_64-linux-gnu/libcudart.so.12:ro
+      - ./backend/runs:/app/backend/runs
+      - ./backend/reports:/app/backend/reports
+      - ./backend/artifacts:/app/backend/artifacts
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://silicon_patient:silicon_patient@postgres:5432/silicon_patient
+      REDIS_URL: redis://redis:6379/0
+      ENGINE_PATH: /app/build-validate/silicon_patient
+      LOG_LEVEL: INFO
+      MAX_CONCURRENT_SIMULATIONS: 2
+      SIMULATION_TIMEOUT_SECONDS: 3600
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/libcudart.so.12:/lib/x86_64-linux-gnu/libcudart.so.12:ro
+      - ./backend/runs:/app/backend/runs
+      - ./backend/reports:/app/backend/reports
+      - ./backend/artifacts:/app/backend/artifacts
+
+volumes:
+  postgres_data:

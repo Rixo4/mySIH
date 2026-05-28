@@ -1,0 +1,1715 @@
+{
+  "burst_reduction_pct": null,
+  "ca_ic50": 1000.0,
+  "calcium_effect_magnitude": null,
+  "confidence": "MEDIUM",
+  "curve_type": "Flat / Non-responsive",
+  "drug_name": "Test-Na-Blocker",
+  "effective_range": "Not observed",
+  "engine_input_mode": "User Drug Config",
+  "hill": 2.48,
+  "k_ic50": 999.99,
+  "max_effect": 14.0,
+  "model_fit_r2": null,
+  "na_ic50": 1000.0,
+  "nii_increase_pct": null,
+  "nii_reduction_pct": null,
+  "reason": "No significant neural response observed within tested dose range",
+  "recommendation": "LIMITED EFFICACY",
+  "response_mode": "SUPPRESSIVE_RESPONSE",
+  "response_strength": "None",
+  "risk_level": "LOW",
+  "runs": 5.0,
+  "seizure_reduction_pct": null,
+  "stability_score": "MEDIUM",
+  "stabilization_range": null,
+  "sync_reduction_pct": null,
+  "toxic_threshold": ">20.00 (Not observed)",
+  "visualization_data": {
+    "classification_timeline": [
+      {
+        "color": "#475569",
+        "from": 0.0,
+        "label": "Ineffective Zone",
+        "state": "INEFFECTIVE_ZONE",
+        "to": 5.0
+      },
+      {
+        "color": "#10b981",
+        "from": 5.0,
+        "label": "Therapeutic Zone",
+        "state": "THERAPEUTIC_ZONE",
+        "to": 12.0
+      },
+      {
+        "color": "#f59e0b",
+        "from": 12.0,
+        "label": "Excitatory Zone",
+        "state": "EXCITATORY_ZONE",
+        "to": 17.0
+      },
+      {
+        "color": "#06b6d4",
+        "from": 5.0,
+        "label": "Stabilization Zone",
+        "state": "STABILIZATION_ZONE",
+        "to": 12.0
+      },
+      {
+        "color": "#6366f1",
+        "from": 17.0,
+        "label": "Over-Suppression Zone",
+        "state": "OVER_SUPPRESSION_ZONE",
+        "to": 19.549999999999997
+      },
+      {
+        "color": "#ef4444",
+        "from": 19.549999999999997,
+        "label": "Severe Excitability Zone",
+        "state": "SEVERE_EXCITABILITY_ZONE",
+        "to": 20.0
+      }
+    ],
+    "dose_results": [
+      {
+        "biological_state": "INEFFECTIVE_ZONE",
+        "dose": 0.0,
+        "effect": 77.5,
+        "firing_rate": 20.0,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.14,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 4.5,
+        "sync": 0.26,
+        "toxicity_score": 2.0,
+        "variance": 0.95
+      },
+      {
+        "biological_state": "INEFFECTIVE_ZONE",
+        "dose": 2.0,
+        "effect": 76.6,
+        "firing_rate": 17.8,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.12,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 4.14,
+        "sync": 0.236,
+        "toxicity_score": 2.0,
+        "variance": 0.897
+      },
+      {
+        "biological_state": "INEFFECTIVE_ZONE",
+        "dose": 4.0,
+        "effect": 74.3,
+        "firing_rate": 15.6,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.1,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 3.78,
+        "sync": 0.212,
+        "toxicity_score": 2.0,
+        "variance": 0.844
+      },
+      {
+        "biological_state": "THERAPEUTIC_ZONE",
+        "dose": 6.0,
+        "effect": 68.7,
+        "firing_rate": 13.4,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.08,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 3.42,
+        "sync": 0.188,
+        "toxicity_score": 2.0,
+        "variance": 0.791
+      },
+      {
+        "biological_state": "THERAPEUTIC_ZONE",
+        "dose": 8.0,
+        "effect": 57.0,
+        "firing_rate": 11.2,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.06,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 3.06,
+        "sync": 0.164,
+        "toxicity_score": 2.0,
+        "variance": 0.738
+      },
+      {
+        "biological_state": "THERAPEUTIC_ZONE",
+        "dose": 10.0,
+        "effect": 39.0,
+        "firing_rate": 9.0,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.04,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 2.7,
+        "sync": 0.14,
+        "toxicity_score": 2.0,
+        "variance": 0.685
+      },
+      {
+        "biological_state": "THERAPEUTIC_ZONE",
+        "dose": 12.0,
+        "effect": 21.0,
+        "firing_rate": 6.8,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.02,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 2.34,
+        "sync": 0.116,
+        "toxicity_score": 2.0,
+        "variance": 0.632
+      },
+      {
+        "biological_state": "LIMITED_EFFECT",
+        "dose": 14.0,
+        "effect": 9.3,
+        "firing_rate": 4.6,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.02,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 1.98,
+        "sync": 0.092,
+        "toxicity_score": 2.0,
+        "variance": 0.579
+      },
+      {
+        "biological_state": "LIMITED_EFFECT",
+        "dose": 16.0,
+        "effect": 3.7,
+        "firing_rate": 4.0,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.02,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 1.62,
+        "sync": 0.068,
+        "toxicity_score": 2.0,
+        "variance": 0.526
+      },
+      {
+        "biological_state": "OVER_SUPPRESSION_ZONE",
+        "dose": 18.0,
+        "effect": 1.4,
+        "firing_rate": 4.0,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.02,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 1.14,
+        "sync": 0.044,
+        "toxicity_score": 4.8,
+        "variance": 0.474
+      },
+      {
+        "biological_state": "OVER_SUPPRESSION_ZONE",
+        "dose": 20.0,
+        "effect": 0.5,
+        "firing_rate": 4.0,
+        "ic50_ca": 1000.0,
+        "ic50_k": 999.99,
+        "ic50_na": 1000.0,
+        "nii": 0.02,
+        "response_mode": "SUPPRESSIVE_RESPONSE",
+        "seizure_score": 0.8,
+        "sync": 0.03,
+        "toxicity_score": 10.4,
+        "variance": 0.421
+      }
+    ],
+    "raster_spikes": [
+      {
+        "neuron_id": 1,
+        "spike_time": 1.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 19.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 37.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 55.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 73.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 91.7
+      },
+      {
+        "neuron_id": 1,
+        "spike_time": 109.7
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 3.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 21.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 39.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 57.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 75.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 93.4
+      },
+      {
+        "neuron_id": 2,
+        "spike_time": 111.4
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 5.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 23.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 41.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 59.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 77.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 95.1
+      },
+      {
+        "neuron_id": 3,
+        "spike_time": 113.1
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 6.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 24.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 42.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 60.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 78.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 96.8
+      },
+      {
+        "neuron_id": 4,
+        "spike_time": 114.8
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 8.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 26.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 44.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 62.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 80.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 98.5
+      },
+      {
+        "neuron_id": 5,
+        "spike_time": 116.5
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 10.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 28.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 46.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 64.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 82.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 100.2
+      },
+      {
+        "neuron_id": 6,
+        "spike_time": 118.2
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 11.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 29.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 47.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 65.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 83.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 101.9
+      },
+      {
+        "neuron_id": 7,
+        "spike_time": 119.9
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 13.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 31.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 49.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 67.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 85.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 103.6
+      },
+      {
+        "neuron_id": 8,
+        "spike_time": 121.6
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 15.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 33.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 51.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 69.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 87.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 105.3
+      },
+      {
+        "neuron_id": 9,
+        "spike_time": 123.3
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 17.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 35.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 53.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 71.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 89.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 107.0
+      },
+      {
+        "neuron_id": 10,
+        "spike_time": 125.0
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 0.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 18.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 36.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 54.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 72.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 90.7
+      },
+      {
+        "neuron_id": 11,
+        "spike_time": 108.7
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 2.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 20.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 38.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 56.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 74.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 92.4
+      },
+      {
+        "neuron_id": 12,
+        "spike_time": 110.4
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 4.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 22.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 40.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 58.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 76.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 94.1
+      },
+      {
+        "neuron_id": 13,
+        "spike_time": 112.1
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 5.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 23.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 41.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 59.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 77.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 95.8
+      },
+      {
+        "neuron_id": 14,
+        "spike_time": 113.8
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 7.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 25.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 43.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 61.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 79.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 97.5
+      },
+      {
+        "neuron_id": 15,
+        "spike_time": 115.5
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 9.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 27.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 45.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 63.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 81.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 99.2
+      },
+      {
+        "neuron_id": 16,
+        "spike_time": 117.2
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 10.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 28.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 46.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 64.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 82.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 100.9
+      },
+      {
+        "neuron_id": 17,
+        "spike_time": 118.9
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 12.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 30.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 48.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 66.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 84.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 102.6
+      },
+      {
+        "neuron_id": 18,
+        "spike_time": 120.6
+      }
+    ],
+    "reference_points": {
+      "ic50": 1000.0,
+      "therapeutic_max": 12.0,
+      "therapeutic_min": 5.0,
+      "toxic_threshold": 17.0
+    },
+    "voltage_trace": [
+      {
+        "time": 0.0,
+        "voltage": -68.0
+      },
+      {
+        "time": 0.75,
+        "voltage": -66.43
+      },
+      {
+        "time": 1.5,
+        "voltage": -64.86
+      },
+      {
+        "time": 2.25,
+        "voltage": -63.3
+      },
+      {
+        "time": 3.0,
+        "voltage": -61.73
+      },
+      {
+        "time": 3.75,
+        "voltage": -60.16
+      },
+      {
+        "time": 4.5,
+        "voltage": -58.59
+      },
+      {
+        "time": 5.25,
+        "voltage": -57.02
+      },
+      {
+        "time": 6.0,
+        "voltage": -55.46
+      },
+      {
+        "time": 6.75,
+        "voltage": -53.89
+      },
+      {
+        "time": 7.5,
+        "voltage": -52.32
+      },
+      {
+        "time": 8.25,
+        "voltage": -50.75
+      },
+      {
+        "time": 9.0,
+        "voltage": -49.18
+      },
+      {
+        "time": 9.75,
+        "voltage": -47.62
+      },
+      {
+        "time": 10.5,
+        "voltage": -46.05
+      },
+      {
+        "time": 11.25,
+        "voltage": -44.48
+      },
+      {
+        "time": 12.0,
+        "voltage": -42.91
+      },
+      {
+        "time": 12.75,
+        "voltage": -41.34
+      },
+      {
+        "time": 13.5,
+        "voltage": -39.78
+      },
+      {
+        "time": 14.25,
+        "voltage": -38.21
+      },
+      {
+        "time": 15.0,
+        "voltage": -36.64
+      },
+      {
+        "time": 15.75,
+        "voltage": -35.07
+      },
+      {
+        "time": 16.5,
+        "voltage": -33.5
+      },
+      {
+        "time": 17.25,
+        "voltage": -31.94
+      },
+      {
+        "time": 18.0,
+        "voltage": -30.37
+      },
+      {
+        "time": 18.75,
+        "voltage": -28.8
+      },
+      {
+        "time": 19.5,
+        "voltage": -27.23
+      },
+      {
+        "time": 20.25,
+        "voltage": -25.66
+      },
+      {
+        "time": 21.0,
+        "voltage": -27.23
+      },
+      {
+        "time": 21.75,
+        "voltage": -28.8
+      },
+      {
+        "time": 22.5,
+        "voltage": -30.37
+      },
+      {
+        "time": 23.25,
+        "voltage": -31.94
+      },
+      {
+        "time": 24.0,
+        "voltage": -33.5
+      },
+      {
+        "time": 24.75,
+        "voltage": -35.07
+      },
+      {
+        "time": 25.5,
+        "voltage": -36.64
+      },
+      {
+        "time": 26.25,
+        "voltage": -38.21
+      },
+      {
+        "time": 27.0,
+        "voltage": -39.78
+      },
+      {
+        "time": 27.75,
+        "voltage": -41.34
+      },
+      {
+        "time": 28.5,
+        "voltage": -42.91
+      },
+      {
+        "time": 29.25,
+        "voltage": -44.48
+      },
+      {
+        "time": 30.0,
+        "voltage": -46.05
+      },
+      {
+        "time": 30.75,
+        "voltage": -47.62
+      },
+      {
+        "time": 31.5,
+        "voltage": -49.18
+      },
+      {
+        "time": 32.25,
+        "voltage": -50.75
+      },
+      {
+        "time": 33.0,
+        "voltage": -52.32
+      },
+      {
+        "time": 33.75,
+        "voltage": -53.89
+      },
+      {
+        "time": 34.5,
+        "voltage": -55.46
+      },
+      {
+        "time": 35.25,
+        "voltage": -57.02
+      },
+      {
+        "time": 36.0,
+        "voltage": -58.59
+      },
+      {
+        "time": 36.75,
+        "voltage": -60.16
+      },
+      {
+        "time": 37.5,
+        "voltage": -61.73
+      },
+      {
+        "time": 38.25,
+        "voltage": -63.3
+      },
+      {
+        "time": 39.0,
+        "voltage": -64.86
+      },
+      {
+        "time": 39.75,
+        "voltage": -66.43
+      },
+      {
+        "time": 40.5,
+        "voltage": -68.0
+      },
+      {
+        "time": 41.25,
+        "voltage": -66.43
+      },
+      {
+        "time": 42.0,
+        "voltage": -64.86
+      },
+      {
+        "time": 42.75,
+        "voltage": -63.3
+      },
+      {
+        "time": 43.5,
+        "voltage": -61.73
+      },
+      {
+        "time": 44.25,
+        "voltage": -60.16
+      },
+      {
+        "time": 45.0,
+        "voltage": -58.59
+      },
+      {
+        "time": 45.75,
+        "voltage": -57.02
+      },
+      {
+        "time": 46.5,
+        "voltage": -55.46
+      },
+      {
+        "time": 47.25,
+        "voltage": -53.89
+      },
+      {
+        "time": 48.0,
+        "voltage": -52.32
+      },
+      {
+        "time": 48.75,
+        "voltage": -50.75
+      },
+      {
+        "time": 49.5,
+        "voltage": -49.18
+      },
+      {
+        "time": 50.25,
+        "voltage": -47.62
+      },
+      {
+        "time": 51.0,
+        "voltage": -46.05
+      },
+      {
+        "time": 51.75,
+        "voltage": -44.48
+      },
+      {
+        "time": 52.5,
+        "voltage": -42.91
+      },
+      {
+        "time": 53.25,
+        "voltage": -41.34
+      },
+      {
+        "time": 54.0,
+        "voltage": -39.78
+      },
+      {
+        "time": 54.75,
+        "voltage": -38.21
+      },
+      {
+        "time": 55.5,
+        "voltage": -36.64
+      },
+      {
+        "time": 56.25,
+        "voltage": -35.07
+      },
+      {
+        "time": 57.0,
+        "voltage": -33.5
+      },
+      {
+        "time": 57.75,
+        "voltage": -31.94
+      },
+      {
+        "time": 58.5,
+        "voltage": -30.37
+      },
+      {
+        "time": 59.25,
+        "voltage": -28.8
+      },
+      {
+        "time": 60.0,
+        "voltage": -27.23
+      },
+      {
+        "time": 60.75,
+        "voltage": -25.66
+      },
+      {
+        "time": 61.5,
+        "voltage": -27.23
+      },
+      {
+        "time": 62.25,
+        "voltage": -28.8
+      },
+      {
+        "time": 63.0,
+        "voltage": -30.37
+      },
+      {
+        "time": 63.75,
+        "voltage": -31.94
+      },
+      {
+        "time": 64.5,
+        "voltage": -33.5
+      },
+      {
+        "time": 65.25,
+        "voltage": -35.07
+      },
+      {
+        "time": 66.0,
+        "voltage": -36.64
+      },
+      {
+        "time": 66.75,
+        "voltage": -38.21
+      },
+      {
+        "time": 67.5,
+        "voltage": -39.78
+      },
+      {
+        "time": 68.25,
+        "voltage": -41.34
+      },
+      {
+        "time": 69.0,
+        "voltage": -42.91
+      },
+      {
+        "time": 69.75,
+        "voltage": -44.48
+      },
+      {
+        "time": 70.5,
+        "voltage": -46.05
+      },
+      {
+        "time": 71.25,
+        "voltage": -47.62
+      },
+      {
+        "time": 72.0,
+        "voltage": -49.18
+      },
+      {
+        "time": 72.75,
+        "voltage": -50.75
+      },
+      {
+        "time": 73.5,
+        "voltage": -52.32
+      },
+      {
+        "time": 74.25,
+        "voltage": -53.89
+      },
+      {
+        "time": 75.0,
+        "voltage": -55.46
+      },
+      {
+        "time": 75.75,
+        "voltage": -57.02
+      },
+      {
+        "time": 76.5,
+        "voltage": -58.59
+      },
+      {
+        "time": 77.25,
+        "voltage": -60.16
+      },
+      {
+        "time": 78.0,
+        "voltage": -61.73
+      },
+      {
+        "time": 78.75,
+        "voltage": -63.3
+      },
+      {
+        "time": 79.5,
+        "voltage": -64.86
+      },
+      {
+        "time": 80.25,
+        "voltage": -66.43
+      },
+      {
+        "time": 81.0,
+        "voltage": -68.0
+      },
+      {
+        "time": 81.75,
+        "voltage": -66.43
+      },
+      {
+        "time": 82.5,
+        "voltage": -64.86
+      },
+      {
+        "time": 83.25,
+        "voltage": -63.3
+      },
+      {
+        "time": 84.0,
+        "voltage": -61.73
+      },
+      {
+        "time": 84.75,
+        "voltage": -60.16
+      },
+      {
+        "time": 85.5,
+        "voltage": -58.59
+      },
+      {
+        "time": 86.25,
+        "voltage": -57.02
+      },
+      {
+        "time": 87.0,
+        "voltage": -55.46
+      },
+      {
+        "time": 87.75,
+        "voltage": -53.89
+      },
+      {
+        "time": 88.5,
+        "voltage": -52.32
+      },
+      {
+        "time": 89.25,
+        "voltage": -50.75
+      },
+      {
+        "time": 90.0,
+        "voltage": -49.18
+      },
+      {
+        "time": 90.75,
+        "voltage": -47.62
+      },
+      {
+        "time": 91.5,
+        "voltage": -46.05
+      },
+      {
+        "time": 92.25,
+        "voltage": -44.48
+      },
+      {
+        "time": 93.0,
+        "voltage": -42.91
+      },
+      {
+        "time": 93.75,
+        "voltage": -41.34
+      },
+      {
+        "time": 94.5,
+        "voltage": -39.78
+      },
+      {
+        "time": 95.25,
+        "voltage": -38.21
+      },
+      {
+        "time": 96.0,
+        "voltage": -36.64
+      },
+      {
+        "time": 96.75,
+        "voltage": -35.07
+      },
+      {
+        "time": 97.5,
+        "voltage": -33.5
+      },
+      {
+        "time": 98.25,
+        "voltage": -31.94
+      },
+      {
+        "time": 99.0,
+        "voltage": -30.37
+      },
+      {
+        "time": 99.75,
+        "voltage": -28.8
+      },
+      {
+        "time": 100.5,
+        "voltage": -27.23
+      },
+      {
+        "time": 101.25,
+        "voltage": -25.66
+      },
+      {
+        "time": 102.0,
+        "voltage": -27.23
+      },
+      {
+        "time": 102.75,
+        "voltage": -28.8
+      },
+      {
+        "time": 103.5,
+        "voltage": -30.37
+      },
+      {
+        "time": 104.25,
+        "voltage": -31.94
+      },
+      {
+        "time": 105.0,
+        "voltage": -33.5
+      },
+      {
+        "time": 105.75,
+        "voltage": -35.07
+      },
+      {
+        "time": 106.5,
+        "voltage": -36.64
+      },
+      {
+        "time": 107.25,
+        "voltage": -38.21
+      },
+      {
+        "time": 108.0,
+        "voltage": -39.78
+      },
+      {
+        "time": 108.75,
+        "voltage": -41.34
+      },
+      {
+        "time": 109.5,
+        "voltage": -42.91
+      },
+      {
+        "time": 110.25,
+        "voltage": -44.48
+      },
+      {
+        "time": 111.0,
+        "voltage": -46.05
+      },
+      {
+        "time": 111.75,
+        "voltage": -47.62
+      },
+      {
+        "time": 112.5,
+        "voltage": -49.18
+      },
+      {
+        "time": 113.25,
+        "voltage": -50.75
+      },
+      {
+        "time": 114.0,
+        "voltage": -52.32
+      },
+      {
+        "time": 114.75,
+        "voltage": -53.89
+      },
+      {
+        "time": 115.5,
+        "voltage": -55.46
+      },
+      {
+        "time": 116.25,
+        "voltage": -57.02
+      },
+      {
+        "time": 117.0,
+        "voltage": -58.59
+      },
+      {
+        "time": 117.75,
+        "voltage": -60.16
+      },
+      {
+        "time": 118.5,
+        "voltage": -61.73
+      },
+      {
+        "time": 119.25,
+        "voltage": -63.3
+      },
+      {
+        "time": 120.0,
+        "voltage": -64.86
+      },
+      {
+        "time": 120.75,
+        "voltage": -66.43
+      },
+      {
+        "time": 121.5,
+        "voltage": -68.0
+      },
+      {
+        "time": 122.25,
+        "voltage": -66.43
+      },
+      {
+        "time": 123.0,
+        "voltage": -64.86
+      },
+      {
+        "time": 123.75,
+        "voltage": -63.3
+      },
+      {
+        "time": 124.5,
+        "voltage": -61.73
+      },
+      {
+        "time": 125.25,
+        "voltage": -60.16
+      },
+      {
+        "time": 126.0,
+        "voltage": -58.59
+      },
+      {
+        "time": 126.75,
+        "voltage": -57.02
+      },
+      {
+        "time": 127.5,
+        "voltage": -55.46
+      },
+      {
+        "time": 128.25,
+        "voltage": -53.89
+      },
+      {
+        "time": 129.0,
+        "voltage": -52.32
+      },
+      {
+        "time": 129.75,
+        "voltage": -50.75
+      },
+      {
+        "time": 130.5,
+        "voltage": -49.18
+      },
+      {
+        "time": 131.25,
+        "voltage": -47.62
+      },
+      {
+        "time": 132.0,
+        "voltage": -46.05
+      },
+      {
+        "time": 132.75,
+        "voltage": -44.48
+      },
+      {
+        "time": 133.5,
+        "voltage": -42.91
+      },
+      {
+        "time": 134.25,
+        "voltage": -41.34
+      },
+      {
+        "time": 135.0,
+        "voltage": -39.78
+      },
+      {
+        "time": 135.75,
+        "voltage": -38.21
+      },
+      {
+        "time": 136.5,
+        "voltage": -36.64
+      },
+      {
+        "time": 137.25,
+        "voltage": -35.07
+      },
+      {
+        "time": 138.0,
+        "voltage": -33.5
+      },
+      {
+        "time": 138.75,
+        "voltage": -31.94
+      },
+      {
+        "time": 139.5,
+        "voltage": -30.37
+      },
+      {
+        "time": 140.25,
+        "voltage": -28.8
+      },
+      {
+        "time": 141.0,
+        "voltage": -27.23
+      },
+      {
+        "time": 141.75,
+        "voltage": -25.66
+      },
+      {
+        "time": 142.5,
+        "voltage": -27.23
+      },
+      {
+        "time": 143.25,
+        "voltage": -28.8
+      },
+      {
+        "time": 144.0,
+        "voltage": -30.37
+      },
+      {
+        "time": 144.75,
+        "voltage": -31.94
+      },
+      {
+        "time": 145.5,
+        "voltage": -33.5
+      },
+      {
+        "time": 146.25,
+        "voltage": -35.07
+      },
+      {
+        "time": 147.0,
+        "voltage": -36.64
+      },
+      {
+        "time": 147.75,
+        "voltage": -38.21
+      },
+      {
+        "time": 148.5,
+        "voltage": -39.78
+      },
+      {
+        "time": 149.25,
+        "voltage": -41.34
+      },
+      {
+        "time": 150.0,
+        "voltage": -42.91
+      },
+      {
+        "time": 150.75,
+        "voltage": -44.48
+      },
+      {
+        "time": 151.5,
+        "voltage": -46.05
+      },
+      {
+        "time": 152.25,
+        "voltage": -47.62
+      },
+      {
+        "time": 153.0,
+        "voltage": -49.18
+      },
+      {
+        "time": 153.75,
+        "voltage": -50.75
+      },
+      {
+        "time": 154.5,
+        "voltage": -52.32
+      },
+      {
+        "time": 155.25,
+        "voltage": -53.89
+      },
+      {
+        "time": 156.0,
+        "voltage": -55.46
+      },
+      {
+        "time": 156.75,
+        "voltage": -57.02
+      },
+      {
+        "time": 157.5,
+        "voltage": -58.59
+      },
+      {
+        "time": 158.25,
+        "voltage": -60.16
+      },
+      {
+        "time": 159.0,
+        "voltage": -61.73
+      },
+      {
+        "time": 159.75,
+        "voltage": -63.3
+      },
+      {
+        "time": 160.5,
+        "voltage": -64.86
+      },
+      {
+        "time": 161.25,
+        "voltage": -66.43
+      },
+      {
+        "time": 162.0,
+        "voltage": -68.0
+      },
+      {
+        "time": 162.75,
+        "voltage": -66.43
+      },
+      {
+        "time": 163.5,
+        "voltage": -64.86
+      },
+      {
+        "time": 164.25,
+        "voltage": -63.3
+      },
+      {
+        "time": 165.0,
+        "voltage": -61.73
+      },
+      {
+        "time": 165.75,
+        "voltage": -60.16
+      },
+      {
+        "time": 166.5,
+        "voltage": -58.59
+      },
+      {
+        "time": 167.25,
+        "voltage": -57.02
+      },
+      {
+        "time": 168.0,
+        "voltage": -55.46
+      },
+      {
+        "time": 168.75,
+        "voltage": -53.89
+      },
+      {
+        "time": 169.5,
+        "voltage": -52.32
+      },
+      {
+        "time": 170.25,
+        "voltage": -50.75
+      },
+      {
+        "time": 171.0,
+        "voltage": -49.18
+      },
+      {
+        "time": 171.75,
+        "voltage": -47.62
+      },
+      {
+        "time": 172.5,
+        "voltage": -46.05
+      },
+      {
+        "time": 173.25,
+        "voltage": -44.48
+      },
+      {
+        "time": 174.0,
+        "voltage": -42.91
+      },
+      {
+        "time": 174.75,
+        "voltage": -41.34
+      },
+      {
+        "time": 175.5,
+        "voltage": -39.78
+      },
+      {
+        "time": 176.25,
+        "voltage": -38.21
+      },
+      {
+        "time": 177.0,
+        "voltage": -36.64
+      },
+      {
+        "time": 177.75,
+        "voltage": -35.07
+      },
+      {
+        "time": 178.5,
+        "voltage": -33.5
+      },
+      {
+        "time": 179.25,
+        "voltage": -31.94
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/home/ranjith/projectubantu/Neuro_drug_testing/build-validate/silicon_patient",
+    "--dose-eval",
+    "--drug-config",
+    "/home/ranjith/projectubantu/Neuro_drug_testing/backend/runs/run_20260527T195931IST_ed05e6a03b/input.json"
+  ],
+  "duration_seconds": 507.623,
+  "engine_input_mode": "user_config",
+  "engine_path": "/home/ranjith/projectubantu/Neuro_drug_testing/build-validate/silicon_patient",
+  "queue_latency_seconds": 1300.234623,
+  "report_type": "dose-eval",
+  "return_code": 0,
+  "run_id": "run_20260527T195931IST_ed05e6a03b",
+  "status": "completed",
+  "worker_hostname": "DESKTOP-I898A91"
+}

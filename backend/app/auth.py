@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -72,6 +72,10 @@ def build_verification_email(code: str) -> tuple[str, str]:
 
 def is_developer_mode() -> bool:
     return os.getenv("SPP_DEVELOPER_MODE", "0") == "1"
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
 
 
 def issue_email_verification_code(db: Session, user: User) -> str:
@@ -199,7 +203,9 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     if cnt > 5:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    stmt = select(User).where(User.email == payload.email)
+    email = normalize_email(payload.email)
+
+    stmt = select(User).where(func.lower(User.email) == email)
     existing = db.execute(stmt).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="Invalid request")
@@ -218,7 +224,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     now = utc_now()
     user = User(
         full_name=payload.full_name,
-        email=payload.email,
+        email=email,
         password_hash=pwd_hash,
         role="researcher",
         company_id=(company.id if company else None),
@@ -242,17 +248,18 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
     client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+    email = normalize_email(payload.email)
 
     ip_locked = limiter.is_locked(f"ip:{client_ip}")
-    email_locked = limiter.is_locked(f"email:{payload.email}")
+    email_locked = limiter.is_locked(f"email:{email}")
     if ip_locked or email_locked:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    stmt = select(User).where(User.email == payload.email)
+    stmt = select(User).where(func.lower(User.email) == email)
     user = db.execute(stmt).scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
         ip_key = f"failed:ip:{client_ip}"
-        email_key = f"failed:email:{payload.email}"
+        email_key = f"failed:email:{email}"
         ip_count = limiter.incr_with_expire(ip_key, window=15 * 60)
         email_count = limiter.incr_with_expire(email_key, window=15 * 60)
         if ip_count > 5:
@@ -280,7 +287,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
 
     # reset failed counters on successful login
     limiter.delete(f"failed:ip:{client_ip}")
-    limiter.delete(f"failed:email:{user.email}")
+    limiter.delete(f"failed:email:{email}")
 
     audit(db, user.id, user.company_id, "login_success", request)
 
@@ -368,7 +375,8 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 
 @router.post("/verify-email")
 def verify_email(payload: EmailVerificationRequest, request: Request, db: Session = Depends(get_db)) -> dict:
-    stmt = select(User).where(User.email == payload.email)
+    email = normalize_email(payload.email)
+    stmt = select(User).where(func.lower(User.email) == email)
     user = db.execute(stmt).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
@@ -377,7 +385,7 @@ def verify_email(payload: EmailVerificationRequest, request: Request, db: Sessio
         select(EmailVerificationCode)
         .where(
             EmailVerificationCode.user_id == user.id,
-            EmailVerificationCode.email == payload.email,
+            func.lower(EmailVerificationCode.email) == email,
             EmailVerificationCode.used_at.is_(None),
         )
         .order_by(EmailVerificationCode.created_at.desc())
@@ -420,12 +428,13 @@ def verify_email(payload: EmailVerificationRequest, request: Request, db: Sessio
 @router.post("/resend-verification-code")
 def resend_verification_code(payload: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)) -> dict:
     client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
-    email_key = f"resend:email:{payload.email}"
+    email = normalize_email(payload.email)
+    email_key = f"resend:email:{email}"
     ip_key = f"resend:ip:{client_ip}"
     if limiter.incr_with_expire(email_key, window=3600) > 3 or limiter.incr_with_expire(ip_key, window=3600) > 3:
         return {"detail": "If an account needs verification, a code has been sent."}
 
-    stmt = select(User).where(User.email == payload.email)
+    stmt = select(User).where(func.lower(User.email) == email)
     user = db.execute(stmt).scalar_one_or_none()
     if user is not None and not user.is_email_verified:
         otp = issue_email_verification_code(db, user)
@@ -492,7 +501,9 @@ def request_password_reset(payload: dict, request: Request, db: Session = Depend
     if not email:
         return {"detail": "ok"}
 
-    stmt = select(User).where(User.email == email)
+    email = normalize_email(str(email))
+
+    stmt = select(User).where(func.lower(User.email) == email)
     user = db.execute(stmt).scalar_one_or_none()
     if user is None:
         return {"detail": "ok"}

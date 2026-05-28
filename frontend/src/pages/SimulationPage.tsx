@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, AlertCircle } from 'lucide-react';
-import { runSimulation } from '../api/client';
+import { getRunDetail, getScientificJobStatus, runSimulation } from '../api/client';
 import { LoadingEngineState } from '../components/LoadingEngineState';
 import { MetricCard } from '../components/MetricCard';
 import { ReportViewer } from '../components/ReportViewer';
@@ -26,12 +26,53 @@ const defaultPayload: SingleSimulationRequest = {
     Ca: { ic50: 1000, hill: 3.2 }
   },
   dose: 10,
-  mode: 'fast'
+  mode: 'accurate'
 };
 
 function summaryValue(result: BackendRunResponse | null, key: string): string {
   const value = result?.parsed_summary?.[key];
   return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '—';
+}
+
+function mapRunDetailToBackendResponse(detail: Awaited<ReturnType<typeof getRunDetail>>): BackendRunResponse {
+  return {
+    run_id: detail.run_id,
+    status: detail.status,
+    report_type: detail.report_type,
+    engine_input_mode: detail.engine_input_mode,
+    parsed_summary: detail.parsed_summary,
+    visualization_data: detail.visualization_data ?? null,
+    raw_report: detail.raw_report,
+    duration_seconds: detail.duration_seconds,
+    created_at: detail.created_at,
+    error: detail.error_message,
+    stderr: null
+  };
+}
+
+async function waitForScientificJob(jobId: string): Promise<BackendRunResponse> {
+  const startedAt = Date.now();
+  const pollIntervalMs = 2000;
+  const timeoutMs = 60 * 60 * 1000;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const job = await getScientificJobStatus(jobId);
+    if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+      throw new Error(job.error_message ?? 'Simulation failed');
+    }
+
+    if (job.status === 'COMPLETED') {
+      if (!job.result_run_id) {
+        throw new Error('Completed job did not return a run record');
+      }
+      const detail = await getRunDetail(job.result_run_id);
+      return mapRunDetailToBackendResponse(detail);
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
+  }
+
+  throw new Error('Simulation timeout. Try fewer runs.');
 }
 
 export function SimulationPage() {
@@ -127,11 +168,9 @@ export function SimulationPage() {
     }, 1100);
 
     try {
-      const response = await runSimulation(nextPayload);
+      const submission = await runSimulation(nextPayload);
+      const response = await waitForScientificJob(submission.job_id);
       setResult(response);
-      if (response.status === 'failed') {
-        setError(response.error === 'Engine execution timed out' ? 'Simulation timeout. Try Fast mode or fewer runs.' : response.error ?? 'Engine execution failed');
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Backend unreachable');
     } finally {

@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { runDrugEvaluation, runValidation } from '../api/client';
-import type { BackendRunResponse, DrugEvalRequest, EngineMode } from '../types';
+import { getRunDetail, getScientificJobStatus, runDrugEvaluation, runValidation } from '../api/client';
+import type { BackendRunResponse, DrugEvalRequest } from '../types';
+import { useAuth } from './AuthContext';
 
-type TaskStatus = 'idle' | 'running' | 'completed' | 'failed';
+type TaskStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed';
 
 interface ValidationState {
   status: TaskStatus;
@@ -13,7 +14,6 @@ interface ValidationState {
 interface DrugEvaluationState {
   status: TaskStatus;
   payload: DrugEvalRequest;
-  engineMode: EngineMode;
   result: BackendRunResponse | null;
   error: string | null;
 }
@@ -24,11 +24,10 @@ interface RunTaskContextValue {
   runValidationTask: () => Promise<void>;
   runDrugEvaluationTask: (payload: DrugEvalRequest) => Promise<void>;
   setDrugEvaluationPayload: (payload: DrugEvalRequest) => void;
-  setDrugEvaluationMode: (mode: EngineMode) => void;
 }
 
 const VALIDATION_STORAGE_KEY = 'spp.validation.state';
-const DRUG_EVAL_STORAGE_KEY = 'spp.drug-eval.state';
+const DRUG_EVAL_STORAGE_KEY_PREFIX = 'spp.drug-eval.state';
 
 const initialState: ValidationState = {
   status: 'idle',
@@ -54,7 +53,6 @@ const initialDrugEvalPayload: DrugEvalRequest = {
 const initialDrugEvaluationState: DrugEvaluationState = {
   status: 'idle',
   payload: initialDrugEvalPayload,
-  engineMode: 'fast',
   result: null,
   error: null
 };
@@ -69,9 +67,55 @@ function mapEngineError(response: BackendRunResponse): string {
   return response.error ?? 'Engine execution failed';
 }
 
+function mapRunDetailToBackendResponse(detail: Awaited<ReturnType<typeof getRunDetail>>): BackendRunResponse {
+  return {
+    run_id: detail.run_id,
+    status: detail.status,
+    report_type: detail.report_type,
+    engine_input_mode: detail.engine_input_mode,
+    parsed_summary: detail.parsed_summary,
+    visualization_data: detail.visualization_data ?? null,
+    raw_report: detail.raw_report,
+    duration_seconds: detail.duration_seconds,
+    created_at: detail.created_at,
+    error: detail.error_message,
+    stderr: null
+  };
+}
+
+async function waitForScientificJob(jobId: string): Promise<BackendRunResponse> {
+  const startedAt = Date.now();
+  const pollIntervalMs = 2000;
+  const timeoutMs = 60 * 60 * 1000;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const job = await getScientificJobStatus(jobId);
+
+    if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+      throw new Error(job.error_message ?? 'Simulation failed');
+    }
+
+    if (job.status === 'COMPLETED') {
+      if (!job.result_run_id) {
+        throw new Error('Completed job did not return a run record');
+      }
+
+      const detail = await getRunDetail(job.result_run_id);
+      return mapRunDetailToBackendResponse(detail);
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
+  }
+
+  throw new Error('Simulation timeout. Try fewer runs.');
+}
+
 const RunTaskContext = createContext<RunTaskContextValue | undefined>(undefined);
 
 export function RunTaskProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const userStorageKey = user?.id != null ? `${DRUG_EVAL_STORAGE_KEY_PREFIX}.${user.id}` : `${DRUG_EVAL_STORAGE_KEY_PREFIX}.anonymous`;
+
   const [validationState, setValidationState] = useState<ValidationState>(() => {
     try {
       const raw = window.sessionStorage.getItem(VALIDATION_STORAGE_KEY);
@@ -94,7 +138,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
 
   const [drugEvaluationState, setDrugEvaluationState] = useState<DrugEvaluationState>(() => {
     try {
-      const raw = window.sessionStorage.getItem(DRUG_EVAL_STORAGE_KEY);
+      const raw = window.sessionStorage.getItem(userStorageKey);
       if (!raw) {
         return initialDrugEvaluationState;
       }
@@ -107,7 +151,6 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       return {
         status: parsed.status ?? 'idle',
         payload,
-        engineMode: parsed.engineMode ?? 'fast',
         result: parsed.result ?? null,
         error: parsed.error ?? null
       };
@@ -121,22 +164,35 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
   }, [validationState]);
 
   useEffect(() => {
-    window.sessionStorage.setItem(DRUG_EVAL_STORAGE_KEY, JSON.stringify(drugEvaluationState));
-  }, [drugEvaluationState]);
+    window.sessionStorage.setItem(userStorageKey, JSON.stringify(drugEvaluationState));
+  }, [drugEvaluationState, userStorageKey]);
 
-  const runValidationTask = async () => {
-    setValidationState({ status: 'running', result: null, error: null });
-
+  useEffect(() => {
     try {
-      const response = await runValidation();
-      if (response.status === 'failed') {
-        const message =
-          response.error === 'Engine execution timed out'
-            ? 'Simulation timeout. Try Fast mode or fewer runs.'
-            : response.error ?? 'Engine execution failed';
-        setValidationState({ status: 'failed', result: response, error: message });
+      const raw = window.sessionStorage.getItem(userStorageKey);
+      if (!raw) {
+        setDrugEvaluationState(initialDrugEvaluationState);
         return;
       }
+      const parsed = JSON.parse(raw) as Partial<DrugEvaluationState>;
+      setDrugEvaluationState({
+        status: parsed.status ?? 'idle',
+        payload: parsed.payload ?? initialDrugEvalPayload,
+        result: parsed.result ?? null,
+        error: parsed.error ?? null
+      });
+    } catch {
+      setDrugEvaluationState(initialDrugEvaluationState);
+    }
+  }, [userStorageKey]);
+
+  const runValidationTask = async () => {
+    setValidationState({ status: 'queued', result: null, error: null });
+
+    try {
+      const submission = await runValidation();
+      setValidationState((current) => ({ ...current, status: 'running' }));
+      const response = await waitForScientificJob(submission.job_id);
 
       setValidationState({ status: 'completed', result: response, error: null });
     } catch (err) {
@@ -151,24 +207,20 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
   const runDrugEvaluationTask = async (payload: DrugEvalRequest) => {
     setDrugEvaluationState((current) => ({
       ...current,
-      status: 'running',
+      status: 'queued',
       payload,
       result: null,
       error: null
     }));
 
     try {
-      const response = await runDrugEvaluation(payload);
-      if (response.status === 'failed') {
-        setDrugEvaluationState((current) => ({
-          ...current,
-          status: 'failed',
-          payload,
-          result: response,
-          error: mapEngineError(response)
-        }));
-        return;
-      }
+      const submission = await runDrugEvaluation(payload);
+      setDrugEvaluationState((current) => ({
+        ...current,
+        status: 'running'
+      }));
+
+      const response = await waitForScientificJob(submission.job_id);
 
       setDrugEvaluationState((current) => ({
         ...current,
@@ -195,25 +247,13 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
     }));
   };
 
-  const setDrugEvaluationMode = (mode: EngineMode) => {
-    setDrugEvaluationState((current) => ({
-      ...current,
-      engineMode: mode,
-      payload: {
-        ...current.payload,
-        runs: mode === 'fast' ? Math.min(current.payload.runs, 3) || 1 : Math.max(current.payload.runs, 3)
-      }
-    }));
-  };
-
   const value = useMemo(
     () => ({
       validationState,
       drugEvaluationState,
       runValidationTask,
       runDrugEvaluationTask,
-      setDrugEvaluationPayload,
-      setDrugEvaluationMode
+      setDrugEvaluationPayload
     }),
     [validationState, drugEvaluationState]
   );

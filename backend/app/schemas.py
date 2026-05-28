@@ -104,3 +104,51 @@ class RunsListResponse(BaseModel):
 class DeleteRunResponse(BaseModel):
     run_id: str
     deleted: bool
+
+
+class QueuedSimulationJobResponse(BaseModel):
+    job_id: str
+    status: str
+    queue_name: str
+
+
+class SimulationJobStatusResponse(BaseModel):
+    job_id: str
+    queue_name: str
+    status: str
+    is_finished: bool
+    is_queued: bool
+    is_started: bool
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    enqueued_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    meta: dict[str, Any] | None = None
+
+
+class ScientificSimulationSubmitResponse(BaseModel):
+    job_id: str
+    status: Literal["QUEUED"]
+
+
+class ScientificSimulationStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
+    progress: int = Field(ge=0, le=100)
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result_run_id: str | None = None
+    error_message: str | None = None
+    runtime_seconds: float | None = None
+    queue_latency_seconds: float | None = None
+
+class QueueStatsResponse(BaseModel):
+    queue_name: str
+    queued_jobs: int
+    running_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    active_jobs: int
+    max_concurrent_simulations: int

@@ -1838,7 +1838,8 @@ std::string buildDrugEvaluationReportText(
     const std::string riskLevel = report.riskLevel;
     const std::string reason = report.reason;
     const std::string confidence = report.confidence;
-    const std::string responseMode = report.responseMode;
+    const std::string responseMode = noResponse ? std::string("NO_SIGNIFICANT_RESPONSE") : report.responseMode;
+    const bool noSignificantMode = responseMode == "NO_SIGNIFICANT_RESPONSE";
 
     const bool excitatoryMode =
         (responseMode == "EXCITATORY_RESPONSE") ||
@@ -1846,23 +1847,31 @@ std::string buildDrugEvaluationReportText(
     const bool stabilizationMode =
         (responseMode == "STABILIZING_RESPONSE") ||
         (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
-    const std::string windowSectionTitle = excitatoryMode
-                                               ? std::string("Excitatory Response Range")
-                                 : (stabilizationMode ? std::string("Stabilization Response Range")
-                                             : std::string("Therapeutic Window"));
-    const std::string effectiveRangeLabel = excitatoryMode
-                                                ? std::string("Excitatory Range")
-                                  : (stabilizationMode ? std::string("Stabilization Range")
-                                              : std::string("Effective Range"));
-    const std::string zoneLabel = excitatoryMode
-                                      ? std::string("Excitatory Zone")
-                           : (stabilizationMode ? std::string("Stabilization Zone")
-                                       : std::string("Therapeutic Zone"));
-    const std::string optimalZoneText = excitatoryMode
+        const std::string windowSectionTitle = noSignificantMode
+                                 ? std::string("Response Range")
+                                 : (excitatoryMode
+                                     ? std::string("Excitatory Response Range")
+                                     : (stabilizationMode ? std::string("Stabilization Response Range")
+                                                 : std::string("Therapeutic Window")));
+        const std::string effectiveRangeLabel = noSignificantMode
+                                  ? std::string("Response Range")
+                                  : (excitatoryMode
+                                      ? std::string("Excitatory Range")
+                                      : (stabilizationMode ? std::string("Stabilization Range")
+                                                  : std::string("Effective Range")));
+        const std::string zoneLabel = noSignificantMode
+                           ? std::string("Response Zone")
+                           : (excitatoryMode
+                               ? std::string("Excitatory Zone")
+                               : (stabilizationMode ? std::string("Stabilization Zone")
+                                           : std::string("Therapeutic Zone")));
+    const std::string optimalZoneText = noSignificantMode
+                                            ? std::string("No validated pharmacodynamic response observed.")
+                                            : (excitatoryMode
                                             ? std::string("Transient excitatory regime before seizure-risk escalation")
                                             : (stabilizationMode
                                   ? std::string("Calcium-channel blockade reduced synchronization and neural instability")
-                                                   : std::string("Moderate, controlled suppression (20-60%)"));
+                                                   : std::string("Moderate, controlled suppression (20-60%)")));
         const std::string windowQualityText = noResponse || therapeuticRanges.empty()
                                 ? std::string("Not observed")
                                 : (stabilizationMode
@@ -1934,7 +1943,7 @@ std::string buildDrugEvaluationReportText(
 
     out << "[Pharmacodynamic Interpretation]\n";
     appendLine("Onset Dose", onsetDose);
-    appendLine("Peak Efficiency", peakEfficiency);
+    appendLine("Peak Biological Effect", peakEfficiency);
     appendLine("Saturation Trend", saturationText);
     out << "\n--------------------------------------------------\n\n";
 

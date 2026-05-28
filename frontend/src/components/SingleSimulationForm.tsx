@@ -1,5 +1,5 @@
 import type { ChangeEvent, FormEvent } from 'react';
-import type { ChannelInput, EngineMode, SingleSimulationRequest } from '../types';
+import type { ChannelInput, SingleSimulationRequest } from '../types';
 
 interface SingleSimulationFormProps {
   value: SingleSimulationRequest;
@@ -39,10 +39,6 @@ export function SingleSimulationForm({ value, loading = false, error, onChange, 
 
   const handleDose = (event: ChangeEvent<HTMLInputElement>) => {
     onChange({ ...value, dose: Number(event.target.value) });
-  };
-
-  const setMode = (mode: EngineMode) => {
-    onChange({ ...value, mode });
   };
 
   return (
@@ -98,7 +94,7 @@ export function SingleSimulationForm({ value, loading = false, error, onChange, 
 
       <section className="glass-card p-6">
         <h3 className="text-lg font-semibold text-white">Single Dose Settings</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="mt-4 grid gap-4">
           <label className="space-y-2 text-sm">
             <span className="text-slate-300">Input Dose</span>
             <input
@@ -110,27 +106,6 @@ export function SingleSimulationForm({ value, loading = false, error, onChange, 
               className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/10"
             />
           </label>
-
-          <div className="space-y-2 text-sm">
-            <span className="text-slate-300">Mode</span>
-            <div className="grid grid-cols-2 gap-3">
-              {(['fast', 'accurate'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setMode(mode)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
-                    value.mode === mode
-                      ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-100'
-                      : 'border-white/10 bg-slate-950/60 text-slate-300 hover:border-cyan-400/20 hover:bg-white/5'
-                  }`}
-                >
-                  <p className="font-medium capitalize">{mode}</p>
-                  <p className="mt-1 text-xs text-slate-400">{mode === 'fast' ? 'Lower-latency run' : 'Full-quality run'}</p>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 

@@ -18,7 +18,7 @@ function summaryValue(result: BackendRunResponse | null, key: string): string {
 export function ValidationPage() {
   const { validationState, runValidationTask } = useRunTask();
   const [activeStep, setActiveStep] = useState(0);
-  const loading = validationState.status === 'running';
+  const loading = validationState.status === 'queued' || validationState.status === 'running';
   const result = validationState.result;
   const error = validationState.error;
 

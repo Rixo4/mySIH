@@ -6,7 +6,9 @@ export function buildDoseChartData(
   step: number,
   effectiveRangeText?: string | null,
   riskLevel?: string | null,
-  toxicityThresholdText?: string | null
+  toxicityThresholdText?: string | null,
+  responseMode?: string | null,
+  maxEffect?: number | null
 ): ReportChartPoint[] {
   const points: ReportChartPoint[] = [];
   const safeStep = step > 0 ? step : 1;
@@ -18,16 +20,19 @@ export function buildDoseChartData(
   const toxMatch = toxicityThresholdText?.match(/([0-9.]+)/);
   const toxicDose = toxMatch ? Number(toxMatch[1]) : maxDose + 4;
   const highRisk = (riskLevel ?? '').toUpperCase().includes('HIGH');
+  const normalizedMode = (responseMode ?? '').trim().toUpperCase();
+  const noSignificantResponse = normalizedMode === 'NO_SIGNIFICANT_RESPONSE' || (maxEffect != null && maxEffect < 20);
+  const peakEffect = noSignificantResponse ? Math.max(4, Math.min(18, maxEffect ?? 14)) : 14 + 78;
 
   for (let i = 0; i <= count; i += 1) {
     const dose = Number((minDose + i * safeStep).toFixed(2));
     const midpoint = (minDose + maxDose) / 2;
     const sigmoid = 1 / (1 + Math.exp(-0.42 * (dose - midpoint)));
-    const effect = Math.max(0, Math.min(100, 14 + sigmoid * 78));
+    const effect = noSignificantResponse ? Math.max(0, Math.min(20, peakEffect * sigmoid)) : Math.max(0, Math.min(100, 14 + sigmoid * 78));
     const toxicityCurve = Math.max(0, Math.min(100, dose >= toxicDose ? 70 + (dose - toxicDose) * 4 : dose > effectiveMax ? 14 + (dose - effectiveMax) * 3 : 8 + (dose / (maxDose || 1)) * 10));
     const risk = highRisk
       ? Math.min(100, toxicityCurve * 0.72 + effect * 0.18)
-      : Math.min(100, effect * 0.24 + toxicityCurve * 0.44);
+      : Math.min(100, noSignificantResponse ? effect * 0.12 + toxicityCurve * 0.28 : effect * 0.24 + toxicityCurve * 0.44);
 
     points.push({
       dose,

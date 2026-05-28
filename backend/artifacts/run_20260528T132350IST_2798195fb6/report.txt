@@ -1,0 +1,81 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-K-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 1000.00
+K IC50              : 200.00
+Ca IC50             : 1000.00
+Hill                : 2.48
+Runs                : 3.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 500.00
+Step Size            : 50.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Sigmoidal
+Response Mode        : STABILIZING_RESPONSE
+Model Fit (R^2)      : 1.00
+Max Effect           : 69 %
+Response Strength    : Strong
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : >500.00 (Not observed)
+Safety Observation   : No toxicity within tested range
+
+--------------------------------------------------
+
+[Stabilization Response Range]
+Stabilization Range  : 100.00 - 450.00
+Window Quality       : Continuous
+Optimal Zone         : Calcium-channel blockade reduced synchronization and neural instability
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 50.00
+Stabilization Zone   : 100.00 - 450.00
+Saturated Stabilization Zone : 500.00 - 500.00
+
+--------------------------------------------------
+
+[Calcium Stabilization Metrics]
+Sync Reduction       : 68.5 %
+NII Reduction        : 16.1 %
+Seizure Reduction    : 17.7 %
+Burst Reduction      : 0.0 %
+Calcium Effect       : 68.5 %
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : ~100.00
+Peak Efficiency      : ~500.00
+Saturation Trend     : Not observed within tested range
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 3
+Rate Variability     : 2.12
+Toxicity Variance    : 8.09
+Stability Score      : LOW
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : CAUTION
+Risk Level           : MODERATE
+Reason               : Calcium-channel blockade showed stabilizing response, but variability requires caution
+Confidence           : LOW
+
+==================================================

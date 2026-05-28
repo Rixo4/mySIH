@@ -70,8 +70,8 @@ export default function App() {
   }, []);
 
   return (
-    <RunTaskProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <RunTaskProvider>
         <BrowserRouter>
           <Routes>
             <Route element={<Shell backendConnected={backendConnected} />}>
@@ -87,7 +87,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
-      </AuthProvider>
-    </RunTaskProvider>
+      </RunTaskProvider>
+    </AuthProvider>
   );
 }

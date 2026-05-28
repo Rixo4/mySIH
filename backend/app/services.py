@@ -16,6 +16,59 @@ from .visualization import build_visualization_payload
 from .utils import ensure_directory, generate_run_id, loads_or_default, sanitize_run_id, utc_now, write_json_file, write_text_file
 
 
+def _normalize_zone_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().upper()
+    return normalized or None
+
+
+def _enforce_scientific_consistency(parsed: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(parsed, dict):
+        return parsed
+
+    summary = dict(parsed)
+    active_zone = _normalize_zone_name(summary.get("active_zone"))
+    recommendation = _normalize_zone_name(summary.get("recommendation")) or ""
+    has_valid_therapeutic_window = bool(summary.get("has_valid_therapeutic_window"))
+    zone_ranges = summary.get("zone_ranges") if isinstance(summary.get("zone_ranges"), dict) else {}
+
+    therapeutic_zone = zone_ranges.get("therapeutic_zone") if isinstance(zone_ranges, dict) else None
+    has_therapeutic_zone = isinstance(therapeutic_zone, list) and len(therapeutic_zone) == 2
+    effective_range_text = str(summary.get("effective_range") or "").strip().lower()
+    effective_range_observed = bool(effective_range_text) and effective_range_text != "not observed"
+    max_effect_value = summary.get("max_effect")
+    low_effect = isinstance(max_effect_value, (int, float)) and max_effect_value < 20
+    response_strength = _normalize_zone_name(summary.get("response_strength"))
+    no_significant_response = low_effect and not has_valid_therapeutic_window and response_strength in {None, "NONE", "NOT OBSERVED", "NO RESPONSE"}
+
+    if not has_valid_therapeutic_window:
+        has_valid_therapeutic_window = has_therapeutic_zone and effective_range_observed
+
+    forbidden_therapeutic_zones = {"THERAPEUTIC_ZONE", "STABILIZATION_ZONE", "EXCITATORY_ZONE"}
+    if not has_valid_therapeutic_window and active_zone in forbidden_therapeutic_zones:
+        active_zone = "NO_VALID_WINDOW"
+    if "NOT RECOMMENDED" in recommendation and active_zone in forbidden_therapeutic_zones:
+        active_zone = "NO_VALID_WINDOW"
+    if no_significant_response:
+        summary["response_mode"] = "NO_SIGNIFICANT_RESPONSE"
+        summary["response_strength"] = "None"
+        active_zone = "NO_VALID_WINDOW"
+
+    summary["has_valid_therapeutic_window"] = has_valid_therapeutic_window
+    if active_zone is not None:
+        summary["active_zone"] = active_zone
+    summary.setdefault("consistency_checks", {})
+    if isinstance(summary["consistency_checks"], dict):
+        summary["consistency_checks"] = {
+            **summary["consistency_checks"],
+            "therapeutic_window_valid": has_valid_therapeutic_window,
+            "active_zone": summary.get("active_zone"),
+            "recommendation": summary.get("recommendation"),
+        }
+    return summary
+
+
 def _extract_decision_fields(parsed: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
     recommendation = parsed.get("recommendation") if isinstance(parsed, dict) else None
     risk_level = parsed.get("risk_level") if isinstance(parsed, dict) else None
@@ -151,7 +204,7 @@ def execute_engine_run(
     )
 
     raw_report = engine_result.stdout or ""
-    parsed_summary = parse_report(report_type, raw_report)
+    parsed_summary = _enforce_scientific_consistency(parse_report(report_type, raw_report))
     visualization_data = build_visualization_payload(report_type=report_type, input_payload=safe_input_payload, parsed_summary=parsed_summary)
     if visualization_data is not None:
         parsed_summary = {**parsed_summary, "visualization_data": visualization_data}
