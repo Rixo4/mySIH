@@ -32,43 +32,6 @@ struct DoseFeatures {
     bool is_toxic = false;
 };
 
-enum class ResponseMode {
-    NoSignificantResponse,
-    SuppressiveResponse,
-    ExcitatoryResponse,
-    StabilizingResponse,
-    ToxicInstability,
-    NeuralSilencing
-};
-
-struct MechanisticDominance {
-    double naDominance = 0.0;
-    double kDominance = 0.0;
-    double caDominance = 0.0;
-};
-
-struct DoseMechanisticResult {
-    double dose = 0.0;
-    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
-    MechanisticDominance dominance;
-    double scientificConfidence = 0.0;
-    double seizureRisk = 0.0;
-    double earlyWarningIndex = 0.0;
-    double instabilityScore = 0.0;
-    std::string reasoning;
-};
-
-struct TimelineSegment {
-    double startDose = 0.0;
-    double endDose = 0.0;
-    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
-    double scientificConfidence = 0.0;
-    double meanFiringRateHz = 0.0;
-    double syncDelta = 0.0;
-    double niiDelta = 0.0;
-    double seizureDelta = 0.0;
-};
-
 enum class DrugRiskTier {
     Safe,
     ModerateRisk,
@@ -135,20 +98,14 @@ struct PharmaDecisionReport {
     std::string primaryChangeText = "Not observed";
     std::string safetyInterpretationText = "Not observed";
     std::string seizureTrendText = "Not observed";
-    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
-    double scientificConfidence = 0.0;
-    std::string mechanisticSummary = "Not observed";
-    std::string ontologyReasoning = "Not observed";
-    double syncReductionPct = 0.0;
-    double niiReductionPct = 0.0;
-    double niiIncreasePct = 0.0;
-    double seizureReductionPct = 0.0;
-    double burstReductionPct = 0.0;
-    double calciumEffectMagnitude = 0.0;
-    bool meaningfulCaBlock = false;
-
-    std::vector<DoseMechanisticResult> doseResults;
-    std::vector<TimelineSegment> timelineSegments;
+        std::string responseMode = "STANDARD_RESPONSE";
+        double syncReductionPct = 0.0;
+        double niiReductionPct = 0.0;
+        double niiIncreasePct = 0.0;
+        double seizureReductionPct = 0.0;
+        double burstReductionPct = 0.0;
+        double calciumEffectMagnitude = 0.0;
+        bool meaningfulCaBlock = false;
 
     bool hasSafeRange = false;
     float safeMinDose = 0.0f;
@@ -157,9 +114,7 @@ struct PharmaDecisionReport {
     bool hasToxicThreshold = false;
     float toxicMinDose = 0.0f;
 
-    std::vector<double> overSuppressionDoses;
     std::vector<double> excitatoryRiskDoses;
-    std::vector<double> stabilizationSaturationDoses;
 
     bool hasEffectiveDose = false;
     float effectiveMinDose = 0.0f;
@@ -187,7 +142,6 @@ public:
         const std::vector<DoseObservation>& observations,
         const DecisionStabilityInput& stabilityInput = {}
     );
-    static std::string toString(ResponseMode mode);
     static std::string toString(BiologicalState state);
     static std::string toString(DrugRiskTier tier);
 };
