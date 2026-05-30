@@ -14,18 +14,18 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(SPP_SOURCES
-    main.cpp
-    neuron/NeuronModel.cpp
-    drug/DrugModel.cpp
-    synapse/Synapse.cpp
-    network/Network.cpp
-    simulation/SimulationEngine.cpp
-    analyzer/Metrics.cpp
-    analyzer/SeizureDetector.cpp
-    analyzer/PharmaDecisionEngine.cpp
-    analyzer/DrugEvaluationEngine.cpp
-    output/CsvWriter.cpp
-    cuda/CudaSimulator.cpp
+    engine/main.cpp
+    engine/neuron/NeuronModel.cpp
+    engine/drug/DrugModel.cpp
+    engine/synapse/Synapse.cpp
+    engine/network/Network.cpp
+    engine/simulation/SimulationEngine.cpp
+    engine/analyzer/Metrics.cpp
+    engine/analyzer/SeizureDetector.cpp
+    engine/analyzer/PharmaDecisionEngine.cpp
+    engine/analyzer/DrugEvaluationEngine.cpp
+    engine/output/CsvWriter.cpp
+    engine/cuda/CudaSimulator.cpp
 )
 
 set(SPP_ENABLE_CUDA OFF)
@@ -51,7 +51,7 @@ if(SPP_CAN_ENABLE_CUDA)
         find_package(CUDAToolkit QUIET)
         if(CUDAToolkit_FOUND)
             set(SPP_ENABLE_CUDA ON)
-            list(APPEND SPP_SOURCES cuda/NeuronUpdate.cu)
+            list(APPEND SPP_SOURCES engine/cuda/NeuronUpdate.cu)
             message(STATUS "CUDA enabled with compiler: ${CMAKE_CUDA_COMPILER}")
         else()
             message(STATUS "CUDA compiler detected but CUDAToolkit not found; building CPU-only.")
@@ -63,7 +63,7 @@ endif()
 
 add_executable(silicon_patient ${SPP_SOURCES})
 
-target_include_directories(silicon_patient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(silicon_patient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 
 if(SPP_ENABLE_CUDA)
     target_compile_definitions(silicon_patient PRIVATE SPP_USE_CUDA)

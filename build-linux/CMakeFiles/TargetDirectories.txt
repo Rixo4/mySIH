@@ -1,3 +1,0 @@
-/home/saneesh/Downloads/startup-main/build-linux/CMakeFiles/silicon_patient.dir
-/home/saneesh/Downloads/startup-main/build-linux/CMakeFiles/edit_cache.dir
-/home/saneesh/Downloads/startup-main/build-linux/CMakeFiles/rebuild_cache.dir

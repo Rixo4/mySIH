@@ -1,2 +1,0 @@
-/home/saneesh/Downloads/startup-main/build-linux/CMakeFiles/CheckCUDA/CMakeFiles/edit_cache.dir
-/home/saneesh/Downloads/startup-main/build-linux/CMakeFiles/CheckCUDA/CMakeFiles/rebuild_cache.dir

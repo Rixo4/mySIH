@@ -65,17 +65,18 @@ Delete a specific run from the Run History page when you want to remove both the
 
 ```text
 .
-├── analyzer/          # Drug evaluation and reporting logic
 ├── backend/           # FastAPI service, SQLite storage, engine runner
-├── cuda/              # CUDA simulator and kernels
-├── drug/              # Drug model definitions
+├── engine/            # Native C++/CUDA engine sources
+│   ├── analyzer/      # Drug evaluation and reporting logic
+│   ├── cuda/          # CUDA simulator and kernels
+│   ├── drug/          # Drug model definitions
+│   ├── network/       # Network simulation logic
+│   ├── neuron/        # Neuron model definitions
+│   ├── output/        # CSV output helpers
+│   ├── simulation/    # Simulation engine
+│   └── synapse/       # Synapse model logic
 ├── frontend/          # React + Vite web application
-├── network/           # Network simulation logic
-├── neuron/            # Neuron model definitions
-├── output/            # CSV output helpers
-├── simulation/        # Simulation engine
-├── synapse/           # Synapse model logic
-└── main.cpp           # Native application entry point
+└── build-validate/    # Local CMake build directory
 ```
 
 ## Architecture
@@ -113,18 +114,14 @@ graph TD
 
 ### 1. Build the native engine
 
-From the repository root:
+From the repository root on Linux:
 
-```powershell
-cmake -S . -B build-cuda
-cmake --build build-cuda --config Release
+```bash
+cmake -S . -B build-validate
+cmake --build build-validate --target silicon_patient -j2
 ```
 
-If you are using the provided helper script on Windows, you can also use:
-
-```powershell
-.\build_cuda_windows.cmd
-```
+On Windows, you can use a separate CMake build directory and the generated `.exe` binary.
 
 ### 2. Set up the backend
 
@@ -138,10 +135,12 @@ pip install -r requirements.txt
 Create `backend/.env` from `backend/.env.example` and confirm these values if needed:
 
 ```env
-SPP_ENGINE_PATH=../build-cuda/silicon_patient.exe
+SPP_ENGINE_PATH=../build-validate/silicon_patient
 SPP_DATABASE_URL=sqlite:///./silicon_patient.db
 SPP_ENGINE_TIMEOUT_SECONDS=3600
 ```
+
+If you are on Windows, point `SPP_ENGINE_PATH` to the matching `.exe` in your Windows build folder.
 
 Start the API server:
 
@@ -165,7 +164,7 @@ Open the app in your browser at:
 
 ### Native engine workflow
 
-- Edit the C++ source in `main.cpp`, `analyzer/`, `cuda/`, `drug/`, `network/`, `neuron/`, `simulation/`, `synapse/`, and `output/`.
+- Edit the C++ source in `engine/main.cpp`, `engine/analyzer/`, `engine/cuda/`, `engine/drug/`, `engine/network/`, `engine/neuron/`, `engine/simulation/`, `engine/synapse/`, and `engine/output/`.
 - Rebuild the executable with CMake.
 - The backend consumes the engine binary through `SPP_ENGINE_PATH`.
 
@@ -216,7 +215,7 @@ This makes the project audit-friendly and easy to inspect after a run completes.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `SPP_ENGINE_PATH` | Native engine executable path | `../build-cuda/silicon_patient.exe` |
+| `SPP_ENGINE_PATH` | Native engine executable path | `../build-validate/silicon_patient` |
 | `SPP_DATABASE_URL` | SQLAlchemy database URL | `sqlite:///./silicon_patient.db` |
 | `SPP_ENGINE_TIMEOUT_SECONDS` | Engine execution timeout | `3600` |
 

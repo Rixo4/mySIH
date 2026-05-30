@@ -1,3 +1,0 @@
-/home/ranjith/projectubantu/Neuro_drug_testing/build-check-2/CMakeFiles/silicon_patient.dir
-/home/ranjith/projectubantu/Neuro_drug_testing/build-check-2/CMakeFiles/edit_cache.dir
-/home/ranjith/projectubantu/Neuro_drug_testing/build-check-2/CMakeFiles/rebuild_cache.dir
