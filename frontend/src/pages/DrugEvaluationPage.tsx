@@ -27,7 +27,7 @@ function validatePayload(payload: DrugEvalRequest): string | null {
     return 'Invalid drug input';
   }
 
-  if (payload.runs < 1 || payload.runs > 20) {
+  if (payload.runs < 1 || payload.runs > 10) {
     return 'Invalid drug input';
   }
 

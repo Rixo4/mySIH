@@ -1,0 +1,43 @@
+==================================================
+SILICON PATIENT - SINGLE DOSE SIMULATION REPORT
+==================================================
+[Simulation Configuration]
+Neurons             : 1500
+Duration            : 400.00 ms
+Drug Dose           : 10.00
+Mode                : CUDA
+
+---
+
+[Neural Activity]
+Firing Rate         : 6.08 Hz
+Synchronization     : 0.01
+ISI Variability     : 0.68
+
+--------------------------------------------------
+[Network State]
+Brain State         : Asynchronous Irregular (AI), balanced E/I
+Spike Pattern       : Irregular spiking (healthy variability)
+--------------------------------------------------
+[Risk Assessment]
+Seizure Score       : 11.53 / 100
+Seizure Risk        : LOW
+Toxicity Score      : 21.09 / 100
+Toxicity Risk       : LOW
+Instability Index   : 0.33
+--------------------------------------------------
+[Drug Impact]
+Baseline Rate       : 9.53 Hz
+Current Rate        : 5.35 Hz
+Change              : -43.85 %
+Effect Type         : Suppressive
+Network Response    : Rate Decrease
+Safety Margin       : Wide
+--------------------------------------------------
+[FINAL DECISION]
+Recommendation      : PROCEED WITH MONITORING
+Risk Level          : LOW
+Confidence          : MEDIUM
+Reason              : Controlled suppression with low seizure and toxicity risk
+
+==================================================

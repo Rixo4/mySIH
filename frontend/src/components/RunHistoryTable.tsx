@@ -110,7 +110,7 @@ export function RunHistoryTable({
                   <td className="px-5 py-4">
                     <div className="flex flex-wrap gap-2">
                       <Link
-                        to={`/reports/${encodeURIComponent(run.run_id)}`}
+                        to={`/app/reports/${encodeURIComponent(run.run_id)}`}
                         className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-200 transition hover:border-cyan-400/30 hover:bg-cyan-500/15"
                       >
                         View Report <ArrowRight className="h-4 w-4" />

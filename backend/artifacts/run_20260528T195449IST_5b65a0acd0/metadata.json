@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/app/build-validate/silicon_patient",
+    "--simulate",
+    "--drug-config",
+    "/app/backend/runs/run_20260528T195449IST_5b65a0acd0/input.json"
+  ],
+  "duration_seconds": 331.043,
+  "engine_input_mode": "default_internal_engine_config",
+  "engine_path": "/app/build-validate/silicon_patient",
+  "queue_latency_seconds": 96.536727,
+  "report_type": "simulate",
+  "return_code": 0,
+  "run_id": "run_20260528T195449IST_5b65a0acd0",
+  "status": "completed",
+  "worker_hostname": "7aefdb04f1d3"
+}

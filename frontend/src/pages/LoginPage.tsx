@@ -40,7 +40,7 @@ export function LoginPage() {
     setError(null);
     try {
       await auth.login(email, password);
-      nav('/');
+      nav('/app');
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
       if (detail === 'Email verification required') {

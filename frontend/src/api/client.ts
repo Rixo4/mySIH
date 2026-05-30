@@ -134,7 +134,7 @@ export async function getMe(): Promise<MeResponse> {
 }
 
 export async function runSimulation(payload?: SingleSimulationRequest): Promise<ScientificSimulationSubmitResponse> {
-  const response = await api.post<ScientificSimulationSubmitResponse>('/api/simulate', payload ?? {});
+  const response = await api.post<ScientificSimulationSubmitResponse>('/simulate', payload ?? {});
   return response.data;
 }
 

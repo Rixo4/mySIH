@@ -97,7 +97,7 @@ export function DashboardPage({ backendConnected }: DashboardPageProps) {
           </p>
         </div>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Link to="/dose-eval" className="inline-flex items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-midnight-950 transition hover:scale-[1.01]">
+          <Link to="/app/dose-eval" className="inline-flex items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-midnight-950 transition hover:scale-[1.01]">
             Run Drug Evaluation <ArrowRight className="h-4 w-4" />
           </Link>
         </div>

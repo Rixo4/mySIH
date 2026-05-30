@@ -149,7 +149,7 @@ export function DrugInputForm({ value, loading = false, onChange, onSubmit, erro
             <input
               type="number"
               min="1"
-              max="20"
+              max="10"
               step="1"
               value={value.runs}
               onChange={(event) => handleNumber('runs', event.target.value)}
@@ -161,7 +161,7 @@ export function DrugInputForm({ value, loading = false, onChange, onSubmit, erro
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <p className="text-sm text-slate-400">
-          Validation rules enforced before execution: IC50 &gt; 0, Hill &gt; 0, dose range valid, runs between 1 and 20.
+          Validation rules enforced before execution: IC50 &gt; 0, Hill &gt; 0, dose range valid, runs between 1 and 10.
         </p>
         <button
           type="submit"

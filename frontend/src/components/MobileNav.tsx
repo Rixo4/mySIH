@@ -1,11 +1,10 @@
-import { Activity, Beaker, History, LayoutDashboard } from 'lucide-react';
+import { Beaker, History, LayoutDashboard } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
-  { to: '/', label: 'Home', icon: LayoutDashboard },
-  { to: '/dose-eval', label: 'Drug', icon: Beaker },
-  { to: '/simulation', label: 'Sim', icon: Activity },
-  { to: '/history', label: 'Runs', icon: History }
+  { to: '/app', label: 'Home', icon: LayoutDashboard },
+  { to: '/app/dose-eval', label: 'Drug', icon: Beaker },
+  { to: '/app/history', label: 'Runs', icon: History }
 ];
 
 export function MobileNav() {
@@ -17,7 +16,7 @@ export function MobileNav() {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === '/'}
+            end={item.to === '/app'}
             className={({ isActive }) =>
               `flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-medium transition ${
                 isActive ? 'bg-cyan-500/15 text-cyan-100' : 'text-slate-400'

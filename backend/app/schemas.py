@@ -42,7 +42,7 @@ class DoseEvalRequest(BaseModel):
     drug_name: str = Field(min_length=1)
     channels: ChannelsInput
     dose_range: DoseRangeInput
-    runs: int = Field(ge=1, le=20)
+    runs: int = Field(ge=1, le=10)
 
 
 class SingleDoseSimulationRequest(BaseModel):

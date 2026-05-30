@@ -5,10 +5,12 @@ import { deleteRun, getRuns } from '../api/client';
 import { RunHistoryTable } from '../components/RunHistoryTable';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
+import { useRunTask } from '../context/RunTaskContext';
 import type { RunListItem } from '../types';
 
 export function RunHistoryPage() {
   const { accessToken, user } = useAuth();
+  const { drugEvaluationState } = useRunTask();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +18,19 @@ export function RunHistoryPage() {
   const [riskFilter, setRiskFilter] = useState('all');
   const [recommendationFilter, setRecommendationFilter] = useState('all');
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+
+  async function refreshRuns() {
+    try {
+      setLoading(true);
+      const response = await getRuns();
+      setRuns(response.runs);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Backend unreachable');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!accessToken) {
@@ -25,29 +40,14 @@ export function RunHistoryPage() {
       return;
     }
 
-    let active = true;
-    async function load() {
-      try {
-        setLoading(true);
-        const response = await getRuns();
-        if (active) {
-          setRuns(response.runs);
-        }
-      } catch (err) {
-        if (active) {
-          setError(err instanceof Error ? err.message : 'Backend unreachable');
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-    load();
-    return () => {
-      active = false;
-    };
+    void refreshRuns();
   }, [accessToken]);
+
+  useEffect(() => {
+    if (accessToken && drugEvaluationState.status === 'completed') {
+      void refreshRuns();
+    }
+  }, [accessToken, drugEvaluationState.status]);
 
   const filteredRuns = useMemo(
     () =>

@@ -1,12 +1,11 @@
-import { Activity, Beaker, FlaskConical, LayoutDashboard, History } from 'lucide-react';
+import { Beaker, FlaskConical, LayoutDashboard, History } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/dose-eval', label: 'Drug Evaluation', icon: Beaker },
-  { to: '/simulation', label: 'Simulation', icon: Activity },
-  { to: '/history', label: 'Run History', icon: History }
+  { to: '/app', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/app/dose-eval', label: 'Drug Evaluation', icon: Beaker },
+  { to: '/app/history', label: 'Run History', icon: History }
 ];
 
 export function Sidebar() {
@@ -35,7 +34,7 @@ export function Sidebar() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                end={item.to === '/'}
+                end={item.to === '/app'}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
                     isActive

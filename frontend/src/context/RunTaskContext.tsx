@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { getRunDetail, getScientificJobStatus, runDrugEvaluation, runValidation } from '../api/client';
 import type { BackendRunResponse, DrugEvalRequest } from '../types';
 import { useAuth } from './AuthContext';
@@ -13,6 +13,7 @@ interface ValidationState {
 
 interface DrugEvaluationState {
   status: TaskStatus;
+  jobId: string | null;
   payload: DrugEvalRequest;
   result: BackendRunResponse | null;
   error: string | null;
@@ -52,6 +53,7 @@ const initialDrugEvalPayload: DrugEvalRequest = {
 
 const initialDrugEvaluationState: DrugEvaluationState = {
   status: 'idle',
+  jobId: null,
   payload: initialDrugEvalPayload,
   result: null,
   error: null
@@ -80,6 +82,25 @@ function mapRunDetailToBackendResponse(detail: Awaited<ReturnType<typeof getRunD
     created_at: detail.created_at,
     error: detail.error_message,
     stderr: null
+  };
+}
+
+function parseDrugEvaluationState(raw: string | null): DrugEvaluationState {
+  if (!raw) {
+    return initialDrugEvaluationState;
+  }
+
+  const parsed = JSON.parse(raw) as Partial<DrugEvaluationState>;
+  if (!parsed || typeof parsed !== 'object') {
+    return initialDrugEvaluationState;
+  }
+
+  return {
+    status: parsed.status ?? 'idle',
+    jobId: typeof parsed.jobId === 'string' ? parsed.jobId : null,
+    payload: parsed.payload ?? initialDrugEvalPayload,
+    result: parsed.result ?? null,
+    error: parsed.error ?? null
   };
 }
 
@@ -115,6 +136,7 @@ const RunTaskContext = createContext<RunTaskContextValue | undefined>(undefined)
 export function RunTaskProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const userStorageKey = user?.id != null ? `${DRUG_EVAL_STORAGE_KEY_PREFIX}.${user.id}` : `${DRUG_EVAL_STORAGE_KEY_PREFIX}.anonymous`;
+  const activeDrugEvaluationJobIdRef = useRef<string | null>(null);
 
   const [validationState, setValidationState] = useState<ValidationState>(() => {
     try {
@@ -138,22 +160,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
 
   const [drugEvaluationState, setDrugEvaluationState] = useState<DrugEvaluationState>(() => {
     try {
-      const raw = window.sessionStorage.getItem(userStorageKey);
-      if (!raw) {
-        return initialDrugEvaluationState;
-      }
-      const parsed = JSON.parse(raw) as Partial<DrugEvaluationState>;
-      if (!parsed || typeof parsed !== 'object') {
-        return initialDrugEvaluationState;
-      }
-
-      const payload = parsed.payload ?? initialDrugEvalPayload;
-      return {
-        status: parsed.status ?? 'idle',
-        payload,
-        result: parsed.result ?? null,
-        error: parsed.error ?? null
-      };
+      return parseDrugEvaluationState(window.sessionStorage.getItem(userStorageKey));
     } catch {
       return initialDrugEvaluationState;
     }
@@ -170,21 +177,71 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const raw = window.sessionStorage.getItem(userStorageKey);
-      if (!raw) {
-        setDrugEvaluationState(initialDrugEvaluationState);
-        return;
-      }
-      const parsed = JSON.parse(raw) as Partial<DrugEvaluationState>;
-      setDrugEvaluationState({
-        status: parsed.status ?? 'idle',
-        payload: parsed.payload ?? initialDrugEvalPayload,
-        result: parsed.result ?? null,
-        error: parsed.error ?? null
-      });
+      setDrugEvaluationState(parseDrugEvaluationState(raw));
     } catch {
       setDrugEvaluationState(initialDrugEvaluationState);
     }
   }, [userStorageKey]);
+
+  useEffect(() => {
+    if (drugEvaluationState.status !== 'queued' && drugEvaluationState.status !== 'running') {
+      return;
+    }
+
+    if (!drugEvaluationState.jobId || activeDrugEvaluationJobIdRef.current === drugEvaluationState.jobId) {
+      return;
+    }
+
+    let active = true;
+    const jobId = drugEvaluationState.jobId;
+    activeDrugEvaluationJobIdRef.current = jobId;
+
+    const resumeJob = async () => {
+      try {
+        setDrugEvaluationState((current) => ({
+          ...current,
+          status: 'running',
+          jobId,
+          error: null
+        }));
+
+        const response = await waitForScientificJob(jobId);
+        if (!active) {
+          return;
+        }
+
+        setDrugEvaluationState((current) => ({
+          ...current,
+          status: 'completed',
+          jobId: null,
+          result: response,
+          error: null
+        }));
+      } catch (err) {
+        if (!active) {
+          return;
+        }
+
+        setDrugEvaluationState((current) => ({
+          ...current,
+          status: 'failed',
+          jobId: null,
+          result: null,
+          error: err instanceof Error ? err.message : 'Backend unreachable'
+        }));
+      } finally {
+        if (activeDrugEvaluationJobIdRef.current === jobId) {
+          activeDrugEvaluationJobIdRef.current = null;
+        }
+      }
+    };
+
+    void resumeJob();
+
+    return () => {
+      active = false;
+    };
+  }, [drugEvaluationState.jobId, drugEvaluationState.status]);
 
   const runValidationTask = async () => {
     setValidationState({ status: 'queued', result: null, error: null });
@@ -208,6 +265,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
     setDrugEvaluationState((current) => ({
       ...current,
       status: 'queued',
+      jobId: null,
       payload,
       result: null,
       error: null
@@ -217,14 +275,20 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       const submission = await runDrugEvaluation(payload);
       setDrugEvaluationState((current) => ({
         ...current,
-        status: 'running'
+        status: 'running',
+        jobId: submission.job_id,
+        payload,
+        error: null
       }));
+
+      activeDrugEvaluationJobIdRef.current = submission.job_id;
 
       const response = await waitForScientificJob(submission.job_id);
 
       setDrugEvaluationState((current) => ({
         ...current,
         status: 'completed',
+        jobId: null,
         payload,
         result: response,
         error: null
@@ -233,10 +297,15 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       setDrugEvaluationState((current) => ({
         ...current,
         status: 'failed',
+        jobId: null,
         payload,
         result: null,
         error: err instanceof Error ? err.message : 'Backend unreachable'
       }));
+    } finally {
+      if (activeDrugEvaluationJobIdRef.current) {
+        activeDrugEvaluationJobIdRef.current = null;
+      }
     }
   };
 
