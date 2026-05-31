@@ -6,6 +6,8 @@ interface LoadingEngineStateProps {
   subtext?: string;
   steps?: string[];
   activeStep?: number;
+  onStop?: () => void;
+  stopDisabled?: boolean;
 }
 
 export function LoadingEngineState({
@@ -18,7 +20,9 @@ export function LoadingEngineState({
     'Computing therapeutic window',
     'Generating report'
   ],
-  activeStep = 0
+  activeStep = 0,
+  onStop,
+  stopDisabled = false
 }: LoadingEngineStateProps) {
   return (
     <motion.div
@@ -41,6 +45,16 @@ export function LoadingEngineState({
           GPU pipeline active
           <Sigma className="h-4 w-4 text-emerald-300" />
         </div>
+        {onStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={stopDisabled}
+            className="inline-flex items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Stop evaluation
+          </button>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-3 md:grid-cols-5">

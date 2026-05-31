@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { getRunDetail, getScientificJobStatus, runDrugEvaluation, runValidation } from '../api/client';
+import { cancelScientificJob, getRunDetail, getScientificJobStatus, runDrugEvaluation, runValidation } from '../api/client';
 import type { BackendRunResponse, DrugEvalRequest } from '../types';
 import { useAuth } from './AuthContext';
 
-type TaskStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed';
+type TaskStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 interface ValidationState {
   status: TaskStatus;
@@ -24,6 +24,7 @@ interface RunTaskContextValue {
   drugEvaluationState: DrugEvaluationState;
   runValidationTask: () => Promise<void>;
   runDrugEvaluationTask: (payload: DrugEvalRequest) => Promise<void>;
+  cancelDrugEvaluationTask: () => Promise<void>;
   setDrugEvaluationPayload: (payload: DrugEvalRequest) => void;
 }
 
@@ -58,6 +59,13 @@ const initialDrugEvaluationState: DrugEvaluationState = {
   result: null,
   error: null
 };
+
+class CancellationError extends Error {
+  constructor() {
+    super('Simulation cancelled');
+    this.name = 'CancellationError';
+  }
+}
 
 function mapEngineError(response: BackendRunResponse): string {
   if (response.error === 'Engine execution timed out') {
@@ -104,15 +112,22 @@ function parseDrugEvaluationState(raw: string | null): DrugEvaluationState {
   };
 }
 
-async function waitForScientificJob(jobId: string): Promise<BackendRunResponse> {
+async function waitForScientificJob(jobId: string, shouldStop: () => boolean): Promise<BackendRunResponse> {
   const startedAt = Date.now();
   const pollIntervalMs = 2000;
   const timeoutMs = 60 * 60 * 1000;
 
   while (Date.now() - startedAt < timeoutMs) {
+    if (shouldStop()) {
+      throw new CancellationError();
+    }
+
     const job = await getScientificJobStatus(jobId);
 
     if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+      if (job.status === 'CANCELLED') {
+        throw new CancellationError();
+      }
       throw new Error(job.error_message ?? 'Simulation failed');
     }
 
@@ -137,6 +152,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const userStorageKey = user?.id != null ? `${DRUG_EVAL_STORAGE_KEY_PREFIX}.${user.id}` : `${DRUG_EVAL_STORAGE_KEY_PREFIX}.anonymous`;
   const activeDrugEvaluationJobIdRef = useRef<string | null>(null);
+  const cancelledDrugEvaluationJobIdRef = useRef<string | null>(null);
 
   const [validationState, setValidationState] = useState<ValidationState>(() => {
     try {
@@ -205,7 +221,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
           error: null
         }));
 
-        const response = await waitForScientificJob(jobId);
+        const response = await waitForScientificJob(jobId, () => cancelledDrugEvaluationJobIdRef.current === jobId);
         if (!active) {
           return;
         }
@@ -219,6 +235,17 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
         }));
       } catch (err) {
         if (!active) {
+          return;
+        }
+
+        if (err instanceof CancellationError) {
+          setDrugEvaluationState((current) => ({
+            ...current,
+            status: 'cancelled',
+            jobId: null,
+            result: null,
+            error: null
+          }));
           return;
         }
 
@@ -249,7 +276,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
     try {
       const submission = await runValidation();
       setValidationState((current) => ({ ...current, status: 'running' }));
-      const response = await waitForScientificJob(submission.job_id);
+      const response = await waitForScientificJob(submission.job_id, () => false);
 
       setValidationState({ status: 'completed', result: response, error: null });
     } catch (err) {
@@ -282,8 +309,9 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       }));
 
       activeDrugEvaluationJobIdRef.current = submission.job_id;
+      cancelledDrugEvaluationJobIdRef.current = null;
 
-      const response = await waitForScientificJob(submission.job_id);
+      const response = await waitForScientificJob(submission.job_id, () => cancelledDrugEvaluationJobIdRef.current === submission.job_id);
 
       setDrugEvaluationState((current) => ({
         ...current,
@@ -294,6 +322,17 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
         error: null
       }));
     } catch (err) {
+      if (err instanceof CancellationError) {
+        setDrugEvaluationState((current) => ({
+          ...current,
+          status: 'cancelled',
+          jobId: null,
+          result: null,
+          error: null
+        }));
+        return;
+      }
+
       setDrugEvaluationState((current) => ({
         ...current,
         status: 'failed',
@@ -306,6 +345,32 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       if (activeDrugEvaluationJobIdRef.current) {
         activeDrugEvaluationJobIdRef.current = null;
       }
+    }
+  };
+
+  const cancelDrugEvaluationTask = async () => {
+    const jobId = drugEvaluationState.jobId;
+    if (!jobId) {
+      return;
+    }
+
+    cancelledDrugEvaluationJobIdRef.current = jobId;
+    try {
+      await cancelScientificJob(jobId);
+    } catch {
+      // If the backend cancellation fails, still stop polling locally.
+    }
+
+    setDrugEvaluationState((current) => ({
+      ...current,
+      status: 'cancelled',
+      jobId: null,
+      result: null,
+      error: null
+    }));
+
+    if (activeDrugEvaluationJobIdRef.current === jobId) {
+      activeDrugEvaluationJobIdRef.current = null;
     }
   };
 
@@ -322,6 +387,7 @@ export function RunTaskProvider({ children }: { children: React.ReactNode }) {
       drugEvaluationState,
       runValidationTask,
       runDrugEvaluationTask,
+      cancelDrugEvaluationTask,
       setDrugEvaluationPayload
     }),
     [validationState, drugEvaluationState]

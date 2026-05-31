@@ -64,7 +64,7 @@ function getResponseMode(result: BackendRunResponse | null): string {
 }
 
 export function DrugEvaluationPage() {
-  const { drugEvaluationState, runDrugEvaluationTask, setDrugEvaluationPayload } = useRunTask();
+  const { drugEvaluationState, runDrugEvaluationTask, cancelDrugEvaluationTask, setDrugEvaluationPayload } = useRunTask();
 
   const payload = drugEvaluationState.payload;
   const loading = drugEvaluationState.status === 'queued' || drugEvaluationState.status === 'running';
@@ -188,7 +188,7 @@ export function DrugEvaluationPage() {
         </div>
       </motion.div>
 
-      {loading ? <LoadingEngineState activeStep={activeStep} /> : null}
+      {loading ? <LoadingEngineState activeStep={activeStep} onStop={() => void cancelDrugEvaluationTask()} /> : null}
 
       <div className="grid gap-6">
         <DrugInputForm

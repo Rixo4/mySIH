@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import socket
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from rq.job import Job
 
 from .config import get_settings
 from .artifact_store import get_artifact_store
@@ -17,6 +19,7 @@ from .database import SessionLocal
 from .engine_runner import run_engine
 from .models import DoseResult, RunRecord, SimulationJob, SimulationJobStatus
 from .queue.queues import simulation_queue
+from .queue.redis_conn import redis_conn
 from .report_parser import parse_report
 from .utils import ensure_directory, generate_run_id, sanitize_run_id, utc_now, write_json_file
 from .visualization import build_visualization_payload
@@ -116,6 +119,42 @@ def attach_rq_job_id(db: Session, *, simulation_job_id: uuid.UUID, rq_job_id: st
         return
     job.rq_job_id = rq_job_id
     db.commit()
+
+
+def cancel_scientific_simulation_job(db: Session, *, simulation_job_id: uuid.UUID) -> SimulationJob:
+    job = db.get(SimulationJob, simulation_job_id)
+    if job is None:
+        raise ValueError(f"SimulationJob {simulation_job_id} not found")
+
+    if job.status in {SimulationJobStatus.COMPLETED, SimulationJobStatus.FAILED, SimulationJobStatus.CANCELLED}:
+        return job
+
+    if job.rq_job_id:
+        try:
+            rq_job = Job.fetch(job.rq_job_id, connection=redis_conn)
+            rq_job.cancel()
+        except Exception:
+            logger.info(
+                "simulation_job_cancel_rq_cleanup_failed",
+                extra={"job_id": str(job.id), "rq_job_id": job.rq_job_id},
+            )
+
+    job.status = SimulationJobStatus.CANCELLED
+    job.error_message = "Cancelled by user"
+    job.completed_at = utc_now()
+    if job.started_at is not None:
+        job.runtime_seconds = max(0.0, (job.completed_at - job.started_at).total_seconds())
+    db.commit()
+
+    logger.info(
+        "simulation_job_cancelled",
+        extra={
+            "job_id": str(job.id),
+            "rq_job_id": job.rq_job_id,
+            "worker_hostname": job.worker_hostname,
+        },
+    )
+    return job
 
 
 def _count_running_jobs(db: Session) -> int:
@@ -458,8 +497,26 @@ def run_scientific_simulation_job(job_payload: dict[str, Any]) -> dict[str, Any]
         if job is None:
             raise ValueError(f"SimulationJob {simulation_job_id} not found")
 
+        db.refresh(job)
+        if job.status == SimulationJobStatus.CANCELLED:
+            return {
+                "job_id": str(job.id),
+                "status": job.status.value,
+                "result_run_id": job.result_run_id,
+                "error": job.error_message or "Cancelled by user",
+            }
+
         if _count_running_jobs(db) >= max_concurrent_simulations():
             raise RuntimeError("Maximum concurrent simulations reached")
+
+        db.refresh(job)
+        if job.status == SimulationJobStatus.CANCELLED:
+            return {
+                "job_id": str(job.id),
+                "status": job.status.value,
+                "result_run_id": job.result_run_id,
+                "error": job.error_message or "Cancelled by user",
+            }
 
         report_type = str(job_payload.get("report_type", "simulate"))
         input_payload = job_payload.get("input_payload")
@@ -520,6 +577,16 @@ def run_scientific_simulation_job(job_payload: dict[str, Any]) -> dict[str, Any]
             drug_config_path=str(run_dir / "input.json"),
             cwd=str(run_dir),
         )
+
+        db.refresh(job)
+        if job.status == SimulationJobStatus.CANCELLED:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            return {
+                "job_id": str(job.id),
+                "status": job.status.value,
+                "result_run_id": job.result_run_id,
+                "error": job.error_message or "Cancelled by user",
+            }
 
         raw_report = engine_result.stdout or ""
         engine_contract = _normalize_engine_contract(
@@ -607,6 +674,15 @@ def run_scientific_simulation_job(job_payload: dict[str, Any]) -> dict[str, Any]
         total_doses = len(dose_rows)
         created_at = utc_now()
         for index, row in enumerate(dose_rows, start=1):
+            db.refresh(job)
+            if job.status == SimulationJobStatus.CANCELLED:
+                shutil.rmtree(run_dir, ignore_errors=True)
+                return {
+                    "job_id": str(job.id),
+                    "status": job.status.value,
+                    "result_run_id": job.result_run_id,
+                    "error": job.error_message or "Cancelled by user",
+                }
             db.add(_row_to_dose_result(row, run_id=record.run_id, created_at=created_at))
             _update_progress(db, job=job, completed_doses=index, total_doses=total_doses)
 

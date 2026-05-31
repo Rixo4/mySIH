@@ -1,0 +1,72 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-K-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 999.98
+K IC50              : 8.00
+Ca IC50             : 1000.00
+Hill                : 3.20
+Runs                : 3.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 20.00
+Step Size            : 2.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Weak Sigmoidal
+Response Mode        : STANDARD_RESPONSE
+Model Fit (R^2)      : 0.93
+Max Effect           : 46 %
+Response Strength    : Moderate-to-Strong
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : 6.00
+Safety Observation   : Toxicity observed within tested range
+
+--------------------------------------------------
+
+[Excitatory Response Range]
+Excitatory Range     : 6.00 - 20.00
+Window Quality       : Continuous
+Optimal Zone         : Transient excitatory regime before seizure-risk escalation
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 4.00
+Excitatory Zone      : 6.00 - 20.00
+Severe Excitability Zone : 6.00 - 6.00
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : ~6.00
+Peak Efficiency      : ~20.00 (within toxic range)
+Saturation Trend     : Not observed within tested range
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 3
+Rate Variability     : 2.24
+Toxicity Variance    : 7.59
+Stability Score      : LOW
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : NOT RECOMMENDED
+Risk Level           : HIGH
+Reason               : Excitability and seizure-risk markers increased beyond therapeutic tolerance
+Confidence           : LOW
+
+==================================================

@@ -18,6 +18,7 @@ from .database import SessionLocal
 from .models import SimulationJob
 from . import models as _models_registry  # noqa: F401
 from .orchestration import enqueue_scientific_simulation, get_queue_stats, job_owner_matches, serialize_simulation_job
+from .orchestration import cancel_scientific_simulation_job
 from .schemas import (
     DeleteRunResponse,
     DoseEvalRequest,
@@ -178,6 +179,36 @@ def get_scientific_job_status(job_id: str, db: Session = Depends(get_db), user=D
         raise HTTPException(status_code=403, detail="Forbidden")
 
     payload = serialize_simulation_job(job)
+    return ScientificSimulationStatusResponse(
+        job_id=payload["job_id"],
+        status=payload["status"],
+        progress=payload["progress"],
+        created_at=payload["created_at"],
+        started_at=payload["started_at"],
+        completed_at=payload["completed_at"],
+        result_run_id=payload.get("result_run_id"),
+        error_message=payload.get("error_message"),
+        runtime_seconds=payload.get("runtime_seconds"),
+        queue_latency_seconds=payload.get("queue_latency_seconds"),
+    )
+
+
+@app.post("/api/jobs/{job_id}/cancel", response_model=ScientificSimulationStatusResponse)
+def cancel_scientific_job(job_id: str, db: Session = Depends(get_db), user=Depends(require_user)) -> ScientificSimulationStatusResponse:
+    try:
+        parsed_id = uuid.UUID(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid job id") from exc
+
+    job = db.get(SimulationJob, parsed_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job_owner_matches(job, user_id=user.id, company_id=user.company_id, user_role=user.role):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cancelled_job = cancel_scientific_simulation_job(db, simulation_job_id=parsed_id)
+    payload = serialize_simulation_job(cancelled_job)
     return ScientificSimulationStatusResponse(
         job_id=payload["job_id"],
         status=payload["status"],

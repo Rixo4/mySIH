@@ -154,6 +154,11 @@ export async function getScientificJobStatus(jobId: string): Promise<ScientificS
   return response.data;
 }
 
+export async function cancelScientificJob(jobId: string): Promise<ScientificSimulationStatusResponse> {
+  const response = await api.post<ScientificSimulationStatusResponse>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`);
+  return response.data;
+}
+
 export async function getRuns(): Promise<RunsListResponse> {
   const response = await api.get<RunsListResponse>('/api/runs');
   return response.data;
