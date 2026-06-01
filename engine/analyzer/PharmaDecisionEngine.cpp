@@ -7,6 +7,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <array>
 #include <vector>
 
 namespace spp::analyzer {
@@ -378,6 +379,14 @@ struct MechanisticDominance {
     double dominantEvidence = 0.0;
     double totalMeaningfulWeight = 0.0;
     bool hasMeaningfulEffect = false;
+    // Channel-level dominance (normalized shares)
+    double naShare = 0.0;
+    double kShare = 0.0;
+    double caShare = 0.0;
+    // Spread between top two channel shares
+    double dominanceSpread = 0.0;
+    // True when two channels compete closely
+    bool mixedMechanism = false;
 };
 
 double dominantChannelScore(const DoseObservation& obs, BiologicalState state) {
@@ -450,7 +459,7 @@ double mechanisticEvidenceScore(
     return std::clamp(0.40 * channelScore + 0.60 * std::clamp(directionScore, 0.0, 2.0) / 2.0, 0.0, 1.0);
 }
 
-MechanisticDominance computeMechanisticDominance(const std::vector<BiologicalState>& doseStates, const std::vector<double>& doseWeights) {
+MechanisticDominance computeMechanisticDominance(const std::vector<BiologicalState>& doseStates, const std::vector<double>& doseWeights, const std::vector<double>& naBlocks, const std::vector<double>& kBlocks, const std::vector<double>& caBlocks) {
     MechanisticDominance dominance;
     if (doseStates.empty() || doseStates.size() != doseWeights.size()) {
         dominance.dominantMode = "NO_SIGNIFICANT_RESPONSE";
@@ -482,6 +491,48 @@ MechanisticDominance computeMechanisticDominance(const std::vector<BiologicalSta
         if (state != BiologicalState::LimitedEffect) {
             dominance.hasMeaningfulEffect = true;
             dominance.totalMeaningfulWeight += weight;
+        }
+    }
+
+    // Compute channel-level weighted shares from per-dose block fractions
+    double naSum = 0.0;
+    double kSum = 0.0;
+    double caSum = 0.0;
+    double weightSum = 0.0;
+    for (std::size_t i = 0; i < doseWeights.size(); ++i) {
+        const double w = std::max(0.0, doseWeights[i]);
+        weightSum += w;
+        if (i < naBlocks.size()) naSum += w * std::clamp(naBlocks[i], 0.0, 1.0);
+        if (i < kBlocks.size()) kSum += w * std::clamp(kBlocks[i], 0.0, 1.0);
+        if (i < caBlocks.size()) caSum += w * std::clamp(caBlocks[i], 0.0, 1.0);
+    }
+    if (weightSum > 1.0e-12) {
+        dominance.naShare = naSum / weightSum;
+        dominance.kShare = kSum / weightSum;
+        dominance.caShare = caSum / weightSum;
+    }
+    // compute spread and mixed mechanism flag
+    std::array<std::pair<double,std::string>,3> shares = {{{dominance.naShare,"NA"},{dominance.kShare,"K"},{dominance.caShare,"CA"}}};
+    std::sort(shares.begin(), shares.end(), [](auto &a, auto &b){ return a.first > b.first; });
+    dominance.dominanceSpread = shares[0].first - shares[1].first;
+    dominance.mixedMechanism = (shares[0].first >= 0.15 && shares[1].first >= 0.15 && dominance.dominanceSpread < 0.12);
+
+    // Also detect mixed mechanism when two mode summaries have near-equal weight
+    if (!dominance.modeSummaries.empty()) {
+        std::vector<std::pair<double,std::string>> modeWeights;
+        for (const auto &entry : dominance.modeSummaries) {
+            modeWeights.push_back({entry.second.weight, entry.first});
+        }
+        std::sort(modeWeights.begin(), modeWeights.end(), [](auto &a, auto &b){ return a.first > b.first; });
+        if (modeWeights.size() > 1) {
+            const double top = modeWeights[0].first;
+            const double second = modeWeights[1].first;
+            const double total = dominance.totalMeaningfulWeight > 1.0e-12 ? dominance.totalMeaningfulWeight : 1.0;
+            const double topShare = top / total;
+            const double secondShare = second / total;
+            if (topShare >= 0.15 && secondShare >= 0.15 && (topShare - secondShare) < 0.12) {
+                dominance.mixedMechanism = true;
+            }
         }
     }
 
@@ -561,33 +612,51 @@ std::string resolveResponseMode(
         return "NO_SIGNIFICANT_RESPONSE";
     }
 
-    if ((sustained(toxicSummary) && toxicShare >= 0.20) || (sustained(silencingSummary) && silencingShare >= 0.20)) {
-        return toxicShare >= silencingShare ? "TOXIC_INSTABILITY" : "NEURAL_SILENCING";
+    // Toxic or sustained neural silencing outrank mechanism dominance
+    if ((sustained(toxicSummary) && toxicShare >= 0.20)) {
+        return "TOXIC_INSTABILITY";
+    }
+    if ((sustained(silencingSummary) && silencingShare >= 0.20)) {
+        return "NEURAL_SILENCING";
     }
 
-    if (sustained(stabilizingSummary) && finalMeaningfulCaBlock && finalCalciumEffectMagnitude >= 15.0 && stabilizingShare >= 0.30) {
-        return "STABILIZING_RESPONSE";
-    }
-
-    if (sustained(suppressiveSummary) && suppressiveShare >= 0.30) {
-        return "SUPPRESSIVE_RESPONSE";
-    }
-
-    if (sustained(excitatorySummary) && excitatoryShare >= 0.30) {
-        return "EXCITATORY_RESPONSE";
-    }
-
-    const bool mixedDominance =
-        dominance.dominantShare >= 0.35 && dominance.dominantMargin < 0.10 &&
-        ((stabilizingShare > 0.0 && suppressiveShare > 0.0) ||
-         (stabilizingShare > 0.0 && excitatoryShare > 0.0) ||
-         (suppressiveShare > 0.0 && excitatoryShare > 0.0) ||
-         (toxicShare > 0.0 && (suppressiveShare > 0.0 || excitatoryShare > 0.0)) ||
-         (silencingShare > 0.0 && (suppressiveShare > 0.0 || excitatoryShare > 0.0)));
-    if (mixedDominance) {
+    // Mixed channel contributions -> do not force single ontology; keep ambiguous
+    if (dominance.mixedMechanism) {
         return "STANDARD_RESPONSE";
     }
 
+    // Channel-first classification
+    const double naShare = dominance.naShare;
+    const double kShare = dominance.kShare;
+    const double caShare = dominance.caShare;
+
+    // Calcium-dominant stabilization: require calcium dominance and measurable calcium effect
+    if (caShare > naShare && caShare > kShare) {
+        if (finalMeaningfulCaBlock && finalCalciumEffectMagnitude >= 15.0 && stabilizingShare >= 0.30 && sustained(stabilizingSummary)) {
+            return "STABILIZING_RESPONSE";
+        }
+        // If calcium not providing stabilizing evidence, fall through to standard
+    }
+
+    // Potassium-dominant => excitatory
+    if (kShare > naShare && kShare > caShare) {
+        if (sustained(excitatorySummary) && excitatoryShare >= 0.20) {
+            return "EXCITATORY_RESPONSE";
+        }
+        // If excitatory evidence weak, still allow STANDARD
+    }
+
+    // Sodium-dominant => suppression (but do not pick suppression if excitatory/toxic markers are present)
+    if (naShare > kShare && naShare > caShare) {
+        if (sustained(suppressiveSummary) && suppressiveShare >= 0.25 && excitatoryShare < 0.15 && toxicShare < 0.15) {
+            return "SUPPRESSIVE_RESPONSE";
+        }
+        if (sustained(silencingSummary) && silencingShare >= 0.20) {
+            return "NEURAL_SILENCING";
+        }
+    }
+
+    // If one dominant mode has strong evidence (fallback to dominantMode)
     if (dominance.dominantShare >= 0.55 && dominance.dominantMargin >= 0.10) {
         if (dominance.dominantMode == "STABILIZING_RESPONSE") {
             return finalMeaningfulCaBlock && finalCalciumEffectMagnitude >= 15.0 ? "STABILIZING_RESPONSE" : "STANDARD_RESPONSE";
@@ -595,6 +664,7 @@ std::string resolveResponseMode(
         return dominance.dominantMode;
     }
 
+    // Conservative default: ambiguous when evidence conflicts
     return "STANDARD_RESPONSE";
 }
 
@@ -765,6 +835,9 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     std::vector<double> overSuppressionDoses;
     std::vector<BiologicalState> doseStates;
     std::vector<double> doseWeights;
+    std::vector<double> doseBlockNa;
+    std::vector<double> doseBlockK;
+    std::vector<double> doseBlockCa;
     doseStates.reserve(sorted.size());
     doseWeights.reserve(sorted.size());
 
@@ -919,7 +992,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         if (perDoseState == BiologicalState::LimitedEffect) {
             safeDoses.push_back(static_cast<double>(dose));
         }
-        if (perDoseState == BiologicalState::ControlledSuppression || perDoseState == BiologicalState::NetworkStabilization) {
+        if ((perDoseState == BiologicalState::ControlledSuppression || perDoseState == BiologicalState::NetworkStabilization) && !isToxic) {
             therapeuticDoses.push_back(static_cast<double>(dose));
             if (!hasOnsetDose) {
                 hasOnsetDose = true;
@@ -976,6 +1049,9 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
         doseStates.push_back(perDoseState);
         doseWeights.push_back(1.0 + (perDoseState == BiologicalState::LimitedEffect ? 0.0 : 0.35) + 0.65 * mechanisticEvidence);
+        doseBlockNa.push_back(static_cast<double>(obs.blockNa));
+        doseBlockK.push_back(static_cast<double>(obs.blockK));
+        doseBlockCa.push_back(static_cast<double>(obs.blockCa));
     }
 
     if (std::isfinite(maxRateChangePct)) {
@@ -1120,7 +1196,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.effectiveRangeMax
     );
 
-    const MechanisticDominance dominance = computeMechanisticDominance(doseStates, doseWeights);
+    const MechanisticDominance dominance = computeMechanisticDominance(doseStates, doseWeights, doseBlockNa, doseBlockK, doseBlockCa);
     const std::string resolvedResponseMode = resolveResponseMode(
         dominance,
         finalMeaningfulCaBlock,
@@ -1134,7 +1210,13 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     if (resolvedResponseMode == "NO_SIGNIFICANT_RESPONSE") {
         report.biologicalState = BiologicalState::LimitedEffect;
     } else if (resolvedResponseMode == "STANDARD_RESPONSE") {
-        report.biologicalState = dominance.dominantState == BiologicalState::LimitedEffect ? detectedState : dominance.dominantState;
+        // When ambiguous (STANDARD_RESPONSE) and channels indicate mixed mechanism,
+        // prefer the observed detectedState rather than forcing the dominantState.
+        if (dominance.mixedMechanism) {
+            report.biologicalState = detectedState;
+        } else {
+            report.biologicalState = dominance.dominantState == BiologicalState::LimitedEffect ? detectedState : dominance.dominantState;
+        }
     } else {
         report.biologicalState = stateForResponseMode(resolvedResponseMode);
     }
@@ -1159,6 +1241,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         default:
             report.responseMode = "NO_SIGNIFICANT_RESPONSE";
             break;
+    }
+
+    // If channels indicate a true mixed mechanism, force ambiguous responseMode
+    if (dominance.mixedMechanism) {
+        report.responseMode = "STANDARD_RESPONSE";
     }
 
     const bool stabilizingResponseObserved = report.responseMode == "STABILIZING_RESPONSE";
@@ -1275,6 +1362,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     }
 
     report.confidence = confidenceFromEvidence(stabilityInput, report.sigmoidR2, therapeuticWindowExists, fragmentedWindow);
+    // If channels indicate a true mixed mechanism, reduce confidence to reflect mechanistic ambiguity
+    if (dominance.mixedMechanism) {
+        report.confidence = "LOW";
+    }
     report.hasToxicThresholdExact = report.hasToxicThreshold;
     report.toxicThresholdText = report.hasToxicThreshold ? std::to_string(report.toxicThresholdDoseEval)
                                                          : ">" + std::to_string(report.maxTestedDose);

@@ -66,7 +66,7 @@ export function ReportDetailPage() {
   return (
     <div className="space-y-6 pb-24 xl:pb-8">
       <div className="flex items-center justify-between gap-3">
-        <Link to="/history" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/30 hover:bg-cyan-500/10">
+        <Link to="/app/history" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/30 hover:bg-cyan-500/10">
           <ArrowLeft className="h-4 w-4" /> Back to History
         </Link>
         <button
