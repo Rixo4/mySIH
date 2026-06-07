@@ -124,6 +124,11 @@ async function waitForScientificJob(jobId: string, shouldStop: () => boolean): P
 
     const job = await getScientificJobStatus(jobId);
 
+    if (job.result_run_id) {
+      const detail = await getRunDetail(job.result_run_id);
+      return mapRunDetailToBackendResponse(detail);
+    }
+
     if (job.status === 'FAILED' || job.status === 'CANCELLED') {
       if (job.status === 'CANCELLED') {
         throw new CancellationError();
@@ -132,12 +137,7 @@ async function waitForScientificJob(jobId: string, shouldStop: () => boolean): P
     }
 
     if (job.status === 'COMPLETED') {
-      if (!job.result_run_id) {
-        throw new Error('Completed job did not return a run record');
-      }
-
-      const detail = await getRunDetail(job.result_run_id);
-      return mapRunDetailToBackendResponse(detail);
+      throw new Error('Completed job did not return a run record');
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
