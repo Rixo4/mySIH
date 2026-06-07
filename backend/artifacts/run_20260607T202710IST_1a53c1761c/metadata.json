@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/app/build-validate/silicon_patient",
+    "--dose-eval",
+    "--drug-config",
+    "/app/backend/runs/run_20260607T202710IST_1a53c1761c/input.json"
+  ],
+  "duration_seconds": 259.349,
+  "engine_input_mode": "user_config",
+  "engine_path": "/app/build-validate/silicon_patient",
+  "queue_latency_seconds": 58.3862,
+  "report_type": "dose-eval",
+  "return_code": 0,
+  "run_id": "run_20260607T202710IST_1a53c1761c",
+  "status": "completed",
+  "worker_hostname": "8a6f96d9e0bd"
+}
