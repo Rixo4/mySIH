@@ -35,3 +35,4 @@ backend/.env
 DEPLOYMENT.md
 vercel.json
 echo "backend/artifacts/" >> .gitignore
+echo "backend/artifacts/*" >> .gitignore

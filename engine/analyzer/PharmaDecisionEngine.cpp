@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -280,6 +281,32 @@ std::vector<Range> contiguousRanges(const std::vector<double>& doses, double ste
     return out;
 }
 
+std::vector<bool> smoothBiologicalMask(const std::vector<bool>& mask) {
+    if (mask.size() < 3U) {
+        return mask;
+    }
+
+    std::vector<bool> smoothed = mask;
+    for (std::size_t i = 1U; i + 1U < mask.size(); ++i) {
+        if (mask[i - 1U] == mask[i + 1U] && mask[i] != mask[i - 1U]) {
+            smoothed[i] = mask[i - 1U];
+        }
+    }
+    return smoothed;
+}
+
+std::vector<double> dosesFromMask(const std::vector<double>& doses, const std::vector<bool>& mask) {
+    std::vector<double> selected;
+    const std::size_t n = std::min(doses.size(), mask.size());
+    selected.reserve(n);
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (mask[i]) {
+            selected.push_back(doses[i]);
+        }
+    }
+    return selected;
+}
+
 DrugRiskTier classifyTier(float seizureNorm, float suppressionNorm, float riskScore) {
     if (seizureNorm > 0.80f || suppressionNorm > 0.80f || riskScore >= 80.0f) {
         return DrugRiskTier::Toxic;
@@ -322,89 +349,66 @@ std::string primaryChangeTextForState(
     }
 }
 
-std::string responseModeForState(BiologicalState state) {
-    switch (state) {
-        case BiologicalState::ControlledSuppression:
-            return "SUPPRESSIVE_RESPONSE";
-        case BiologicalState::NeuralSilencing:
-            return "NEURAL_SILENCING";
-        case BiologicalState::Hyperexcitability:
-            return "EXCITATORY_RESPONSE";
-        case BiologicalState::NetworkStabilization:
-            return "STABILIZING_RESPONSE";
-        case BiologicalState::ToxicInstability:
-            return "TOXIC_INSTABILITY";
-        case BiologicalState::LimitedEffect:
-        default:
-            return "NO_SIGNIFICANT_RESPONSE";
-    }
-}
+enum class Mechanism {
+    None,
+    Suppression,
+    Excitation,
+    Stabilization,
+    Silencing,
+    Toxicity,
+    Mixed
+};
 
-BiologicalState stateForResponseMode(const std::string& mode) {
-    if (mode == "SUPPRESSIVE_RESPONSE") {
-        return BiologicalState::ControlledSuppression;
-    }
-    if (mode == "NEURAL_SILENCING") {
-        return BiologicalState::NeuralSilencing;
-    }
-    if (mode == "EXCITATORY_RESPONSE") {
-        return BiologicalState::Hyperexcitability;
-    }
-    if (mode == "STABILIZING_RESPONSE") {
-        return BiologicalState::NetworkStabilization;
-    }
-    if (mode == "TOXIC_INSTABILITY") {
-        return BiologicalState::ToxicInstability;
-    }
-    return BiologicalState::LimitedEffect;
-}
+struct DoseMechanisticEvidence {
+    BiologicalState biologicalState = BiologicalState::LimitedEffect;
+    double suppressionScore = 0.0;
+    double excitationScore = 0.0;
+    double stabilizationScore = 0.0;
+    double silencingScore = 0.0;
+    double toxicityScore = 0.0;
+    double sodiumContribution = 0.0;
+    double potassiumContribution = 0.0;
+    double calciumContribution = 0.0;
+    double evidenceWeight = 0.0;
+};
 
-struct ModeSummary {
-    BiologicalState state = BiologicalState::LimitedEffect;
-    std::size_t count = 0U;
-    std::size_t currentRun = 0U;
-    std::size_t longestRun = 0U;
-    double weight = 0.0;
-    double evidence = 0.0;
+struct MechanisticAnalysis {
+    double suppressionScore = 0.0;
+    double excitationScore = 0.0;
+    double stabilizationScore = 0.0;
+    double silencingScore = 0.0;
+    double toxicityScore = 0.0;
+    double sodiumContribution = 0.0;
+    double potassiumContribution = 0.0;
+    double calciumContribution = 0.0;
+    double dominantScore = 0.0;
+    double runnerUpScore = 0.0;
+    double dominanceMargin = 0.0;
+    double totalEvidence = 0.0;
     double peakEvidence = 0.0;
-};
-
-struct MechanisticDominance {
-    std::map<std::string, ModeSummary> modeSummaries;
-    std::string dominantMode = "STANDARD_RESPONSE";
-    BiologicalState dominantState = BiologicalState::LimitedEffect;
-    double dominantShare = 0.0;
-    double dominantMargin = 0.0;
-    double dominantEvidence = 0.0;
-    double totalMeaningfulWeight = 0.0;
+    double fragmentationPenalty = 0.0;
+    double contradictionPenalty = 0.0;
     bool hasMeaningfulEffect = false;
+    bool hasMinimalBiologicalChange = true;
+    Mechanism dominantMechanism = Mechanism::None;
+    BiologicalState dominantBiologicalState = BiologicalState::LimitedEffect;
 };
 
-double dominantChannelScore(const DoseObservation& obs, BiologicalState state) {
-    const double dominant = std::max({static_cast<double>(obs.blockNa), static_cast<double>(obs.blockK), static_cast<double>(obs.blockCa)});
-    const double runnerUp = std::max(
-        dominant == static_cast<double>(obs.blockNa) ? static_cast<double>(obs.blockK) : static_cast<double>(obs.blockNa),
-        dominant == static_cast<double>(obs.blockCa) ? static_cast<double>(obs.blockK) : static_cast<double>(obs.blockCa)
-    );
-    const double dominance = std::clamp(dominant - runnerUp, 0.0, 1.0);
+struct ConfidenceAnalysis {
+    double score = 0.0;
+    std::string label = "LOW";
+};
 
-    switch (state) {
-        case BiologicalState::ControlledSuppression:
-        case BiologicalState::NeuralSilencing:
-            return std::clamp(static_cast<double>(obs.blockNa) + dominance, 0.0, 1.0);
-        case BiologicalState::Hyperexcitability:
-            return std::clamp(static_cast<double>(obs.blockK) + dominance, 0.0, 1.0);
-        case BiologicalState::NetworkStabilization:
-            return std::clamp(static_cast<double>(obs.blockCa) + dominance, 0.0, 1.0);
-        case BiologicalState::ToxicInstability:
-            return std::clamp(0.50 * static_cast<double>(obs.blockNa) + 0.50 * static_cast<double>(obs.blockK) + dominance, 0.0, 1.0);
-        case BiologicalState::LimitedEffect:
-        default:
-            return std::clamp(1.0 - dominant, 0.0, 1.0);
-    }
+struct OntologySummary {
+    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
+    BiologicalState biologicalState = BiologicalState::LimitedEffect;
+};
+
+double channelContribution(double blockFraction, double biologicalEvidence) {
+    return std::clamp(0.25 * safeNonNegativeD(blockFraction) + 0.75 * biologicalEvidence, 0.0, 1.0);
 }
 
-double mechanisticEvidenceScore(
+DoseMechanisticEvidence analyzeDoseMechanism(
     const DoseObservation& obs,
     BiologicalState state,
     double rateChangeFrac,
@@ -417,185 +421,225 @@ double mechanisticEvidenceScore(
     double burstReductionPct,
     double baselineRate
 ) {
-    const double channelScore = dominantChannelScore(obs, state);
+    DoseMechanisticEvidence evidence;
+    evidence.biologicalState = state;
+
     const double improvementScore = std::clamp(
         std::max({syncReductionPct, niiReductionPct, seizureReductionPct, burstReductionPct}) / 100.0,
         0.0,
         1.0
     );
+    const double suppressionBiology = std::clamp(((-rateChangeFrac) - 0.10) / 0.60, 0.0, 1.0);
+    const double excitationBiology = std::clamp(std::max({rateChangeFrac, syncDelta, niiDelta, seizureDelta}) / 0.40, 0.0, 1.0);
+    const double silencingBiology = std::clamp((0.10 * baselineRate - std::max(0.0, baselineRate * (1.0 + rateChangeFrac))) / std::max(1.0, baselineRate), 0.0, 1.0);
+    const double toxicityBiology = std::clamp(std::max({niiDelta, seizureDelta}) / 0.40, 0.0, 1.0);
+    const double stabilizationBiology = std::clamp(
+        0.70 * improvementScore +
+        0.30 * std::clamp((std::max({syncReductionPct, niiReductionPct, seizureReductionPct, burstReductionPct}) - 10.0) / 35.0, 0.0, 1.0),
+        0.0,
+        1.0
+    );
 
-    double directionScore = 0.0;
-    switch (state) {
-        case BiologicalState::ControlledSuppression:
-            directionScore = std::clamp(((-rateChangeFrac) - 0.10) / 0.60, 0.0, 1.0) + improvementScore;
-            break;
-        case BiologicalState::NeuralSilencing:
-            directionScore = std::clamp((0.10 * baselineRate - std::max(0.0, baselineRate * (1.0 + rateChangeFrac))) / std::max(1.0, baselineRate), 0.0, 1.0) + improvementScore;
-            break;
-        case BiologicalState::Hyperexcitability:
-            directionScore = std::clamp(std::max({rateChangeFrac, syncDelta, niiDelta, seizureDelta}) / 0.40, 0.0, 1.0) + std::clamp((seizureDelta > 0.0 ? seizureDelta : 0.0) / 0.25, 0.0, 1.0);
-            break;
-        case BiologicalState::NetworkStabilization:
-            directionScore = improvementScore + std::clamp((std::max({syncReductionPct, niiReductionPct, seizureReductionPct, burstReductionPct}) - 10.0) / 35.0, 0.0, 1.0);
-            break;
-        case BiologicalState::ToxicInstability:
-            directionScore = std::clamp(std::max({niiDelta, seizureDelta}) / 0.40, 0.0, 1.0) + std::clamp((std::max({niiDelta, seizureDelta}) - 0.20) / 0.30, 0.0, 1.0);
-            break;
-        case BiologicalState::LimitedEffect:
-        default:
-            directionScore = std::clamp(1.0 - std::max({static_cast<double>(obs.blockNa), static_cast<double>(obs.blockK), static_cast<double>(obs.blockCa)}), 0.0, 1.0);
-            break;
-    }
-
-    return std::clamp(0.40 * channelScore + 0.60 * std::clamp(directionScore, 0.0, 2.0) / 2.0, 0.0, 1.0);
+    evidence.suppressionScore = suppressionBiology;
+    evidence.excitationScore = excitationBiology;
+    evidence.stabilizationScore = stabilizationBiology;
+    evidence.silencingScore = silencingBiology;
+    evidence.toxicityScore = toxicityBiology;
+    evidence.sodiumContribution = channelContribution(obs.blockNa, std::max(suppressionBiology, silencingBiology));
+    evidence.potassiumContribution = channelContribution(obs.blockK, excitationBiology);
+    evidence.calciumContribution = channelContribution(obs.blockCa, stabilizationBiology);
+    evidence.evidenceWeight = std::max({evidence.suppressionScore, evidence.excitationScore, evidence.stabilizationScore, evidence.silencingScore, evidence.toxicityScore});
+    return evidence;
 }
 
-MechanisticDominance computeMechanisticDominance(const std::vector<BiologicalState>& doseStates, const std::vector<double>& doseWeights) {
-    MechanisticDominance dominance;
-    if (doseStates.empty() || doseStates.size() != doseWeights.size()) {
-        dominance.dominantMode = "NO_SIGNIFICANT_RESPONSE";
-        dominance.dominantState = BiologicalState::LimitedEffect;
-        dominance.dominantShare = 1.0;
-        dominance.dominantMargin = 1.0;
-        return dominance;
+MechanisticAnalysis analyzeMechanisms(
+    const std::vector<DoseMechanisticEvidence>& doseEvidence,
+    double maxRateChangePct,
+    double maxSyncDelta,
+    double maxNiiDelta,
+    double maxSeizureDelta,
+    bool fragmentedWindow
+) {
+    MechanisticAnalysis analysis;
+    if (doseEvidence.empty()) {
+        return analysis;
     }
 
-    std::string previousMode;
-    for (std::size_t i = 0; i < doseStates.size(); ++i) {
-        const BiologicalState state = doseStates[i];
-        const std::string mode = responseModeForState(state);
-        const double weight = std::max(0.0, doseWeights[i]);
-
-        auto& summary = dominance.modeSummaries[mode];
-        summary.state = state;
-        summary.count += 1U;
-        summary.weight += weight;
-
-        if (!previousMode.empty() && previousMode == mode) {
-            summary.currentRun += 1U;
-        } else {
-            summary.currentRun = 1U;
-        }
-        summary.longestRun = std::max(summary.longestRun, summary.currentRun);
-        previousMode = mode;
-
-        if (state != BiologicalState::LimitedEffect) {
-            dominance.hasMeaningfulEffect = true;
-            dominance.totalMeaningfulWeight += weight;
-        }
+    std::map<BiologicalState, double> stateWeights;
+    for (const auto& evidence : doseEvidence) {
+        const double weight = 1.0 + evidence.evidenceWeight;
+        analysis.suppressionScore += evidence.suppressionScore * weight;
+        analysis.excitationScore += evidence.excitationScore * weight;
+        analysis.stabilizationScore += evidence.stabilizationScore * weight;
+        analysis.silencingScore += evidence.silencingScore * weight;
+        analysis.toxicityScore += evidence.toxicityScore * weight;
+        analysis.sodiumContribution += evidence.sodiumContribution * weight;
+        analysis.potassiumContribution += evidence.potassiumContribution * weight;
+        analysis.calciumContribution += evidence.calciumContribution * weight;
+        analysis.totalEvidence += weight;
+        analysis.peakEvidence = std::max(analysis.peakEvidence, evidence.evidenceWeight);
+        stateWeights[evidence.biologicalState] += weight;
     }
 
-    if (!dominance.hasMeaningfulEffect || dominance.totalMeaningfulWeight <= 1.0e-6) {
-        dominance.dominantMode = "NO_SIGNIFICANT_RESPONSE";
-        dominance.dominantState = BiologicalState::LimitedEffect;
-        dominance.dominantShare = 1.0;
-        dominance.dominantMargin = 1.0;
-        return dominance;
+    if (analysis.totalEvidence > 1.0e-6) {
+        analysis.suppressionScore /= analysis.totalEvidence;
+        analysis.excitationScore /= analysis.totalEvidence;
+        analysis.stabilizationScore /= analysis.totalEvidence;
+        analysis.silencingScore /= analysis.totalEvidence;
+        analysis.toxicityScore /= analysis.totalEvidence;
+        analysis.sodiumContribution /= analysis.totalEvidence;
+        analysis.potassiumContribution /= analysis.totalEvidence;
+        analysis.calciumContribution /= analysis.totalEvidence;
     }
 
-    std::vector<std::pair<std::string, const ModeSummary*>> ranked;
-    ranked.reserve(dominance.modeSummaries.size());
-    for (const auto& entry : dominance.modeSummaries) {
-        ranked.push_back({entry.first, &entry.second});
-    }
-    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
-        if (a.second->weight != b.second->weight) {
-            return a.second->weight > b.second->weight;
-        }
-        return a.second->count > b.second->count;
+    std::vector<std::pair<Mechanism, double>> mechanismScores = {
+        {Mechanism::Suppression, analysis.suppressionScore},
+        {Mechanism::Excitation, analysis.excitationScore},
+        {Mechanism::Stabilization, analysis.stabilizationScore},
+        {Mechanism::Silencing, analysis.silencingScore},
+        {Mechanism::Toxicity, analysis.toxicityScore}
+    };
+    std::sort(mechanismScores.begin(), mechanismScores.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
     });
 
-    const auto bestIt = ranked.begin();
-    const auto secondIt = ranked.size() > 1U ? std::next(ranked.begin()) : ranked.end();
-    if (bestIt != ranked.end()) {
-        dominance.dominantMode = bestIt->first;
-        dominance.dominantState = bestIt->second->state;
-        dominance.dominantShare = bestIt->second->weight / dominance.totalMeaningfulWeight;
-        dominance.dominantEvidence = bestIt->second->count == 0U ? 0.0 : bestIt->second->evidence / static_cast<double>(bestIt->second->count);
-        dominance.dominantMargin = secondIt != ranked.end()
-                                        ? std::max(0.0, bestIt->second->weight - secondIt->second->weight) / dominance.totalMeaningfulWeight
-                                        : dominance.dominantShare;
+    analysis.dominantMechanism = mechanismScores.front().first;
+    analysis.dominantScore = mechanismScores.front().second;
+    analysis.runnerUpScore = mechanismScores.size() > 1U ? mechanismScores[1].second : 0.0;
+    analysis.dominanceMargin = std::max(0.0, analysis.dominantScore - analysis.runnerUpScore);
+
+    const bool multipleCompetingMechanisms =
+        analysis.dominantScore >= 0.35 &&
+        analysis.runnerUpScore >= 0.30 &&
+        analysis.dominanceMargin < 0.15;
+    if (multipleCompetingMechanisms) {
+        analysis.dominantMechanism = Mechanism::Mixed;
     }
 
-    return dominance;
+    const auto bestStateIt = std::max_element(stateWeights.begin(), stateWeights.end(), [](const auto& a, const auto& b) {
+        return a.second < b.second;
+    });
+    if (bestStateIt != stateWeights.end()) {
+        analysis.dominantBiologicalState = bestStateIt->first;
+    }
+
+    std::vector<double> meaningfulStateShares;
+    meaningfulStateShares.reserve(stateWeights.size());
+    for (const auto& stateWeight : stateWeights) {
+        if (stateWeight.first == BiologicalState::LimitedEffect || analysis.totalEvidence <= 1.0e-6) {
+            continue;
+        }
+        meaningfulStateShares.push_back(stateWeight.second / analysis.totalEvidence);
+    }
+    std::sort(meaningfulStateShares.begin(), meaningfulStateShares.end(), std::greater<double>());
+    const bool competingBiologicalStates =
+        meaningfulStateShares.size() >= 2U &&
+        meaningfulStateShares[0] >= 0.25 &&
+        meaningfulStateShares[1] >= 0.25 &&
+        (meaningfulStateShares[0] - meaningfulStateShares[1]) < 0.25 &&
+        analysis.silencingScore < 0.45 &&
+        analysis.toxicityScore < 0.45;
+    if (competingBiologicalStates) {
+        analysis.dominantMechanism = Mechanism::Mixed;
+        analysis.dominanceMargin = std::min(analysis.dominanceMargin, meaningfulStateShares[0] - meaningfulStateShares[1]);
+    }
+
+    analysis.hasMeaningfulEffect = analysis.dominantScore >= 0.20 || analysis.peakEvidence >= 0.30;
+    analysis.hasMinimalBiologicalChange =
+        maxRateChangePct < 10.0 &&
+        std::fabs(maxSyncDelta) < 0.05 &&
+        std::fabs(maxNiiDelta) < 0.05 &&
+        std::fabs(maxSeizureDelta) < 5.0 &&
+        analysis.peakEvidence < 0.20;
+    analysis.fragmentationPenalty = fragmentedWindow ? 0.15 : 0.0;
+    analysis.contradictionPenalty = multipleCompetingMechanisms ? 0.10 : 0.0;
+    return analysis;
 }
 
-std::string resolveResponseMode(
-    const MechanisticDominance& dominance,
-    bool finalMeaningfulCaBlock,
-    double finalCalciumEffectMagnitude,
-    bool lowStability,
+ConfidenceAnalysis analyzeConfidence(
+    const MechanisticAnalysis& mechanism,
+    const DecisionStabilityInput& stability,
+    double sigmoidR2,
     bool therapeuticWindowExists,
-    bool fragmentedWindow,
-    double maxRateChangePct
+    bool fragmentedWindow
 ) {
-    (void)lowStability;
-    (void)therapeuticWindowExists;
-    (void)fragmentedWindow;
-    (void)maxRateChangePct;
+    ConfidenceAnalysis confidence;
+    const double stabilityPenalty = ((stability.stabilityScore == "LOW") ||
+                                     (stability.rateStd >= 2.0f) ||
+                                     (stability.toxicityStd >= 10.0f)) ? 0.25 : 0.0;
+    const double doseResponseCoherence = std::clamp(sigmoidR2, 0.0, 1.0);
+    const double dominanceRobustness = std::clamp(mechanism.dominanceMargin / 0.35, 0.0, 1.0);
+    const double mechanisticConsistency = std::clamp(mechanism.dominantScore, 0.0, 1.0);
+    const double windowSupport = therapeuticWindowExists ? 0.15 : 0.0;
+    const double runCountModifier = std::clamp((static_cast<double>(stability.runCount) - 1.0) / 20.0, 0.0, 0.10);
 
-    const auto modeSummary = [&](const std::string& mode) -> const ModeSummary* {
-        const auto it = dominance.modeSummaries.find(mode);
-        return it == dominance.modeSummaries.end() ? nullptr : &it->second;
-    };
+    confidence.score = std::clamp(
+        0.30 * mechanisticConsistency +
+        0.25 * dominanceRobustness +
+        0.25 * doseResponseCoherence +
+        windowSupport +
+        runCountModifier -
+        stabilityPenalty -
+        mechanism.fragmentationPenalty -
+        mechanism.contradictionPenalty -
+        (fragmentedWindow ? 0.10 : 0.0),
+        0.0,
+        1.0
+    );
 
-    const auto sustained = [](const ModeSummary* summary) -> bool {
-        return summary != nullptr && summary->count >= 2U && summary->longestRun >= 2U;
-    };
+    if (confidence.score >= 0.78) {
+        confidence.label = "HIGH";
+    } else if (confidence.score >= 0.52) {
+        confidence.label = "MEDIUM";
+    } else {
+        confidence.label = "LOW";
+    }
+    return confidence;
+}
 
-    const ModeSummary* toxicSummary = modeSummary("TOXIC_INSTABILITY");
-    const ModeSummary* silencingSummary = modeSummary("NEURAL_SILENCING");
-    const ModeSummary* suppressiveSummary = modeSummary("SUPPRESSIVE_RESPONSE");
-    const ModeSummary* excitatorySummary = modeSummary("EXCITATORY_RESPONSE");
-    const ModeSummary* stabilizingSummary = modeSummary("STABILIZING_RESPONSE");
-    const ModeSummary* noResponseSummary = modeSummary("NO_SIGNIFICANT_RESPONSE");
+OntologySummary summarizeOntology(const MechanisticAnalysis& mechanism, const ConfidenceAnalysis& confidence) {
+    (void)confidence;
+    OntologySummary summary;
 
-    const double toxicShare = toxicSummary ? toxicSummary->weight / dominance.totalMeaningfulWeight : 0.0;
-    const double silencingShare = silencingSummary ? silencingSummary->weight / dominance.totalMeaningfulWeight : 0.0;
-    const double suppressiveShare = suppressiveSummary ? suppressiveSummary->weight / dominance.totalMeaningfulWeight : 0.0;
-    const double excitatoryShare = excitatorySummary ? excitatorySummary->weight / dominance.totalMeaningfulWeight : 0.0;
-    const double stabilizingShare = stabilizingSummary ? stabilizingSummary->weight / dominance.totalMeaningfulWeight : 0.0;
-    const double noResponseShare = noResponseSummary ? noResponseSummary->weight / dominance.totalMeaningfulWeight : 0.0;
-
-    if (!dominance.hasMeaningfulEffect || dominance.totalMeaningfulWeight <= 1.0e-6 || noResponseShare >= 0.95) {
-        return "NO_SIGNIFICANT_RESPONSE";
+    if (!mechanism.hasMeaningfulEffect || mechanism.hasMinimalBiologicalChange) {
+        summary.responseMode = "NO_SIGNIFICANT_RESPONSE";
+        summary.biologicalState = BiologicalState::LimitedEffect;
+        return summary;
     }
 
-    if ((sustained(toxicSummary) && toxicShare >= 0.20) || (sustained(silencingSummary) && silencingShare >= 0.20)) {
-        return toxicShare >= silencingShare ? "TOXIC_INSTABILITY" : "NEURAL_SILENCING";
+    switch (mechanism.dominantMechanism) {
+        case Mechanism::Silencing:
+            summary.responseMode = "NEURAL_SILENCING";
+            summary.biologicalState = BiologicalState::NeuralSilencing;
+            break;
+        case Mechanism::Toxicity:
+            summary.responseMode = "TOXIC_INSTABILITY";
+            summary.biologicalState = BiologicalState::ToxicInstability;
+            break;
+        case Mechanism::Suppression:
+            summary.responseMode = "SUPPRESSIVE_RESPONSE";
+            summary.biologicalState = BiologicalState::ControlledSuppression;
+            break;
+        case Mechanism::Excitation:
+            summary.responseMode = "EXCITATORY_RESPONSE";
+            summary.biologicalState = BiologicalState::Hyperexcitability;
+            break;
+        case Mechanism::Stabilization:
+            summary.responseMode = "STABILIZING_RESPONSE";
+            summary.biologicalState = BiologicalState::NetworkStabilization;
+            break;
+        case Mechanism::Mixed:
+            summary.responseMode = "MIXED_RESPONSE";
+            summary.biologicalState = mechanism.dominantBiologicalState;
+            break;
+        case Mechanism::None:
+        default:
+            summary.responseMode = "NO_SIGNIFICANT_RESPONSE";
+            summary.biologicalState = BiologicalState::LimitedEffect;
+            break;
     }
 
-    if (sustained(stabilizingSummary) && finalMeaningfulCaBlock && finalCalciumEffectMagnitude >= 15.0 && stabilizingShare >= 0.30) {
-        return "STABILIZING_RESPONSE";
-    }
-
-    if (sustained(suppressiveSummary) && suppressiveShare >= 0.30) {
-        return "SUPPRESSIVE_RESPONSE";
-    }
-
-    if (sustained(excitatorySummary) && excitatoryShare >= 0.30) {
-        return "EXCITATORY_RESPONSE";
-    }
-
-    const bool mixedDominance =
-        dominance.dominantShare >= 0.35 && dominance.dominantMargin < 0.10 &&
-        ((stabilizingShare > 0.0 && suppressiveShare > 0.0) ||
-         (stabilizingShare > 0.0 && excitatoryShare > 0.0) ||
-         (suppressiveShare > 0.0 && excitatoryShare > 0.0) ||
-         (toxicShare > 0.0 && (suppressiveShare > 0.0 || excitatoryShare > 0.0)) ||
-         (silencingShare > 0.0 && (suppressiveShare > 0.0 || excitatoryShare > 0.0)));
-    if (mixedDominance) {
-        return "STANDARD_RESPONSE";
-    }
-
-    if (dominance.dominantShare >= 0.55 && dominance.dominantMargin >= 0.10) {
-        if (dominance.dominantMode == "STABILIZING_RESPONSE") {
-            return finalMeaningfulCaBlock && finalCalciumEffectMagnitude >= 15.0 ? "STABILIZING_RESPONSE" : "STANDARD_RESPONSE";
-        }
-        return dominance.dominantMode;
-    }
-
-    return "STANDARD_RESPONSE";
+    return summary;
 }
 
 std::string safetyInterpretationForState(
@@ -763,10 +807,18 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     std::vector<double> safeDoses;
     std::vector<double> excitatoryRiskDoses;
     std::vector<double> overSuppressionDoses;
-    std::vector<BiologicalState> doseStates;
-    std::vector<double> doseWeights;
-    doseStates.reserve(sorted.size());
-    doseWeights.reserve(sorted.size());
+    std::vector<double> allDoses;
+    std::vector<bool> safeMask;
+    std::vector<bool> therapeuticMask;
+    std::vector<bool> excitatoryRiskMask;
+    std::vector<bool> overSuppressionMask;
+    std::vector<DoseMechanisticEvidence> doseEvidence;
+    allDoses.reserve(sorted.size());
+    safeMask.reserve(sorted.size());
+    therapeuticMask.reserve(sorted.size());
+    excitatoryRiskMask.reserve(sorted.size());
+    overSuppressionMask.reserve(sorted.size());
+    doseEvidence.reserve(sorted.size());
 
     for (std::size_t i = 0; i < sorted.size(); ++i) {
         const DoseObservation& obs = sorted[i];
@@ -795,34 +847,22 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const double niiReductionPct = reductionPercent(baselineNii, static_cast<double>(niiValue));
         const double burstReductionPct = reductionPercent(baselineBurst, static_cast<double>(burstValue));
         const double seizureReductionPct = reductionPercent(baselineSeizure, static_cast<double>(seizurePct));
-        const bool meaningfulCaBlock = obs.blockCa >= kMeaningfulKBlockThreshold;
-        const bool calciumStabilization = meaningfulCaBlock &&
-                                          (syncReductionPct >= 15.0 ||
-                                           niiReductionPct >= 15.0 ||
-                                           seizureReductionPct >= 15.0 ||
-                                           burstReductionPct >= 15.0);
+        const bool stabilizationMetricsObserved =
+            syncReductionPct >= 15.0 ||
+            niiReductionPct >= 15.0 ||
+            seizureReductionPct >= 15.0 ||
+            burstReductionPct >= 15.0;
 
         // Per-dose biological state detection (mirrors global detector rules)
         BiologicalState perDoseState = BiologicalState::LimitedEffect;
-        // K-block override: require meaningful K block plus a real excitability shift
-        const bool meaningfulKBlock = obs.blockK >= kMeaningfulKBlockThreshold;
-        if (meaningfulKBlock && (rateChangeFrac > 0.25 || syncDeltaLocal > 0.15 || niiDeltaLocal > 0.20 || seizureDeltaLocal > 0.20)) {
-            perDoseState = BiologicalState::Hyperexcitability;
-        } else if (static_cast<double>(meanRate) < 0.10 * baselineRate) {
+        if (static_cast<double>(meanRate) < 0.10 * baselineRate) {
             perDoseState = BiologicalState::NeuralSilencing;
-        } else if (calciumStabilization) {
-            perDoseState = BiologicalState::NetworkStabilization;
         } else if (rateChangeFrac > +0.25 || syncDeltaLocal > +0.15 || niiDeltaLocal > +0.20 || seizureDeltaLocal > +0.20) {
             perDoseState = BiologicalState::Hyperexcitability;
         } else if (rateChangeFrac < -0.20 && rateChangeFrac > -0.70 && niiDeltaLocal <= +0.10) {
             perDoseState = BiologicalState::ControlledSuppression;
-        } else if (syncDeltaLocal < -0.10 && niiDeltaLocal < 0.0 && seizureDeltaLocal <= 0.0) {
-            // never label meaningful K-block stabilization if excitability is also rising
-            if (meaningfulKBlock && (rateChangeFrac > 0.25 || niiDeltaLocal > 0.20 || seizureDeltaLocal > 0.20)) {
-                perDoseState = BiologicalState::Hyperexcitability;
-            } else {
-                perDoseState = BiologicalState::NetworkStabilization;
-            }
+        } else if (stabilizationMetricsObserved || (syncDeltaLocal < -0.10 && niiDeltaLocal < 0.0 && seizureDeltaLocal <= 0.0)) {
+            perDoseState = BiologicalState::NetworkStabilization;
         } else if (niiDeltaLocal > +0.40 || seizureDeltaLocal > +0.40) {
             perDoseState = BiologicalState::ToxicInstability;
         } else {
@@ -915,21 +955,6 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         maxIsiCvDelta = std::max(maxIsiCvDelta, static_cast<double>(isiCv) - baselineIsiCv);
         maxSeizureDelta = std::max(maxSeizureDelta, static_cast<double>(seizurePct) - baselineSeizure);
 
-        // Classify dose ranges according to biological state
-        if (perDoseState == BiologicalState::LimitedEffect) {
-            safeDoses.push_back(static_cast<double>(dose));
-        }
-        if (perDoseState == BiologicalState::ControlledSuppression || perDoseState == BiologicalState::NetworkStabilization) {
-            therapeuticDoses.push_back(static_cast<double>(dose));
-            if (!hasOnsetDose) {
-                hasOnsetDose = true;
-                onsetDose = static_cast<double>(dose);
-                report.hasSuppressionThreshold = true;
-                report.suppressionThresholdDose = dose;
-                report.hasEffectiveDose = true;
-                report.effectiveMinDose = dose;
-            }
-        }
         const bool excitatoryRiskHere =
             (perDoseState == BiologicalState::Hyperexcitability ||
              perDoseState == BiologicalState::ToxicInstability);
@@ -939,14 +964,6 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
 
         if (perDoseState == BiologicalState::NetworkStabilization) {
             peakCalciumEffectMagnitude = std::max(peakCalciumEffectMagnitude, std::max(0.0, stabilizationEffectPct));
-        }
-
-        if (excitatoryRiskHere) {
-            excitatoryRiskDoses.push_back(static_cast<double>(dose));
-        }
-
-        if (overSuppressionHere) {
-            overSuppressionDoses.push_back(static_cast<double>(dose));
         }
 
         if (excitatoryRiskHere || overSuppressionHere) {
@@ -960,7 +977,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
             }
         }
 
-        const double mechanisticEvidence = mechanisticEvidenceScore(
+        const DoseMechanisticEvidence mechanisticEvidence = analyzeDoseMechanism(
             obs,
             perDoseState,
             rateChangeFrac,
@@ -973,9 +990,12 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
             burstReductionPct,
             baselineRate
         );
-
-        doseStates.push_back(perDoseState);
-        doseWeights.push_back(1.0 + (perDoseState == BiologicalState::LimitedEffect ? 0.0 : 0.35) + 0.65 * mechanisticEvidence);
+        doseEvidence.push_back(mechanisticEvidence);
+        allDoses.push_back(static_cast<double>(dose));
+        safeMask.push_back(perDoseState == BiologicalState::LimitedEffect);
+        therapeuticMask.push_back(perDoseState == BiologicalState::ControlledSuppression || perDoseState == BiologicalState::NetworkStabilization);
+        excitatoryRiskMask.push_back(excitatoryRiskHere);
+        overSuppressionMask.push_back(overSuppressionHere);
     }
 
     if (std::isfinite(maxRateChangePct)) {
@@ -1008,6 +1028,20 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.curveType = "Weak Sigmoidal";
     } else {
         report.curveType = "Non-sigmoidal";
+    }
+
+    safeDoses = dosesFromMask(allDoses, smoothBiologicalMask(safeMask));
+    therapeuticDoses = dosesFromMask(allDoses, smoothBiologicalMask(therapeuticMask));
+    excitatoryRiskDoses = dosesFromMask(allDoses, smoothBiologicalMask(excitatoryRiskMask));
+    overSuppressionDoses = dosesFromMask(allDoses, smoothBiologicalMask(overSuppressionMask));
+
+    if (!therapeuticDoses.empty()) {
+        hasOnsetDose = true;
+        onsetDose = therapeuticDoses.front();
+        report.hasSuppressionThreshold = true;
+        report.suppressionThresholdDose = onsetDose;
+        report.hasEffectiveDose = true;
+        report.effectiveMinDose = static_cast<float>(onsetDose);
     }
 
     std::sort(safeDoses.begin(), safeDoses.end());
@@ -1120,46 +1154,29 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.effectiveRangeMax
     );
 
-    const MechanisticDominance dominance = computeMechanisticDominance(doseStates, doseWeights);
-    const std::string resolvedResponseMode = resolveResponseMode(
-        dominance,
-        finalMeaningfulCaBlock,
-        finalCalciumEffectMagnitude,
-        lowStability,
-        therapeuticWindowExists,
-        fragmentedWindow,
-        report.maxRateChangePct
+    MechanisticAnalysis mechanisticAnalysis = analyzeMechanisms(
+        doseEvidence,
+        report.maxRateChangePct,
+        maxSyncDelta,
+        maxNiiDelta,
+        maxSeizureDelta,
+        fragmentedWindow
     );
-
-    if (resolvedResponseMode == "NO_SIGNIFICANT_RESPONSE") {
-        report.biologicalState = BiologicalState::LimitedEffect;
-    } else if (resolvedResponseMode == "STANDARD_RESPONSE") {
-        report.biologicalState = dominance.dominantState == BiologicalState::LimitedEffect ? detectedState : dominance.dominantState;
-    } else {
-        report.biologicalState = stateForResponseMode(resolvedResponseMode);
+    if (mechanisticAnalysis.dominantBiologicalState == BiologicalState::LimitedEffect && detectedState != BiologicalState::LimitedEffect) {
+        mechanisticAnalysis.dominantBiologicalState = detectedState;
     }
 
-    switch (report.biologicalState) {
-        case BiologicalState::ControlledSuppression:
-            report.responseMode = "SUPPRESSIVE_RESPONSE";
-            break;
-        case BiologicalState::NeuralSilencing:
-            report.responseMode = "NEURAL_SILENCING";
-            break;
-        case BiologicalState::Hyperexcitability:
-            report.responseMode = "EXCITATORY_RESPONSE";
-            break;
-        case BiologicalState::NetworkStabilization:
-            report.responseMode = "STABILIZING_RESPONSE";
-            break;
-        case BiologicalState::ToxicInstability:
-            report.responseMode = "TOXIC_INSTABILITY";
-            break;
-        case BiologicalState::LimitedEffect:
-        default:
-            report.responseMode = "NO_SIGNIFICANT_RESPONSE";
-            break;
-    }
+    const ConfidenceAnalysis confidenceAnalysis = analyzeConfidence(
+        mechanisticAnalysis,
+        stabilityInput,
+        report.sigmoidR2,
+        therapeuticWindowExists,
+        fragmentedWindow
+    );
+    const OntologySummary ontologySummary = summarizeOntology(mechanisticAnalysis, confidenceAnalysis);
+
+    report.biologicalState = ontologySummary.biologicalState;
+    report.responseMode = ontologySummary.responseMode;
 
     const bool stabilizingResponseObserved = report.responseMode == "STABILIZING_RESPONSE";
 
@@ -1274,7 +1291,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.overallTier = DrugRiskTier::Safe;
     }
 
-    report.confidence = confidenceFromEvidence(stabilityInput, report.sigmoidR2, therapeuticWindowExists, fragmentedWindow);
+    report.confidence = confidenceAnalysis.label;
     report.hasToxicThresholdExact = report.hasToxicThreshold;
     report.toxicThresholdText = report.hasToxicThreshold ? std::to_string(report.toxicThresholdDoseEval)
                                                          : ">" + std::to_string(report.maxTestedDose);

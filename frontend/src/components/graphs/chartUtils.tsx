@@ -5,7 +5,7 @@ import type {
   VoltageTracePoint
 } from '../../types';
 
-export type ResponseMode = 'SUPPRESSIVE_RESPONSE' | 'EXCITATORY_RESPONSE' | 'STABILIZING_RESPONSE' | 'NO_SIGNIFICANT_RESPONSE' | 'TOXIC_INSTABILITY' | 'UNSPECIFIED';
+export type ResponseMode = 'SUPPRESSIVE_RESPONSE' | 'EXCITATORY_RESPONSE' | 'STABILIZING_RESPONSE' | 'MIXED_RESPONSE' | 'NO_SIGNIFICANT_RESPONSE' | 'TOXIC_INSTABILITY' | 'UNSPECIFIED';
 
 export interface NormalizedDoseResult {
   dose: number;
@@ -80,6 +80,7 @@ const RESPONSE_MODE_LABELS: Record<ResponseMode, string> = {
   SUPPRESSIVE_RESPONSE: 'Suppression',
   EXCITATORY_RESPONSE: 'Excitability',
   STABILIZING_RESPONSE: 'Stabilization',
+  MIXED_RESPONSE: 'Mixed Response',
   NO_SIGNIFICANT_RESPONSE: 'No Significant Response',
   UNSPECIFIED: 'Response'
 };
@@ -89,7 +90,7 @@ export function normalizeResponseMode(value: unknown): ResponseMode {
   if (normalized === 'STANDARD_RESPONSE' || normalized === 'NO_SIGNIFICANT_RESPONSE') {
     return 'NO_SIGNIFICANT_RESPONSE';
   }
-  if (normalized === 'SUPPRESSIVE_RESPONSE' || normalized === 'EXCITATORY_RESPONSE' || normalized === 'STABILIZING_RESPONSE' || normalized === 'TOXIC_INSTABILITY') {
+  if (normalized === 'SUPPRESSIVE_RESPONSE' || normalized === 'EXCITATORY_RESPONSE' || normalized === 'STABILIZING_RESPONSE' || normalized === 'MIXED_RESPONSE' || normalized === 'TOXIC_INSTABILITY') {
     return normalized;
   }
   return 'UNSPECIFIED';
@@ -436,6 +437,18 @@ export function getResponseModeCopy(mode: ResponseMode) {
           { label: 'Toxic threshold', color: '#ef4444' }
         ]
       };
+    case 'MIXED_RESPONSE':
+      return {
+        title: 'Mixed Mechanistic Response Across Dose',
+        explanation: 'The sweep shows competing biological response mechanisms rather than one dominant mode.',
+        axisLabel: 'Effect %',
+        legendItems: [
+          { label: 'Mixed response signal', color: '#a78bfa' },
+          { label: 'IC50 marker', color: '#22d3ee' },
+          { label: 'Onset dose', color: '#10b981' },
+          { label: 'Toxic threshold', color: '#ef4444' }
+        ]
+      };
     case 'NO_SIGNIFICANT_RESPONSE':
       return {
         title: 'Low Biological Response Across Dose',
@@ -495,7 +508,7 @@ export function getRiskTone(value?: string | null): 'safe' | 'warning' | 'danger
 }
 
 export function getModeTone(mode: ResponseMode): 'safe' | 'warning' | 'danger' | 'neutral' {
-  if (mode === 'EXCITATORY_RESPONSE') {
+  if (mode === 'EXCITATORY_RESPONSE' || mode === 'MIXED_RESPONSE') {
     return 'warning';
   }
   if (mode === 'STABILIZING_RESPONSE' || mode === 'SUPPRESSIVE_RESPONSE') {

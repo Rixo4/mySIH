@@ -132,7 +132,7 @@ int main() {
         {"Case B", 200.0, 1000.0, 1000.0, {"SUPPRESSIVE_RESPONSE", "NEURAL_SILENCING"}, CaseDefinition::Profile::Suppressive},
         {"Case C", 1000.0, 200.0, 1000.0, {"EXCITATORY_RESPONSE"}, CaseDefinition::Profile::Excitatory},
         {"Case D", 1000.0, 1000.0, 200.0, {"STABILIZING_RESPONSE"}, CaseDefinition::Profile::Stabilizing},
-        {"Case E", 200.0, 200.0, 1000.0, {"STANDARD_RESPONSE"}, CaseDefinition::Profile::MixedWeak}
+        {"Case E", 200.0, 200.0, 1000.0, {"MIXED_RESPONSE"}, CaseDefinition::Profile::MixedWeak}
     };
 
     bool allPassed = true;

@@ -98,14 +98,14 @@ struct PharmaDecisionReport {
     std::string primaryChangeText = "Not observed";
     std::string safetyInterpretationText = "Not observed";
     std::string seizureTrendText = "Not observed";
-        std::string responseMode = "STANDARD_RESPONSE";
-        double syncReductionPct = 0.0;
-        double niiReductionPct = 0.0;
-        double niiIncreasePct = 0.0;
-        double seizureReductionPct = 0.0;
-        double burstReductionPct = 0.0;
-        double calciumEffectMagnitude = 0.0;
-        bool meaningfulCaBlock = false;
+    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
+    double syncReductionPct = 0.0;
+    double niiReductionPct = 0.0;
+    double niiIncreasePct = 0.0;
+    double seizureReductionPct = 0.0;
+    double burstReductionPct = 0.0;
+    double calciumEffectMagnitude = 0.0;
+    bool meaningfulCaBlock = false;
 
     bool hasSafeRange = false;
     float safeMinDose = 0.0f;
