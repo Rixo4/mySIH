@@ -1,0 +1,61 @@
+{
+  "dose_results": [],
+  "metadata": {
+    "output_format": "legacy-text"
+  },
+  "metrics": {},
+  "summary": {
+    "active_zone": "NO_VALID_WINDOW",
+    "burst_reduction_pct": null,
+    "ca_ic50": 1000.0,
+    "calcium_effect_magnitude": null,
+    "confidence": "LOW",
+    "curve_type": "Sigmoidal",
+    "drug_name": "Test-K-Blocker",
+    "effective_range": "100.00 - 100.00",
+    "engine_input_mode": "User Drug Config",
+    "has_valid_therapeutic_window": true,
+    "hill": 3.2,
+    "ineffective_zone": "0.00 - 50.00",
+    "k_ic50": 1000.0,
+    "max_effect": 87.0,
+    "model_fit_r2": 0.99,
+    "na_ic50": 99.99,
+    "nii_increase_pct": null,
+    "nii_reduction_pct": null,
+    "onset_dose": "~100.00",
+    "over_suppression_zone": "150.00 - 500.00",
+    "peak_biological_effect_dose": "~450.00 (within toxic range)",
+    "reason": "Therapeutic response observed before over-suppression; narrow therapeutic window requires caution",
+    "recommendation": "CAUTION",
+    "response_mode": "NO_SIGNIFICANT_RESPONSE",
+    "response_strength": "Strong",
+    "risk_level": "MODERATE",
+    "runs": 3.0,
+    "saturated_stabilization_zone": null,
+    "saturation_trend": "Observed beyond 450.00",
+    "seizure_reduction_pct": null,
+    "severe_excitability_zone": null,
+    "stability_score": "LOW",
+    "stabilization_range": null,
+    "sync_reduction_pct": null,
+    "therapeutic_zone": "100.00 - 100.00",
+    "toxic_threshold": "150.00",
+    "zone_ranges": {
+      "ineffective_zone": [
+        0.0,
+        50.0
+      ],
+      "over_suppression_zone": [
+        150.0,
+        500.0
+      ],
+      "saturated_stabilization_zone": null,
+      "severe_excitability_zone": null,
+      "therapeutic_zone": [
+        100.0,
+        100.0
+      ]
+    }
+  }
+}

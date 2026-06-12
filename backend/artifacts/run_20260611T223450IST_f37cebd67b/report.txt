@@ -1,0 +1,81 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-K-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 1000.00
+K IC50              : 1000.00
+Ca IC50             : 10.00
+Hill                : 3.20
+Runs                : 3.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 500.00
+Step Size            : 50.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Sigmoidal
+Response Mode        : STABILIZING_RESPONSE
+Model Fit (R^2)      : 1.00
+Max Effect           : 23 %
+Response Strength    : Moderate
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : >500.00 (Not observed)
+Safety Observation   : No toxicity within tested range
+
+--------------------------------------------------
+
+[Stabilization Response Range]
+Stabilization Range  : 100.00 - 150.00, 450.00 - 500.00
+Window Quality       : Fragmented
+Optimal Zone         : Calcium-channel blockade reduced synchronization and neural instability
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 50.00, 200.00 - 400.00
+Stabilization Zone   : 100.00 - 150.00, 450.00 - 500.00
+Saturated Stabilization Zone : Not observed
+
+--------------------------------------------------
+
+[Calcium Stabilization Metrics]
+Sync Reduction       : 18.7 %
+NII Increase         : 4.4 %
+Seizure Reduction    : 23.1 %
+Burst Reduction      : 0.0 %
+Calcium Effect       : 23.1 %
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : ~100.00
+Peak Efficiency      : ~500.00
+Saturation Trend     : Not observed within tested range
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 3
+Rate Variability     : 0.83
+Toxicity Variance    : 1.87
+Stability Score      : HIGH
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : PROMISING
+Risk Level           : LOW
+Reason               : Calcium-channel blockade reduced synchronization and neural instability without toxic excitation
+Confidence           : LOW
+
+==================================================

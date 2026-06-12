@@ -1,0 +1,58 @@
+{
+  "dose_results": [],
+  "metadata": {
+    "output_format": "legacy-text"
+  },
+  "metrics": {},
+  "summary": {
+    "active_zone": "STABILIZATION_ZONE",
+    "burst_reduction_pct": 0.0,
+    "ca_ic50": 0.99,
+    "calcium_effect_magnitude": 23.8,
+    "confidence": "LOW",
+    "curve_type": "Sigmoidal",
+    "drug_name": "Test-K-Blocker",
+    "effective_range": "100.00 - 150.00, 450.00 - 500.00",
+    "engine_input_mode": "User Drug Config",
+    "has_valid_therapeutic_window": true,
+    "hill": 3.2,
+    "ineffective_zone": "0.00 - 50.00, 200.00 - 400.00",
+    "k_ic50": 1000.0,
+    "max_effect": 24.0,
+    "model_fit_r2": 0.99,
+    "na_ic50": 1000.0,
+    "nii_increase_pct": 5.0,
+    "nii_reduction_pct": null,
+    "onset_dose": "~100.00",
+    "over_suppression_zone": null,
+    "peak_biological_effect_dose": "~150.00",
+    "reason": "Calcium-channel blockade reduced synchronization and neural instability without toxic excitation",
+    "recommendation": "PROMISING",
+    "response_mode": "STABILIZING_RESPONSE",
+    "response_strength": "Moderate",
+    "risk_level": "LOW",
+    "runs": 3.0,
+    "saturated_stabilization_zone": "Not observed",
+    "saturation_trend": "Observed beyond 150.00",
+    "seizure_reduction_pct": 23.4,
+    "severe_excitability_zone": null,
+    "stability_score": "HIGH",
+    "stabilization_range": "100.00 - 150.00, 450.00 - 500.00",
+    "sync_reduction_pct": 19.4,
+    "therapeutic_zone": "100.00 - 150.00, 450.00 - 500.00",
+    "toxic_threshold": ">500.00 (Not observed)",
+    "zone_ranges": {
+      "ineffective_zone": [
+        0.0,
+        50.0
+      ],
+      "over_suppression_zone": null,
+      "saturated_stabilization_zone": null,
+      "severe_excitability_zone": null,
+      "therapeutic_zone": [
+        100.0,
+        150.0
+      ]
+    }
+  }
+}

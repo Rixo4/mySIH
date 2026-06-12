@@ -115,7 +115,9 @@ struct PharmaDecisionReport {
     float toxicMinDose = 0.0f;
 
     std::vector<double> excitatoryRiskDoses;
-
+    std::vector<double> overSuppressionDoses;
+    std::vector<double> stabilizationSaturationDoses;
+    
     bool hasEffectiveDose = false;
     float effectiveMinDose = 0.0f;
 

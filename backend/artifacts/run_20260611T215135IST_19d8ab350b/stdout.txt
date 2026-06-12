@@ -1,0 +1,72 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-K-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 1000.00
+K IC50              : 0.05
+Ca IC50             : 1000.00
+Hill                : 3.20
+Runs                : 3.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 20.00
+Step Size            : 2.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Sigmoidal
+Response Mode        : EXCITATORY_RESPONSE
+Model Fit (R^2)      : 1.00
+Max Effect           : 66 %
+Response Strength    : Strong
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : 2.00
+Safety Observation   : Toxicity observed within tested range
+
+--------------------------------------------------
+
+[Excitatory Response Range]
+Excitatory Range     : Not observed
+Window Quality       : Not observed
+Optimal Zone         : Transient excitatory regime before seizure-risk escalation
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 0.00
+Excitatory Zone      : Not observed
+Severe Excitability Zone : 4.00 - 20.00
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : Not observed
+Peak Efficiency      : ~20.00 (within toxic range)
+Saturation Trend     : Not observed within tested range
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 3
+Rate Variability     : 2.11
+Toxicity Variance    : 3.88
+Stability Score      : LOW
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : NOT RECOMMENDED
+Risk Level           : HIGH
+Reason               : Excitability and seizure-risk markers increased beyond safe neural stability limits
+Confidence           : LOW
+
+==================================================
