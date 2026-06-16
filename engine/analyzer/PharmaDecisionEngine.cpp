@@ -1,5 +1,5 @@
 #include "PharmaDecisionEngine.h"
-
+// This file implements the core logic for analyzing dose-response data and generating a PharmaDecisionReport.
 #include <algorithm>
 #include <cmath>
 #include <iomanip>

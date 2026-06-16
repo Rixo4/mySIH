@@ -1,3 +1,4 @@
+// This file defines the DrugEvaluationEngine class, which is responsible for analyzing dose-response data from neural simulations to evaluate the biological effects of a drug. The engine computes various biological scores based on firing rates, synchronization, and other metrics, and classifies the drug's effects into categories such as Controlled Suppression, Neural Silencing, Hyperexcitability, etc. It also identifies key doses (onset, peak, toxic) and generates a comprehensive report with mechanistic interpretations and a final recommendation for the drug's potential as a therapeutic agent.
 #pragma once
 
 #include <string>

@@ -1,3 +1,4 @@
+// This file implements the SeizureDetector class, which classifies neural network states based on various metrics and final voltages.
 #include "SeizureDetector.h"
 
 #include <algorithm>

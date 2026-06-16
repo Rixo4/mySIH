@@ -1,3 +1,4 @@
+//  This file defines the MetricsAnalyzer class, which computes various metrics for individual neurons and the overall network based on the results of a neural simulation. The metrics include firing rates, inter-spike interval statistics, synchronization indices, burst indices, and other measures of neural activity and network dynamics. The class also provides functionality to compute metrics over specific time windows to analyze temporal changes in network behavior. These metrics can be used for further analysis, such as seizure detection or drug response evaluation.
 #pragma once
 
 #include <cstddef>
