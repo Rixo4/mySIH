@@ -1,0 +1,72 @@
+==================================================
+SILICON PATIENT - DRUG EVALUATION REPORT
+==================================================
+
+[Drug Input]
+Drug Name           : Test-Na-Blocker
+Engine Input Mode   : User Drug Config
+Na IC50             : 200.00
+K IC50              : 200.00
+Ca IC50             : 999.98
+Hill                : 3.20
+Runs                : 3.00
+
+--------------------------------------------------
+
+[Dose Range]
+Tested Range         : 0.00 - 500.00
+Step Size            : 50.00
+
+--------------------------------------------------
+
+[Response Characteristics]
+Curve Type           : Sigmoidal
+Response Mode        : EXCITATORY_RESPONSE
+Model Fit (R^2)      : 1.00
+Max Effect           : 56 %
+Response Strength    : Moderate-to-Strong
+
+--------------------------------------------------
+
+[Safety Analysis]
+Toxic Threshold      : >500.00 (Not observed)
+Safety Observation   : No toxicity within tested range
+
+--------------------------------------------------
+
+[Excitatory Response Range]
+Excitatory Range     : 150.00 - 150.00, 250.00 - 500.00
+Window Quality       : Fragmented
+Optimal Zone         : Transient excitatory regime before seizure-risk escalation
+
+--------------------------------------------------
+
+[Dose Classification Summary]
+Ineffective Zone     : 0.00 - 100.00, 200.00 - 200.00
+Excitatory Zone      : 150.00 - 150.00, 250.00 - 500.00
+Severe Excitability Zone : Not observed
+
+--------------------------------------------------
+
+[Pharmacodynamic Interpretation]
+Onset Dose           : ~150.00
+Peak Efficiency      : ~500.00
+Saturation Trend     : Not observed within tested range
+
+--------------------------------------------------
+
+[Stability Analysis]
+Run Count            : 3
+Rate Variability     : 2.39
+Toxicity Variance    : 7.19
+Stability Score      : LOW
+
+--------------------------------------------------
+
+[FINAL DECISION]
+Recommendation       : NOT RECOMMENDED
+Risk Level           : HIGH
+Reason               : Excitability and seizure-risk markers increased beyond safe neural stability limits
+Confidence           : LOW
+
+==================================================

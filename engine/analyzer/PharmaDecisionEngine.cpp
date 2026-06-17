@@ -241,91 +241,145 @@ BiologicalState detectBiologicalState(
     [[maybe_unused]] double effectiveRangeMin,
     [[maybe_unused]] double effectiveRangeMax
 ) {
-    // Compute final numeric changes using the user's specified convention
     const double currentRate = safeNonNegativeD(finalObs.meanFiringRateHz);
-    const double rateChange = (currentRate - baselineRate) / std::max(1.0, baselineRate); // fractional change
-    const double currentSync = safeNonNegativeD(finalObs.synchronizationIndex);
-    const double currentBurst = safeNonNegativeD(finalObs.burstIndex);
-    const double syncChange = currentSync - baselineSync;
-    const double syncReductionPct = reductionPercent(baselineSync, currentSync);
-    const double burstReductionPct = reductionPercent(baselineBurst, currentBurst);
-    const double currentNii = safeNonNegativeD(finalObs.nii);
-    const double niiChange = currentNii - baselineNii;
-    const double niiReductionPct = reductionPercent(baselineNii, currentNii);
-    const double currentSeiz = safeNonNegativeD(finalObs.seizureProbabilityPct) / 100.0; // normalized 0..1
-    const double seizChange = currentSeiz - (baselineSeizure / 100.0);
-    const double seizureReductionPct = reductionPercent(baselineSeizure, safeNonNegativeD(finalObs.seizureProbabilityPct));
-    const bool meaningfulCaBlock = finalObs.blockCa >= kMeaningfulKBlockThreshold;
-    const bool calciumStabilizationObserved = meaningfulCaBlock &&
-                                              (syncReductionPct >= 15.0 ||
-                                               niiReductionPct >= 15.0 ||
-                                               seizureReductionPct >= 15.0 ||
-                                               burstReductionPct >= 15.0);
+    const double rateChange =
+        (currentRate - baselineRate) / std::max(1.0, baselineRate);
 
-    // Scan entire sweep for extreme instability and to apply K-block rules
+    const double currentSync =
+        safeNonNegativeD(finalObs.synchronizationIndex);
+    const double currentBurst =
+        safeNonNegativeD(finalObs.burstIndex);
+
+    const double syncChange = currentSync - baselineSync;
+
+    const double syncReductionPct =
+        reductionPercent(baselineSync, currentSync);
+
+    const double burstReductionPct =
+        reductionPercent(baselineBurst, currentBurst);
+
+    const double currentNii =
+        safeNonNegativeD(finalObs.nii);
+
+    const double niiChange =
+        currentNii - baselineNii;
+
+    const double niiReductionPct =
+        reductionPercent(baselineNii, currentNii);
+
+    const double currentSeiz =
+        safeNonNegativeD(finalObs.seizureProbabilityPct) / 100.0;
+
+    const double seizChange =
+        currentSeiz - (baselineSeizure / 100.0);
+
+    const double seizureReductionPct =
+        reductionPercent(
+            baselineSeizure,
+            safeNonNegativeD(finalObs.seizureProbabilityPct));
+
     bool sawToxicInstability = false;
+    bool sawNetworkStabilization = false;
+
     for (const auto& obs : sortedObs) {
-        const double oRate = safeNonNegativeD(obs.meanFiringRateHz);
-        const double oRateChange = (oRate - baselineRate) / std::max(1.0, baselineRate);
-        const double oNiiChange = safeNonNegativeD(obs.nii) - baselineNii;
-        const double oSeizChange = safeNonNegativeD(obs.seizureProbabilityPct) / 100.0 - (baselineSeizure / 100.0);
-        const double oSyncReductionPct = reductionPercent(baselineSync, safeNonNegativeD(obs.synchronizationIndex));
-        const double oNiiReductionPct = reductionPercent(baselineNii, safeNonNegativeD(obs.nii));
-        const double oSeizureReductionPct = reductionPercent(baselineSeizure, safeNonNegativeD(obs.seizureProbabilityPct));
-        const double oBurstReductionPct = reductionPercent(baselineBurst, safeNonNegativeD(obs.burstIndex));
+
+        const double oNiiChange =
+            safeNonNegativeD(obs.nii) - baselineNii;
+
+        const double oSeizChange =
+            safeNonNegativeD(obs.seizureProbabilityPct) / 100.0 -
+            (baselineSeizure / 100.0);
 
         if (oNiiChange > 0.40 || oSeizChange > 0.40) {
             sawToxicInstability = true;
         }
 
-        const bool meaningfulKBlock = obs.blockK >= kMeaningfulKBlockThreshold;
-        if (meaningfulKBlock) {
-            // If K block is meaningful and excitability rises materially -> hyperexcitability
-            if (oRateChange > 0.25 || oNiiChange > 0.20 || oSeizChange > 0.20) {
+        const double oRate =
+            safeNonNegativeD(obs.meanFiringRateHz);
+
+        const double oRateChange =
+            (oRate - baselineRate) /
+            std::max(1.0, baselineRate);
+
+        if (obs.blockK >= kMeaningfulKBlockThreshold) {
+            if (oRateChange > 0.25 ||
+                oNiiChange > 0.20 ||
+                oSeizChange > 0.20) {
                 return BiologicalState::Hyperexcitability;
             }
         }
 
+        const double oSyncReductionPct =
+            reductionPercent(
+                baselineSync,
+                safeNonNegativeD(obs.synchronizationIndex));
+
+        const double oNiiReductionPct =
+            reductionPercent(
+                baselineNii,
+                safeNonNegativeD(obs.nii));
+
+        const double oSeizReductionPct =
+            reductionPercent(
+                baselineSeizure,
+                safeNonNegativeD(obs.seizureProbabilityPct));
+
+        const double oBurstReductionPct =
+            reductionPercent(
+                baselineBurst,
+                safeNonNegativeD(obs.burstIndex));
+
         if (obs.blockCa >= kMeaningfulKBlockThreshold &&
-            (oSyncReductionPct >= 15.0 ||
-             oNiiReductionPct >= 15.0 ||
-             oSeizureReductionPct >= 15.0 ||
-             oBurstReductionPct >= 15.0)) {
-            return BiologicalState::NetworkStabilization;
+            oSyncReductionPct >= 15.0 &&
+            oNiiReductionPct >= 15.0 &&
+            oSeizReductionPct >= 15.0) {
+
+            sawNetworkStabilization = true;
         }
     }
 
-    // Apply exact rule set (order matters)
-    // NEURAL_SILENCING: currentRate < 10% baseline
+    // 1. Neural silencing
     if (currentRate < 0.10 * baselineRate) {
         return BiologicalState::NeuralSilencing;
     }
 
-    const bool reboundExcitation = (rateChange > -0.10) && (syncChange > +0.10 || niiChange > +0.10 || seizChange > +0.10);
+    const bool reboundExcitation =
+        (rateChange > -0.10) &&
+        (syncChange > 0.10 ||
+         niiChange > 0.10 ||
+         seizChange > 0.10);
 
-    // HYPEREXCITABILITY: excitation-oriented increases, not pure suppression toxicity
-    if (rateChange > +0.25 || syncChange > +0.15 || (niiChange > +0.20 && reboundExcitation) || (seizChange > +0.20 && reboundExcitation)) {
+    // 2. Hyperexcitability
+    if (rateChange > 0.25 ||
+        syncChange > 0.15 ||
+        (niiChange > 0.20 && reboundExcitation) ||
+        (seizChange > 0.20 && reboundExcitation)) {
+
         return BiologicalState::Hyperexcitability;
     }
 
-    // CONTROLLED_SUPPRESSION: rateChange between -20% and -70% and niiChange <= +0.10
-    if (rateChange < -0.20 && rateChange > -0.70 && niiChange <= +0.10) {
+    // 3. Toxic instability
+    if (niiChange > 0.40 ||
+        seizChange > 0.40 ||
+        sawToxicInstability) {
+
+        return BiologicalState::ToxicInstability;
+    }
+
+    // 4. Controlled suppression
+    if (rateChange <= -0.20 &&
+        rateChange > -0.90 &&
+        niiChange <= 0.10) {
+
         return BiologicalState::ControlledSuppression;
     }
 
-    // NETWORK_STABILIZATION: meaningful calcium block plus measurable reductions in instability markers
-    if (calciumStabilizationObserved) {
-        // Meaningful K-block alone is not enough; require excitability markers.
-        if ((finalObs.blockK >= kMeaningfulKBlockThreshold) &&
-            (rateChange > 0.25 || niiChange > 0.20 || seizChange > 0.20)) {
-            return BiologicalState::Hyperexcitability;
-        }
-        return BiologicalState::NetworkStabilization;
-    }
+    // 5. Network stabilization
+    if (sawNetworkStabilization &&
+        niiChange <= 0.0 &&
+        seizChange <= 0.0) {
 
-    // TOXIC_INSTABILITY: large nii or seizure increases
-    if (niiChange > +0.40 || seizChange > +0.40 || sawToxicInstability) {
-        return BiologicalState::ToxicInstability;
+        return BiologicalState::NetworkStabilization;
     }
 
     return BiologicalState::LimitedEffect;
