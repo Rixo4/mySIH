@@ -21,7 +21,7 @@ struct CaseDefinition {
     double ic50Na;
     double ic50K;
     double ic50Ca;
-    BiologicalState expectedState;  // Changed from allowedModes (responseMode) to BiologicalState
+    std::vector<std::string> allowedModes;
     enum class Profile {
         Neutral,
         Suppressive,
@@ -115,23 +115,24 @@ bool runCase(const CaseDefinition& definition) {
     const std::vector<DoseObservation> observations = makeCaseObservations(definition, definition.profile);
     const PharmaDecisionReport report = PharmaDecisionEngine::evaluate(observations, DecisionStabilityInput{0.5f, 0.5f, "MEDIUM", 5});
 
-    const bool stateMatches = (report.biologicalState == definition.expectedState);
-    std::cout << definition.name << ": state=" << PharmaDecisionEngine::toString(report.biologicalState)
-              << " (expected " << PharmaDecisionEngine::toString(definition.expectedState) << ")"
+    const bool modeMatches = std::find(definition.allowedModes.begin(), definition.allowedModes.end(), report.responseMode) != definition.allowedModes.end();
+    const bool stableOntology = !report.responseMode.empty();
+    std::cout << definition.name << ": mode=" << report.responseMode
+              << ", state=" << PharmaDecisionEngine::toString(report.biologicalState)
               << ", recommendation=" << report.recommendation
-              << (stateMatches ? " [PASS]" : " [FAIL]") << '\n';
-    return stateMatches;
+              << (modeMatches ? " [PASS]" : " [FAIL]") << '\n';
+    return modeMatches && stableOntology;
 }
 
 } // namespace
 
 int main() {
     const std::vector<CaseDefinition> cases = {
-        {"Case A", 1000.0, 1000.0, 1000.0, BiologicalState::LimitedEffect, CaseDefinition::Profile::Neutral},
-        {"Case B", 200.0, 1000.0, 1000.0, BiologicalState::ControlledSuppression, CaseDefinition::Profile::Suppressive},
-        {"Case C", 1000.0, 200.0, 1000.0, BiologicalState::Hyperexcitability, CaseDefinition::Profile::Excitatory},
-        {"Case D", 1000.0, 1000.0, 200.0, BiologicalState::NetworkStabilization, CaseDefinition::Profile::Stabilizing},
-        {"Case E", 200.0, 200.0, 1000.0, BiologicalState::LimitedEffect, CaseDefinition::Profile::MixedWeak}
+        {"Case A", 1000.0, 1000.0, 1000.0, {"NO_SIGNIFICANT_RESPONSE"}, CaseDefinition::Profile::Neutral},
+        {"Case B", 200.0, 1000.0, 1000.0, {"SUPPRESSIVE_RESPONSE", "NEURAL_SILENCING"}, CaseDefinition::Profile::Suppressive},
+        {"Case C", 1000.0, 200.0, 1000.0, {"EXCITATORY_RESPONSE"}, CaseDefinition::Profile::Excitatory},
+        {"Case D", 1000.0, 1000.0, 200.0, {"STABILIZING_RESPONSE"}, CaseDefinition::Profile::Stabilizing},
+        {"Case E", 200.0, 200.0, 1000.0, {"MIXED_RESPONSE"}, CaseDefinition::Profile::MixedWeak}
     };
 
     bool allPassed = true;
@@ -140,10 +141,10 @@ int main() {
     }
 
     if (!allPassed) {
-        std::cerr << "Biological state validation cases failed." << std::endl;
+        std::cerr << "Ontology regression cases failed." << std::endl;
         return 1;
     }
 
-    std::cout << "Biological state validation cases passed." << std::endl;
+    std::cout << "Ontology regression cases passed." << std::endl;
     return 0;
 }

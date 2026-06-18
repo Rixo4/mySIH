@@ -149,66 +149,52 @@ double computeStabilizingSeizureRisk(const DoseRiskMetrics& metrics) {
     return clamp01(residualInstability - 0.55 * stabilizationBenefit);
 }
 
-// BiologicalState-driven seizure risk computation (replaces responseMode-based dispatch)
-double computeSeizureRiskForState(BiologicalState state, const DoseRiskMetrics& metrics) {
-    switch (state) {
-        case BiologicalState::LimitedEffect:
-            return computeNoSignificantResponseRisk(metrics);
-        case BiologicalState::ControlledSuppression:
-            return computeSuppressiveSeizureRisk(metrics);
-        case BiologicalState::Hyperexcitability:
-            return computeExcitatorySeizureRisk(metrics);
-        case BiologicalState::NetworkStabilization:
-            return computeStabilizingSeizureRisk(metrics);
-        case BiologicalState::NeuralSilencing:
-            return computeSuppressiveSeizureRisk(metrics);  // No further risk; already silenced
-        case BiologicalState::ToxicInstability:
-            return 0.85;  // Extremely high risk
-        default:
-            return computeNoSignificantResponseRisk(metrics);
+double computeSeizureRiskForMode(const std::string& responseMode, const DoseRiskMetrics& metrics) {
+    if (responseMode == "NO_SIGNIFICANT_RESPONSE") {
+        return computeNoSignificantResponseRisk(metrics);
     }
+    if (responseMode == "EXCITATORY_RESPONSE") {
+        return computeExcitatorySeizureRisk(metrics);
+    }
+    if (responseMode == "STABILIZING_RESPONSE") {
+        return computeStabilizingSeizureRisk(metrics);
+    }
+    return computeSuppressiveSeizureRisk(metrics);
 }
 
-// BiologicalState-driven early warning index (replaces responseMode-based dispatch)
-double computeEarlyWarningIndexForState(BiologicalState state, const DoseRiskMetrics& metrics, double seizureRisk) {
-    switch (state) {
-        case BiologicalState::LimitedEffect:
-            return 100.0 * clamp01(
-                0.45 * seizureRisk +
-                0.35 * instabilityMetric(metrics) +
-                0.20 * std::max({0.0, std::fabs(metrics.rateChangeFrac), std::fabs(metrics.syncDelta), std::fabs(metrics.niiDelta)})
-            );
-        case BiologicalState::Hyperexcitability:
-            return 100.0 * clamp01(
-                0.50 * seizureRisk +
-                0.30 * reboundExcitationMetric(metrics) +
-                0.20 * instabilityMetric(metrics)
-            );
-        case BiologicalState::NetworkStabilization: {
-            const double stabilizationBenefit = clamp01(
-                0.35 * clamp01(metrics.syncReductionPct / 100.0) +
-                0.25 * clamp01(metrics.niiReductionPct / 100.0) +
-                0.20 * clamp01(metrics.seizureReductionPct / 100.0) +
-                0.20 * clamp01(metrics.burstReductionPct / 100.0)
-            );
-            return 100.0 * clamp01(
-                0.55 * seizureRisk +
-                0.25 * (1.0 - stabilizationBenefit) +
-                0.20 * instabilityMetric(metrics)
-            );
-        }
-        case BiologicalState::NeuralSilencing:
-            return 5.0;  // Already protected; minimal warning
-        case BiologicalState::ToxicInstability:
-            return 95.0;  // Maximum warning
-        case BiologicalState::ControlledSuppression:
-        default:
-            return 100.0 * clamp01(
-                0.55 * seizureRisk +
-                0.25 * instabilityMetric(metrics) +
-                0.20 * suppressionProtectionMetric(metrics)
-            );
+double computeEarlyWarningIndexForMode(const std::string& responseMode, const DoseRiskMetrics& metrics, double seizureRisk) {
+    if (responseMode == "NO_SIGNIFICANT_RESPONSE") {
+        return 100.0 * clamp01(
+            0.45 * seizureRisk +
+            0.35 * instabilityMetric(metrics) +
+            0.20 * std::max({0.0, std::fabs(metrics.rateChangeFrac), std::fabs(metrics.syncDelta), std::fabs(metrics.niiDelta)})
+        );
     }
+    if (responseMode == "EXCITATORY_RESPONSE") {
+        return 100.0 * clamp01(
+            0.50 * seizureRisk +
+            0.30 * reboundExcitationMetric(metrics) +
+            0.20 * instabilityMetric(metrics)
+        );
+    }
+    if (responseMode == "STABILIZING_RESPONSE") {
+        const double stabilizationBenefit = clamp01(
+            0.35 * clamp01(metrics.syncReductionPct / 100.0) +
+            0.25 * clamp01(metrics.niiReductionPct / 100.0) +
+            0.20 * clamp01(metrics.seizureReductionPct / 100.0) +
+            0.20 * clamp01(metrics.burstReductionPct / 100.0)
+        );
+        return 100.0 * clamp01(
+            0.55 * seizureRisk +
+            0.25 * (1.0 - stabilizationBenefit) +
+            0.20 * instabilityMetric(metrics)
+        );
+    }
+    return 100.0 * clamp01(
+        0.55 * seizureRisk +
+        0.25 * instabilityMetric(metrics) +
+        0.20 * suppressionProtectionMetric(metrics)
+    );
 }
 
 // Helper functions for text generation
@@ -922,27 +908,17 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.maxRateChangePct = 0.0;
     }
 
-    // Select curve based on BiologicalState (replaces responseMode-based fitCurveForMode)
-    auto fitCurveForState = [&](BiologicalState state) -> std::vector<double> {
+    auto fitCurveForMode = [&](const std::string& mode) -> std::vector<double> {
         std::vector<double> curve;
         curve.reserve(xDose.size());
         const std::vector<double>* source = &suppressionCurveEffect;
-        switch (state) {
-            case BiologicalState::LimitedEffect:
-                source = &noSignificantCurveEffect;
-                break;
-            case BiologicalState::Hyperexcitability:
-                source = &excitationCurveEffect;
-                break;
-            case BiologicalState::NetworkStabilization:
-                source = &stabilizationCurveEffect;
-                break;
-            case BiologicalState::ControlledSuppression:
-            case BiologicalState::NeuralSilencing:
-            case BiologicalState::ToxicInstability:
-            default:
-                source = &suppressionCurveEffect;
-                break;
+        if (mode == "NO_SIGNIFICANT_RESPONSE") {
+            source = &noSignificantCurveEffect;
+        }
+        if (mode == "EXCITATORY_RESPONSE") {
+            source = &excitationCurveEffect;
+        } else if (mode == "STABILIZING_RESPONSE") {
+            source = &stabilizationCurveEffect;
         }
         curve = *source;
         for (std::size_t i = 1; i < curve.size(); ++i) {
@@ -1091,7 +1067,15 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     const bool noSignificantResponseObserved =
         (report.biologicalState == BiologicalState::LimitedEffect) ||
         (!therapeuticWindowExists && report.maxRateChangePct < 20.0 && !report.hasToxicThreshold);
-    // NOTE: responseMode removed. Decision logic now driven directly by BiologicalState.
+    if (stabilizingResponseObserved) {
+        report.responseMode = "STABILIZING_RESPONSE";
+    } else if (sawHyperexcitability || hyperexcitabilityDetected || report.biologicalState == BiologicalState::Hyperexcitability) {
+        report.responseMode = "EXCITATORY_RESPONSE";
+    } else if (noSignificantResponseObserved) {
+        report.responseMode = "NO_SIGNIFICANT_RESPONSE";
+    } else {
+        report.responseMode = "SUPPRESSIVE_RESPONSE";
+    }
 
     report.peakRiskScore = 0.0f;
     report.peakEarlyWarningIndex = 0.0f;
@@ -1126,8 +1110,8 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
             niiNorm
         };
 
-        const double seizureRiskPct = 100.0 * computeSeizureRiskForState(report.biologicalState, metrics);
-        const double earlyWarningIndex = computeEarlyWarningIndexForState(report.biologicalState, metrics, seizureRiskPct / 100.0);
+        const double seizureRiskPct = 100.0 * computeSeizureRiskForMode(report.responseMode, metrics);
+        const double earlyWarningIndex = computeEarlyWarningIndexForMode(report.responseMode, metrics, seizureRiskPct / 100.0);
         const DrugRiskTier tier = classifyTier(seizureNorm, suppressionNorm, static_cast<float>(seizureRiskPct));
 
         report.points[i].riskScore = static_cast<float>(seizureRiskPct);
@@ -1138,7 +1122,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.peakEarlyWarningIndex = std::max(report.peakEarlyWarningIndex, static_cast<float>(earlyWarningIndex));
     }
 
-    report.sigmoidR2 = computeBestSigmoidR2(xDose, fitCurveForState(report.biologicalState));
+    report.sigmoidR2 = computeBestSigmoidR2(xDose, fitCurveForMode(report.responseMode));
     if (report.sigmoidR2 >= 0.95) {
         report.curveType = "Sigmoidal";
     } else if (report.sigmoidR2 >= 0.85) {
@@ -1247,7 +1231,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     report.toxicThresholdText = report.hasToxicThreshold ? std::to_string(report.toxicThresholdDoseEval)
                                                          : ">" + std::to_string(report.maxTestedDose);
 
-    if (hyperexcitabilityDetected) {
+    if (report.responseMode == "EXCITATORY_RESPONSE") {
         report.reason = "Excitability and seizure-risk markers increased beyond safe neural stability limits";
     }
 

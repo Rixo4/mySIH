@@ -63,21 +63,21 @@ endif()
 
 add_executable(silicon_patient ${SPP_SOURCES})
 
-add_executable(biological_state_regression
-    engine/tests/biological_state_regression.cpp
+add_executable(ontology_regression
+    engine/tests/ontology_regression.cpp
     engine/analyzer/PharmaDecisionEngine.cpp
     engine/drug/DrugModel.cpp
 )
 
 target_include_directories(silicon_patient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
-target_include_directories(biological_state_regression PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
+target_include_directories(ontology_regression PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 
 if(SPP_ENABLE_CUDA)
     target_compile_definitions(silicon_patient PRIVATE SPP_USE_CUDA)
 endif()
 
 if(SPP_ENABLE_CUDA)
-    target_compile_definitions(biological_state_regression PRIVATE SPP_USE_CUDA)
+    target_compile_definitions(ontology_regression PRIVATE SPP_USE_CUDA)
 endif()
 
 if(SPP_ENABLE_CUDA)
@@ -86,22 +86,22 @@ if(SPP_ENABLE_CUDA)
 endif()
 
 if(SPP_ENABLE_CUDA)
-    set_target_properties(biological_state_regression PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
-    target_link_libraries(biological_state_regression PRIVATE CUDA::cudart)
+    set_target_properties(ontology_regression PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+    target_link_libraries(ontology_regression PRIVATE CUDA::cudart)
 endif()
 
 if(MSVC)
     target_compile_options(silicon_patient PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:/W4 /O2>
     )
-    target_compile_options(biological_state_regression PRIVATE
+    target_compile_options(ontology_regression PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:/W4 /O2>
     )
 else()
     target_compile_options(silicon_patient PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O3>
     )
-    target_compile_options(biological_state_regression PRIVATE
+    target_compile_options(ontology_regression PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O3>
     )
 endif()

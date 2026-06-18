@@ -1840,9 +1840,10 @@ std::string buildDrugEvaluationReportText(
     const std::string riskLevel = report.riskLevel;
     const std::string reason = report.reason;
     const std::string confidence = report.confidence;
+        const std::string responseMode = report.responseMode;
 
     const bool excitatoryMode = (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
-    const bool stabilizationMode = (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
+        const bool stabilizationMode = (responseMode == "STABILIZING_RESPONSE") || (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
     const std::string windowSectionTitle = excitatoryMode
                                                ? std::string("Excitatory Response Range")
                                  : (stabilizationMode ? std::string("Stabilization Response Range")
@@ -1888,7 +1889,7 @@ std::string buildDrugEvaluationReportText(
 
     out << "[Response Characteristics]\n";
     appendLine("Curve Type", curveType);
-    appendLine("Biological State", spp::analyzer::PharmaDecisionEngine::toString(report.biologicalState));
+    appendLine("Response Mode", responseMode);
     appendLine("Model Fit (R^2)", noResponse ? std::string("N/A") : formatRuntimeNumber(report.sigmoidR2, 2));
     appendLine("Max Effect", formatRuntimeNumber(maxEffect, 0) + " %");
     appendLine("Response Strength", responseStrength);
