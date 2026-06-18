@@ -99,7 +99,6 @@ struct PharmaDecisionReport {
     std::string primaryChangeText = "Not observed";
     std::string safetyInterpretationText = "Not observed";
     std::string seizureTrendText = "Not observed";
-    std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
     double syncReductionPct = 0.0;
     double niiReductionPct = 0.0;
     double niiIncreasePct = 0.0;
@@ -137,6 +136,9 @@ struct PharmaDecisionReport {
 
     DrugRiskTier overallTier = DrugRiskTier::Safe;
     std::vector<DrugDecisionPoint> points;
+    
+    // NOTE: responseMode field removed.
+    // Use biologicalState and biologicalStateText instead.
 };
 
 class PharmaDecisionEngine {
