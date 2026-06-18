@@ -602,25 +602,159 @@ std::string riskLevelText(DrugRiskTier tier) {
     }
 }
 
-std::string confidenceFromEvidence(
-    const DecisionStabilityInput& stability,
+// BIOLOGY-DRIVEN CONFIDENCE SCORING
+// Emerges from: biological coherence, mechanistic consistency, dose-response fit quality,
+// window definition, and stability metrics. NOT primarily dependent on run count.
+std::string computeConfidenceFromBiology(
+    BiologicalState state,
     double sigmoidR2,
     bool therapeuticWindowExists,
-    bool fragmentedWindow
+    bool hasContinuousEffectiveWindow,
+    bool fragmentedWindow,
+    float rateVariability,
+    float toxicityVariability,
+    double syncReductionPct,
+    double niiReductionPct,
+    double seizureReductionPct,
+    double burstReductionPct,
+    double maxRateChangePct,
+    float peakRiskScore,
+    float peakSeizureProbabilityPct,
+    int runCount
 ) {
-    const bool lowStability = (stability.stabilityScore == "LOW") ||
-                              (stability.rateStd >= 2.0f) ||
-                              (stability.toxicityStd >= 10.0f);
-    if (lowStability || stability.runCount < 3) {
+    double confidenceScore = 0.0;
+
+    // ==================== COMPONENT 1: BIOLOGICAL COHERENCE (40 max) ====================
+    // Clear, unambiguous biological state detected?
+    const bool isClearState = (state != BiologicalState::LimitedEffect);
+    const bool isTherapeuticState = (state == BiologicalState::ControlledSuppression || 
+                                      state == BiologicalState::NetworkStabilization);
+    const bool isDangerState = (state == BiologicalState::NeuralSilencing || 
+                                state == BiologicalState::Hyperexcitability || 
+                                state == BiologicalState::ToxicInstability);
+
+    if (isClearState) {
+        confidenceScore += 30.0;  // Clear state detected
+        if (isTherapeuticState) {
+            confidenceScore += 10.0;  // Therapeutic effect is well-characterized
+        } else if (isDangerState) {
+            confidenceScore += 10.0;  // Danger signal is unambiguous
+        }
+    } else {
+        // Limited effect: still award points if effect magnitude is detectable
+        if (maxRateChangePct > 10.0) {
+            confidenceScore += 8.0;
+        } else {
+            confidenceScore += 2.0;  // Minimal effect detected
+        }
+    }
+
+    // ==================== COMPONENT 2: MECHANISTIC CONSISTENCY (20 max) ====================
+    // Do the biological metrics align with the detected state?
+    
+    // For suppressive/stabilizing states: check if appropriate reductions occurred
+    if (isTherapeuticState) {
+        int metricsAligned = 0;
+        if (syncReductionPct >= 15.0) metricsAligned++;
+        if (niiReductionPct >= 15.0) metricsAligned++;
+        if (seizureReductionPct >= 15.0) metricsAligned++;
+        if (burstReductionPct >= 15.0) metricsAligned++;
+
+        if (metricsAligned >= 3) {
+            confidenceScore += 20.0;  // Strong consensus across metrics
+        } else if (metricsAligned == 2) {
+            confidenceScore += 15.0;  // Multiple metrics agree
+        } else if (metricsAligned == 1) {
+            confidenceScore += 10.0;  // At least one metric shows effect
+        } else if (maxRateChangePct > 30.0) {
+            confidenceScore += 8.0;   // Rate change significant even if other metrics weak
+        }
+    }
+    // For danger states: high peak metrics indicate strong signal
+    else if (isDangerState) {
+        if (peakRiskScore >= 70.0 || peakSeizureProbabilityPct >= 70.0) {
+            confidenceScore += 20.0;  // Strong danger signal
+        } else if (peakRiskScore >= 50.0 || peakSeizureProbabilityPct >= 50.0) {
+            confidenceScore += 15.0;  // Moderate danger signal
+        } else {
+            confidenceScore += 10.0;  // Detectable but weaker danger signal
+        }
+    }
+    // For limited effect: check if there's ANY meaningful magnitude
+    else {
+        if (maxRateChangePct > 20.0) {
+            confidenceScore += 10.0;  // Significant change despite limited state
+        } else if (maxRateChangePct > 10.0) {
+            confidenceScore += 5.0;
+        }
+    }
+
+    // ==================== COMPONENT 3: DOSE-RESPONSE QUALITY (20 max) ====================
+    // How well does the data fit a sigmoid/smooth curve?
+    if (sigmoidR2 >= 0.95) {
+        confidenceScore += 20.0;  // Excellent fit, highly predictable response
+    } else if (sigmoidR2 >= 0.90) {
+        confidenceScore += 17.0;  // Very good fit
+    } else if (sigmoidR2 >= 0.85) {
+        confidenceScore += 14.0;  // Good fit, interpretable dose-response
+    } else if (sigmoidR2 >= 0.75) {
+        confidenceScore += 9.0;   // Moderate fit, some noise
+    } else if (sigmoidR2 >= 0.65) {
+        confidenceScore += 5.0;   // Weak fit, highly variable
+    } else {
+        confidenceScore += 0.0;   // No coherent dose-response
+    }
+
+    // ==================== COMPONENT 4: WINDOW DEFINITION (10 max) ====================
+    // Is there a well-defined therapeutic or safety window?
+    if (therapeuticWindowExists && hasContinuousEffectiveWindow && !fragmentedWindow) {
+        confidenceScore += 10.0;  // Clear, continuous window
+    } else if (therapeuticWindowExists && hasContinuousEffectiveWindow) {
+        confidenceScore += 8.0;   // Continuous window exists, some fragmentation
+    } else if (therapeuticWindowExists) {
+        confidenceScore += 5.0;   // Window exists but fragmented
+    } else if (isDangerState) {
+        confidenceScore += 5.0;   // No window needed; clear danger is definitive
+    } else {
+        confidenceScore += 0.0;   // No window, unclear signal
+    }
+
+    // ==================== COMPONENT 5: STABILITY & VARIABILITY (10 max) ====================
+    // How consistent are the measurements across experimental runs/doses?
+    if (rateVariability < 1.0f && toxicityVariability < 5.0f) {
+        confidenceScore += 10.0;  // Excellent consistency
+    } else if (rateVariability < 1.5f && toxicityVariability < 7.5f) {
+        confidenceScore += 8.0;   // Good consistency
+    } else if (rateVariability < 2.0f && toxicityVariability < 10.0f) {
+        confidenceScore += 5.0;   // Acceptable consistency
+    } else {
+        confidenceScore += 2.0;   // High variability, noisy data
+    }
+
+    // ==================== FINAL CONVERSION TO CONFIDENCE BAND ====================
+    // Ensure minimum meaningful thresholds
+    const double clampedScore = std::clamp(confidenceScore, 0.0, 100.0);
+
+    // Run count used for validation only (minimum bar)
+    if (runCount < 2) {
+        // Single run: still can be HIGH if all evidence converges perfectly
+        // But downgrade MEDIUM→LOW if very few runs
+        if (clampedScore >= 80.0) {
+            return "HIGH";
+        } else if (clampedScore >= 70.0) {
+            return "MEDIUM";
+        } else {
+            return "LOW";
+        }
+    }
+
+    if (clampedScore >= 80.0) {
+        return "HIGH";
+    } else if (clampedScore >= 50.0) {
+        return "MEDIUM";
+    } else {
         return "LOW";
     }
-    if (stability.runCount >= 10 && sigmoidR2 >= 0.95 && therapeuticWindowExists && !fragmentedWindow) {
-        return "HIGH";
-    }
-    if (stability.runCount >= 5 && sigmoidR2 >= 0.85) {
-        return "MEDIUM";
-    }
-    return "LOW";
 }
 
 PharmaDecisionReport PharmaDecisionEngine::evaluate(
@@ -1226,7 +1360,23 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.overallTier = DrugRiskTier::Safe;
     }
 
-    report.confidence = confidenceFromEvidence(stabilityInput, report.sigmoidR2, therapeuticWindowExists, fragmentedWindow);
+    report.confidence = computeConfidenceFromBiology(
+        report.biologicalState,
+        report.sigmoidR2,
+        therapeuticWindowExists,
+        report.hasContinuousEffectiveWindow,
+        fragmentedWindow,
+        report.rateVariability,
+        report.toxicityVariability,
+        report.syncReductionPct,
+        report.niiReductionPct,
+        report.seizureReductionPct,
+        report.burstReductionPct,
+        report.maxRateChangePct,
+        report.peakRiskScore,
+        report.peakSeizureProbabilityPct,
+        stabilityInput.runCount
+    );
     report.hasToxicThresholdExact = report.hasToxicThreshold;
     report.toxicThresholdText = report.hasToxicThreshold ? std::to_string(report.toxicThresholdDoseEval)
                                                          : ">" + std::to_string(report.maxTestedDose);
