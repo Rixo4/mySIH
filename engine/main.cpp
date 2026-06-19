@@ -880,7 +880,6 @@ SigmoidFitResult fitSigmoidCurve(const std::vector<double>& dose, const std::vec
 
     for (double k = kMin; k <= kMax + 1.0e-9; k += kStep) {
         for (double d50 = doseMin; d50 <= doseMax + 1.0e-9; d50 += dStep) {
-            // Solve the best amplitude analytically for each (k, d50): y ~= emax * sigmoid(k, d50).
             double emaxNumerator = 0.0;
             double emaxDenominator = 0.0;
 
@@ -1634,6 +1633,52 @@ void writePharmaDecisionReport(
     out << "max_seizure_slope_pct_per_dose," << report.maxSeizureSlopePctPerDose << "\n";
 }
 
+// ============================================================
+// FIX: buildRangesFromDoses helper (used by flag-based zone builders)
+// Merges a sorted list of dose values into contiguous [lo, hi] ranges
+// using the inferred step as the gap tolerance.
+// ============================================================
+static std::vector<std::pair<double, double>> buildRangesFromSortedDoses(
+    const std::vector<double>& doses,
+    double stepDose
+) {
+    std::vector<std::pair<double, double>> ranges;
+    if (doses.empty()) {
+        return ranges;
+    }
+
+    double step = stepDose;
+    if (!(step > 0.0) && doses.size() >= 2U) {
+        step = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 1U; i < doses.size(); ++i) {
+            const double diff = doses[i] - doses[i - 1U];
+            if (diff > 1.0e-6) {
+                step = std::min(step, diff);
+            }
+        }
+        if (!std::isfinite(step)) {
+            step = 1.0;
+        }
+    }
+    if (!(step > 0.0)) {
+        step = 1.0;
+    }
+
+    const double maxGap = 1.50 * step + 1.0e-5;
+
+    std::size_t i = 0U;
+    while (i < doses.size()) {
+        std::size_t j = i;
+        while (j + 1U < doses.size() && (doses[j + 1U] - doses[j]) <= maxGap) {
+            ++j;
+        }
+        ranges.emplace_back(doses[i], doses[j]);
+        i = j + 1U;
+    }
+
+    return ranges;
+}
+
 // Build drug evaluation report including the drug input details so callers can
 // prove user-provided values reached the engine.
 std::string buildDrugEvaluationReportText(
@@ -1650,73 +1695,66 @@ std::string buildDrugEvaluationReportText(
     const auto formatRange = [&](double startDose, double endDose) {
         return formatRuntimeNumber(startDose) + " - " + formatRuntimeNumber(endDose);
     };
-    struct DoseBucket {
-        double dose = 0.0;
-        double effectPct = 0.0;
-    };
 
-    std::vector<DoseBucket> features;
-    features.reserve(report.features.size());
-    for (const auto& feature : report.features) {
-        features.push_back(DoseBucket{feature.dose, feature.rate_change});
-    }
-    std::sort(features.begin(), features.end(), [](const DoseBucket& a, const DoseBucket& b) {
+    // ============================================================
+    // FIX: Use engine's per-dose is_effective / is_toxic flags for
+    // zone classification instead of re-applying effectPct thresholds.
+    // This eliminates fragmentation caused by boundary doses whose
+    // effectMagnitudePct (unsigned) falls slightly below 20% while
+    // the engine already labelled them as Hyperexcitability/toxic.
+    // ============================================================
+
+    // Sort features by dose (they should already be sorted, but guarantee it).
+    std::vector<spp::analyzer::DoseFeatures> features = report.features;
+    std::sort(features.begin(), features.end(), [](const spp::analyzer::DoseFeatures& a, const spp::analyzer::DoseFeatures& b) {
         return a.dose < b.dose;
     });
 
-    const auto buildDoseRanges = [&](auto predicate) {
-        std::vector<std::pair<double, double>> ranges;
-        if (features.empty()) {
-            return ranges;
+    // Build dose vectors for each zone using the engine's flags.
+    std::vector<double> ineffectiveDoses;
+    std::vector<double> therapeuticDoses;
+    std::vector<double> overSuppressionDoses;
+    ineffectiveDoses.reserve(features.size());
+    therapeuticDoses.reserve(features.size());
+    overSuppressionDoses.reserve(features.size());
+
+    for (const auto& f : features) {
+        if (f.is_toxic) {
+            // Toxic doses are handled separately via excitatoryRiskDoses /
+            // overSuppressionDoses already stored in the report.
+            // For the suppressive mode, record over-suppression doses here.
+            if (report.responseMode != "EXCITATORY_RESPONSE") {
+                overSuppressionDoses.push_back(f.dose);
+            }
+        } else if (f.is_effective) {
+            therapeuticDoses.push_back(f.dose);
+        } else {
+            ineffectiveDoses.push_back(f.dose);
         }
+    }
 
-        double step = report.stepDose;
-        if (!(step > 0.0) && features.size() >= 2U) {
-            step = std::numeric_limits<double>::infinity();
-            for (std::size_t i = 1U; i < features.size(); ++i) {
-                const double diff = features[i].dose - features[i - 1U].dose;
-                if (diff > 1.0e-6) {
-                    step = std::min(step, diff);
-                }
-            }
-            if (!std::isfinite(step)) {
-                step = 1.0;
-            }
-        }
-        if (!(step > 0.0)) {
-            step = 1.0;
-        }
-
-        const double maxGap = 1.50 * step + 1.0e-5;
-
-        std::size_t i = 0U;
-        while (i < features.size()) {
-            while (i < features.size() && !predicate(features[i].effectPct)) {
-                ++i;
-            }
-            if (i >= features.size()) {
-                break;
-            }
-
-            std::size_t j = i;
-            while (j + 1U < features.size() &&
-                   predicate(features[j + 1U].effectPct) &&
-                   (features[j + 1U].dose - features[j].dose) <= maxGap) {
-                ++j;
-            }
-
-            ranges.emplace_back(features[i].dose, features[j].dose);
-            i = j + 1U;
-        }
-
-        return ranges;
+    // Deduplicate (already sorted).
+    const auto dedupVec = [](std::vector<double>& v) {
+        v.erase(
+            std::unique(v.begin(), v.end(), [](double a, double b) {
+                return std::fabs(a - b) <= 1.0e-6;
+            }),
+            v.end()
+        );
     };
+    dedupVec(ineffectiveDoses);
+    dedupVec(therapeuticDoses);
+    dedupVec(overSuppressionDoses);
+
+    const auto ineffectiveRanges    = buildRangesFromSortedDoses(ineffectiveDoses, report.stepDose);
+    const auto therapeuticRanges    = buildRangesFromSortedDoses(therapeuticDoses, report.stepDose);
+    const auto excitatoryRiskRanges = buildRangesFromSortedDoses(report.excitatoryRiskDoses, report.stepDose);
+    const auto overSuppressionRanges = buildRangesFromSortedDoses(overSuppressionDoses, report.stepDose);
 
     const auto formatRanges = [&](const std::vector<std::pair<double, double>>& ranges) {
         if (ranges.empty()) {
             return std::string("Not observed");
         }
-
         std::ostringstream text;
         for (std::size_t i = 0U; i < ranges.size(); ++i) {
             if (i > 0U) {
@@ -1727,69 +1765,28 @@ std::string buildDrugEvaluationReportText(
         return text.str();
     };
 
-    const auto buildRangesFromDoses = [&](const std::vector<double>& doses) {
-        std::vector<std::pair<double, double>> ranges;
-        if (doses.empty()) {
-            return ranges;
-        }
+    // ============================================================
+    // Derived display values — now computed from flag-based ranges
+    // ============================================================
+    // noResponse: no therapeutic and no excitatory activity detected
+    const bool noResponse = therapeuticRanges.empty() && excitatoryRiskRanges.empty();
 
-        double step = report.stepDose;
-        if (!(step > 0.0) && doses.size() >= 2U) {
-            step = std::numeric_limits<double>::infinity();
-            for (std::size_t i = 1U; i < doses.size(); ++i) {
-                const double diff = doses[i] - doses[i - 1U];
-                if (diff > 1.0e-6) {
-                    step = std::min(step, diff);
-                }
-            }
-            if (!std::isfinite(step)) {
-                step = 1.0;
-            }
-        }
-        if (!(step > 0.0)) {
-            step = 1.0;
-        }
-
-        const double maxGap = 1.50 * step + 1.0e-5;
-
-        std::size_t i = 0U;
-        while (i < doses.size()) {
-            std::size_t j = i;
-            while (j + 1U < doses.size() && (doses[j + 1U] - doses[j]) <= maxGap) {
-                ++j;
-            }
-
-            ranges.emplace_back(doses[i], doses[j]);
-            i = j + 1U;
-        }
-
-        return ranges;
-    };
-
+    // Peak effect: largest effectMagnitudePct across all features
     double maxEffect = -std::numeric_limits<double>::infinity();
     std::size_t peakIndex = 0U;
     for (std::size_t i = 0U; i < features.size(); ++i) {
-        if (features[i].effectPct > maxEffect) {
-            maxEffect = features[i].effectPct;
+        if (features[i].rate_change > maxEffect) {
+            maxEffect = features[i].rate_change;
             peakIndex = i;
         }
     }
+    if (!std::isfinite(maxEffect)) {
+        maxEffect = 0.0;
+    }
 
-    const bool noResponse = !std::isfinite(maxEffect) || maxEffect < 20.0;
     const std::string stabilityScore = getStability(stabilityStats.stdRate, stabilityStats.stdToxicity);
     const bool toxicityDetected = report.hasToxicThreshold;
     const bool lowStability = stabilityScore == "LOW";
-
-    const auto ineffectiveRanges = buildDoseRanges([](double effectPct) {
-        return effectPct < 20.0;
-    });
-    const auto therapeuticRanges = buildDoseRanges([](double effectPct) {
-        return effectPct >= 20.0 && effectPct <= 60.0;
-    });
-    const auto excitatoryRiskRanges = buildRangesFromDoses(report.excitatoryRiskDoses);
-    const auto overSuppressionRanges = buildDoseRanges([](double effectPct) {
-        return effectPct > 60.0;
-    });
 
     const bool overSuppressionDetected = !overSuppressionRanges.empty();
     const bool fragmentedWindow = therapeuticRanges.size() > 1U;
@@ -1807,29 +1804,43 @@ std::string buildDrugEvaluationReportText(
                                             ? std::string("None")
                                             : (maxEffect < 40.0 ? std::string("Moderate")
                                                                 : (maxEffect < 60.0 ? std::string("Moderate-to-Strong") : std::string("Strong")));
+
+    // Effective range display
     const std::string effectiveRange = noResponse || therapeuticRanges.empty()
                                            ? std::string("Not observed")
                                            : formatRanges(therapeuticRanges);
+
     const bool singlePointTherapeuticWindow =
         (therapeuticRanges.size() == 1U) &&
         (std::fabs(therapeuticRanges.front().second - therapeuticRanges.front().first) <=
          std::max(1.0e-6, 0.25 * std::max(1.0e-6, report.stepDose)));
+
     const std::string windowQuality = noResponse || therapeuticRanges.empty()
                                           ? std::string("Not observed")
                                           : (singlePointTherapeuticWindow
                                                  ? std::string("Narrow")
                                                  : (therapeuticRanges.size() == 1U ? std::string("Continuous")
                                                                                    : std::string("Fragmented")));
-    const std::string ineffectiveZone = noResponse ? formatRange(report.minTestedDose, report.maxTestedDose) : formatRanges(ineffectiveRanges);
-    const std::string therapeuticZone = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : formatRanges(therapeuticRanges);
+
+    const std::string ineffectiveZone    = noResponse
+                                               ? formatRange(report.minTestedDose, report.maxTestedDose)
+                                               : formatRanges(ineffectiveRanges);
+    const std::string therapeuticZone   = noResponse || therapeuticRanges.empty()
+                                               ? std::string("Not observed")
+                                               : formatRanges(therapeuticRanges);
     const std::string overSuppressionZone = noResponse ? std::string("Not observed") : formatRanges(overSuppressionRanges);
-    const std::string excitatoryRiskZone = excitatoryRiskRanges.empty() ? std::string("Not observed") : formatRanges(excitatoryRiskRanges);
-    const std::string onsetDose = noResponse || therapeuticRanges.empty() ? std::string("Not observed") : ("~" + formatRuntimeNumber(therapeuticRanges.front().first));
+    const std::string excitatoryRiskZone  = excitatoryRiskRanges.empty() ? std::string("Not observed") : formatRanges(excitatoryRiskRanges);
+
+    const std::string onsetDose = noResponse || therapeuticRanges.empty()
+                                      ? std::string("Not observed")
+                                      : ("~" + formatRuntimeNumber(therapeuticRanges.front().first));
+
     const bool peakInToxicRange = toxicityDetected && (features[peakIndex].dose >= report.toxicMinDose);
     const std::string peakEfficiency = noResponse
                                            ? std::string("Not observed")
                                            : ("~" + formatRuntimeNumber(features[peakIndex].dose) +
                                               (peakInToxicRange ? " (within toxic range)" : ""));
+
     const std::string saturationText = noResponse
                                            ? std::string("Not observed")
                                            : ((peakIndex + 1U >= features.size())
@@ -1837,78 +1848,90 @@ std::string buildDrugEvaluationReportText(
                                                   : std::string("Observed beyond ") + formatRuntimeNumber(features[peakIndex].dose));
 
     const std::string recommendation = report.recommendation;
-    const std::string riskLevel = report.riskLevel;
-    const std::string reason = report.reason;
-    const std::string confidence = report.confidence;
-        const std::string responseMode = report.responseMode;
+    const std::string riskLevel      = report.riskLevel;
+    const std::string reason         = report.reason;
+    const std::string confidence     = report.confidence;
+    const std::string responseMode   = report.responseMode;
 
-    const bool excitatoryMode = (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
-        const bool stabilizationMode = (responseMode == "STABILIZING_RESPONSE") || (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
+    const bool excitatoryMode    = (report.biologicalState == spp::analyzer::BiologicalState::Hyperexcitability);
+    const bool stabilizationMode = (responseMode == "STABILIZING_RESPONSE") ||
+                                   (report.biologicalState == spp::analyzer::BiologicalState::NetworkStabilization);
+
     const std::string windowSectionTitle = excitatoryMode
                                                ? std::string("Excitatory Response Range")
-                                 : (stabilizationMode ? std::string("Stabilization Response Range")
-                                             : std::string("Therapeutic Window"));
+                                               : (stabilizationMode ? std::string("Stabilization Response Range")
+                                                                    : std::string("Therapeutic Window"));
     const std::string effectiveRangeLabel = excitatoryMode
                                                 ? std::string("Excitatory Range")
-                                  : (stabilizationMode ? std::string("Stabilization Range")
-                                              : std::string("Effective Range"));
+                                                : (stabilizationMode ? std::string("Stabilization Range")
+                                                                     : std::string("Effective Range"));
     const std::string zoneLabel = excitatoryMode
                                       ? std::string("Excitatory Zone")
-                           : (stabilizationMode ? std::string("Stabilization Zone")
-                                       : std::string("Therapeutic Zone"));
+                                      : (stabilizationMode ? std::string("Stabilization Zone")
+                                                           : std::string("Therapeutic Zone"));
     const std::string optimalZoneText = excitatoryMode
                                             ? std::string("Transient excitatory regime before seizure-risk escalation")
                                             : (stabilizationMode
-                                  ? std::string("Calcium-channel blockade reduced synchronization and neural instability")
+                                                   ? std::string("Calcium-channel blockade reduced synchronization and neural instability")
                                                    : std::string("Moderate, controlled suppression (20-60%)"));
-        const std::string windowQualityText = noResponse || therapeuticRanges.empty()
-                                ? std::string("Not observed")
-                                : (stabilizationMode
-                                    ? (therapeuticRanges.size() > 1U ? std::string("Fragmented")
-                                                      : std::string("Continuous"))
-                                    : windowQuality);
 
+    // Window quality for stabilization mode
+    const std::string windowQualityText = noResponse || therapeuticRanges.empty()
+                                              ? std::string("Not observed")
+                                              : (stabilizationMode
+                                                     ? (therapeuticRanges.size() > 1U ? std::string("Fragmented")
+                                                                                      : std::string("Continuous"))
+                                                     : windowQuality);
+
+    // ============================================================
+    // Report output
+    // ============================================================
     out << "==================================================\n";
     out << "SILICON PATIENT - DRUG EVALUATION REPORT\n";
     out << "==================================================\n\n";
 
     out << "[Drug Input]\n";
-    appendStructuredReportLine(out, "Drug Name", evalInput.drug_name);
-    appendStructuredReportLine(out, "Engine Input Mode", engineInputMode);
-    appendStructuredReportLine(out, "Na IC50", evalInput.config.ic50_na);
-    appendStructuredReportLine(out, "K IC50", evalInput.config.ic50_k);
-    appendStructuredReportLine(out, "Ca IC50", evalInput.config.ic50_ca);
-    appendStructuredReportLine(out, "Hill", evalInput.config.hill);
-    appendStructuredReportLine(out, "Runs", runCount);
+    appendLine("Drug Name",        evalInput.drug_name);
+    appendLine("Engine Input Mode", engineInputMode);
+    appendLine("Na IC50",          formatRuntimeNumber(evalInput.config.ic50_na));
+    appendLine("K IC50",           formatRuntimeNumber(evalInput.config.ic50_k));
+    appendLine("Ca IC50",          formatRuntimeNumber(evalInput.config.ic50_ca));
+    appendLine("Hill",             formatRuntimeNumber(evalInput.config.hill));
+    appendLine("Runs",             std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Dose Range]\n";
     appendLine("Tested Range", formatRange(report.minTestedDose, report.maxTestedDose));
-    appendLine("Step Size", formatRuntimeNumber(report.stepDose));
+    appendLine("Step Size",    formatRuntimeNumber(report.stepDose));
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Response Characteristics]\n";
-    appendLine("Curve Type", curveType);
-    appendLine("Response Mode", responseMode);
-    appendLine("Model Fit (R^2)", noResponse ? std::string("N/A") : formatRuntimeNumber(report.sigmoidR2, 2));
-    appendLine("Max Effect", formatRuntimeNumber(maxEffect, 0) + " %");
+    appendLine("Curve Type",       curveType);
+    appendLine("Response Mode",    responseMode);
+    appendLine("Model Fit (R^2)",  noResponse ? std::string("N/A") : formatRuntimeNumber(report.sigmoidR2, 2));
+    appendLine("Max Effect",       formatRuntimeNumber(maxEffect, 0) + " %");
     appendLine("Response Strength", responseStrength);
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Safety Analysis]\n";
-    appendLine("Toxic Threshold", toxicityDetected ? formatRuntimeNumber(report.toxicMinDose) : (">" + formatRuntimeNumber(report.maxTestedDose) + " (Not observed)"));
-    appendLine("Safety Observation", toxicityDetected ? "Toxicity observed within tested range" : "No toxicity within tested range");
+    appendLine("Toxic Threshold",
+               toxicityDetected
+                   ? formatRuntimeNumber(report.toxicMinDose)
+                   : (">" + formatRuntimeNumber(report.maxTestedDose) + " (Not observed)"));
+    appendLine("Safety Observation",
+               toxicityDetected ? "Toxicity observed within tested range"
+                                : "No toxicity within tested range");
     out << "\n--------------------------------------------------\n\n";
 
     out << "[" << windowSectionTitle << "]\n";
     appendLine(effectiveRangeLabel, effectiveRange);
-    appendLine("Window Quality", windowQualityText);
-    appendLine("Optimal Zone", optimalZoneText);
+    appendLine("Window Quality",   windowQualityText);
+    appendLine("Optimal Zone",     optimalZoneText);
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Dose Classification Summary]\n";
     appendLine("Ineffective Zone", ineffectiveZone);
-    appendLine(zoneLabel, therapeuticZone);
+    appendLine(zoneLabel,          therapeuticZone);
     if (excitatoryMode) {
         appendLine("Severe Excitability Zone", excitatoryRiskZone);
     } else if (stabilizationMode) {
@@ -1920,34 +1943,34 @@ std::string buildDrugEvaluationReportText(
 
     if (stabilizationMode) {
         out << "[Calcium Stabilization Metrics]\n";
-        appendLine("Sync Reduction", formatRuntimeNumber(report.syncReductionPct, 1) + " %");
+        appendLine("Sync Reduction",  formatRuntimeNumber(report.syncReductionPct, 1) + " %");
         const bool niiReductionObserved = report.niiReductionPct > 0.0;
         appendLine(niiReductionObserved ? "NII Reduction" : "NII Increase",
                    formatRuntimeNumber(niiReductionObserved ? report.niiReductionPct : report.niiIncreasePct, 1) + " %");
-        appendLine("Seizure Reduction", formatRuntimeNumber(report.seizureReductionPct, 1) + " %");
-        appendLine("Burst Reduction", formatRuntimeNumber(report.burstReductionPct, 1) + " %");
-        appendLine("Calcium Effect", formatRuntimeNumber(report.calciumEffectMagnitude, 1) + " %");
+        appendLine("Seizure Reduction",  formatRuntimeNumber(report.seizureReductionPct, 1) + " %");
+        appendLine("Burst Reduction",    formatRuntimeNumber(report.burstReductionPct, 1) + " %");
+        appendLine("Calcium Effect",     formatRuntimeNumber(report.calciumEffectMagnitude, 1) + " %");
         out << "\n--------------------------------------------------\n\n";
     }
 
     out << "[Pharmacodynamic Interpretation]\n";
-    appendLine("Onset Dose", onsetDose);
+    appendLine("Onset Dose",      onsetDose);
     appendLine("Peak Efficiency", peakEfficiency);
     appendLine("Saturation Trend", saturationText);
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Stability Analysis]\n";
-    appendLine("Run Count", std::to_string(runCount));
-    appendLine("Rate Variability", formatRuntimeNumber(stabilityStats.stdRate, 2));
+    appendLine("Run Count",         std::to_string(runCount));
+    appendLine("Rate Variability",  formatRuntimeNumber(stabilityStats.stdRate, 2));
     appendLine("Toxicity Variance", formatRuntimeNumber(stabilityStats.stdToxicity, 2));
-    appendLine("Stability Score", stabilityScore);
+    appendLine("Stability Score",   stabilityScore);
     out << "\n--------------------------------------------------\n\n";
 
     out << "[FINAL DECISION]\n";
     appendLine("Recommendation", recommendation);
-    appendLine("Risk Level", riskLevel);
-    appendLine("Reason", reason);
-    appendLine("Confidence", confidence);
+    appendLine("Risk Level",     riskLevel);
+    appendLine("Reason",         reason);
+    appendLine("Confidence",     confidence);
     out << "\n==================================================\n";
 
     return out.str();
@@ -2108,7 +2131,6 @@ void runDoseEvaluationMode(const RuntimeInput& baseInput, const std::string& eng
             aggregatedMetrics,
             label
         });
-
     }
 
     if (observations.empty()) {
@@ -2169,7 +2191,6 @@ static std::optional<double> extractJsonNumber(const std::string& s, const std::
     if (p == std::string::npos) return std::nullopt;
     const auto colon = s.find(':', p + pat.size());
     if (colon == std::string::npos) return std::nullopt;
-    // find first digit/+-/. after colon
     const auto numStart = s.find_first_of("0123456789-+.", colon);
     if (numStart == std::string::npos) return std::nullopt;
     std::size_t numEnd = numStart;
@@ -2213,33 +2234,8 @@ static bool loadDrugConfigFromJsonFile(const std::string& path, RuntimeInput& ou
 
     const auto doseRangePos = content.find("\"dose_range\"");
     if (doseRangePos != std::string::npos) {
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) outInput.config.dose = *v; // note: base dose will be set to min
         if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            // we'll set sweep start/end/points elsewhere; but keep dose as min for single run context
-        }
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            (void)v;
-        }
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            (void)v;
-        }
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            (void)v;
-        }
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            (void)v;
-        }
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            (void)v;
-        }
-        // extract min/max/step explicitly
-        if (auto v = extractJsonNumber(content, "min", doseRangePos); v.has_value()) {
-            // nothing: already handled
-            (void)v;
-        }
-        if (auto v = extractJsonNumber(content, "max", doseRangePos); v.has_value()) {
-            // nothing here; main run will use min/max/step local variables
-            (void)v;
+            outInput.config.dose = *v;
         }
     }
 
@@ -2249,16 +2245,6 @@ static bool loadDrugConfigFromJsonFile(const std::string& path, RuntimeInput& ou
 
     if (auto v = extractJsonString(content, "mode"); v.has_value()) {
         outMode = *v;
-    }
-
-    // For dose_range we separately parse min/max/step and provide them via environment or outInput fields.
-    const auto dosePos = content.find("\"dose_range\"");
-    if (dosePos != std::string::npos) {
-        if (auto v = extractJsonNumber(content, "min", dosePos); v.has_value()) {
-            outInput.config.dose = *v;
-        }
-        // store min,max,step temporarily in the output folder fields (abuse existing struct)
-        // We will not set sweep points here; engine uses SPP_DOSE_EVAL_MIN/MAX/STEP env vars instead.
     }
 
     return true;
@@ -2332,7 +2318,6 @@ static bool loadDrugConfigFromJsonFile(const std::string& path, RuntimeInput& ou
             summary.network_metrics,
             label
         });
-
     }
 
     const PharmaDecisionReport decisionReport = PharmaDecisionEngine::evaluate(decisionInput);
@@ -2402,11 +2387,6 @@ void runSingleSimulationMode(const RuntimeInput& input) {
 }
 
 // Internal benchmark harness: Internal Biological Benchmark Suite
-// Purpose: regression testing, biological verification, literature matching,
-// scientific reproducibility, and internal QA. This is an internal developer
-// tool and is not exposed as part of the public user workflow. To run this
-// suite from the CLI set the environment variable `SPP_DEVELOPER_MODE=1`
-// and invoke the hidden flag `--internal-benchmark`.
 void runInternalBiologicalBenchmarkSuite() {
     const auto suiteStart = std::chrono::steady_clock::now();
 
@@ -2547,18 +2527,11 @@ void runInternalBiologicalBenchmarkSuite() {
         details << "Mean Rate (Hz)         : " << formatStats(baselineRateStats, 2) << "\n"
                 << "Synchronization        : " << formatStats(baselineSyncStats, 2) << "\n"
                 << "ISI CV                 : " << formatStats(baselineIsiCvStats, 2) << "\n";
-
         if (!baselineCheck.pass) {
             details << "Findings               :";
-            if (!baselineRatePass) {
-                details << " meanRate outside [5,22] across CI.";
-            }
-            if (!baselineSyncPass) {
-                details << " sync CI upper bound >= 0.30.";
-            }
-            if (!baselineIsiPass) {
-                details << " ISI CV CI lower bound <= 0.35.";
-            }
+            if (!baselineRatePass) details << " meanRate outside [5,22] across CI.";
+            if (!baselineSyncPass) details << " sync CI upper bound >= 0.30.";
+            if (!baselineIsiPass)  details << " ISI CV CI lower bound <= 0.35.";
             details << "\n";
         }
         baselineCheck.details = details.str();
@@ -2577,17 +2550,10 @@ void runInternalBiologicalBenchmarkSuite() {
     }
 
     // 2) Excitation-Inhibition Balance (multi-run)
-    std::vector<double> rateA;
-    std::vector<double> syncA;
-    std::vector<double> rateB;
-    std::vector<double> syncB;
-    std::vector<double> seizureB;
+    std::vector<double> rateA, syncA, rateB, syncB, seizureB;
     int stableCountB = 0;
-    rateA.reserve(kStatRuns);
-    syncA.reserve(kStatRuns);
-    rateB.reserve(kStatRuns);
-    syncB.reserve(kStatRuns);
-    seizureB.reserve(kStatRuns);
+    rateA.reserve(kStatRuns); syncA.reserve(kStatRuns);
+    rateB.reserve(kStatRuns); syncB.reserve(kStatRuns); seizureB.reserve(kStatRuns);
 
     for (int run = 0; run < kStatRuns; ++run) {
         RuntimeInput runA = baseInput;
@@ -2619,10 +2585,10 @@ void runInternalBiologicalBenchmarkSuite() {
         }
     }
 
-    const MetricStats rateAStats = computeMetricStats(rateA);
-    const MetricStats syncAStats = computeMetricStats(syncA);
-    const MetricStats rateBStats = computeMetricStats(rateB);
-    const MetricStats syncBStats = computeMetricStats(syncB);
+    const MetricStats rateAStats    = computeMetricStats(rateA);
+    const MetricStats syncAStats    = computeMetricStats(syncA);
+    const MetricStats rateBStats    = computeMetricStats(rateB);
+    const MetricStats syncBStats    = computeMetricStats(syncB);
     const MetricStats seizureBStats = computeMetricStats(seizureB);
 
     const double zRate = computeWelchZScore(rateA, rateB);
@@ -2633,7 +2599,7 @@ void runInternalBiologicalBenchmarkSuite() {
     eiCheck.name = "E/I Balance (" + std::to_string(kStatRuns) + " runs per case)";
     const bool rateSignificant = (rateAStats.mean > rateBStats.mean) && (zRate > 1.96);
     const bool syncSignificant = (syncAStats.mean > syncBStats.mean) && (zSync > 1.96);
-    const bool caseBStable = stableFracB >= 0.70 && seizureBStats.ci95High < 0.40;
+    const bool caseBStable     = stableFracB >= 0.70 && seizureBStats.ci95High < 0.40;
     eiCheck.pass = rateSignificant && syncSignificant && caseBStable;
     {
         std::ostringstream details;
@@ -2644,18 +2610,11 @@ void runInternalBiologicalBenchmarkSuite() {
                 << "zRate                  : " << formatRuntimeNumber(zRate) << "\n"
                 << "zSync                  : " << formatRuntimeNumber(zSync) << "\n"
                 << "CaseB Stable Fraction  : " << formatRuntimeNumber(stableFracB) << "\n";
-
         if (!eiCheck.pass) {
             details << "Findings               :";
-            if (!rateSignificant) {
-                details << " CaseA firing rate not significantly greater than CaseB.";
-            }
-            if (!syncSignificant) {
-                details << " CaseA sync not significantly greater than CaseB.";
-            }
-            if (!caseBStable) {
-                details << " CaseB failed stability envelope.";
-            }
+            if (!rateSignificant) details << " CaseA firing rate not significantly greater than CaseB.";
+            if (!syncSignificant) details << " CaseA sync not significantly greater than CaseB.";
+            if (!caseBStable)     details << " CaseB failed stability envelope.";
             details << "\n";
         }
         eiCheck.details = details.str();
@@ -2677,60 +2636,39 @@ void runInternalBiologicalBenchmarkSuite() {
         reportBlocks.push_back(report.str());
     }
 
-    // 3) Dose-response curve fit (20 independent runs)
+    // 3) Dose-response curve fit
     RuntimeInput doseInput = baseInput;
     doseInput.config.ic50_na = 200.0;
-    doseInput.config.ic50_k = 8.0;
+    doseInput.config.ic50_k  = 8.0;
     doseInput.config.ic50_ca = 1000.0;
-    doseInput.config.hill = 3.2;
+    doseInput.config.hill    = 3.2;
 
     const std::vector<double> doseGrid = buildLinearDoseGrid(0.0, 32.0, kDosePoints);
     constexpr int kDoseReplicates = 3;
-    std::vector<double> toxicityPct;
-    std::vector<double> toxicityFrac;
+    std::vector<double> toxicityPct, toxicityFrac;
     toxicityPct.reserve(doseGrid.size());
     toxicityFrac.reserve(doseGrid.size());
 
     for (std::size_t i = 0; i < doseGrid.size(); ++i) {
         doseInput.config.dose = doseGrid[i];
         double toxicAccum = 0.0;
-
         for (int rep = 0; rep < kDoseReplicates; ++rep) {
             const std::uint32_t seed = makeSeedForRun(40 + static_cast<int>(i), rep);
-            logRunMetadata(
-                "DoseResponse",
-                static_cast<int>(i * static_cast<std::size_t>(kDoseReplicates) + static_cast<std::size_t>(rep) + 1U),
-                seed,
-                doseInput
-            );
-
+            logRunMetadata("DoseResponse",
+                           static_cast<int>(i * static_cast<std::size_t>(kDoseReplicates) + static_cast<std::size_t>(rep) + 1U),
+                           seed, doseInput);
             const SimulationSummary summary = runSingleSimulation(doseInput, seed);
-            const double seizureFrac = std::clamp(
-                static_cast<double>(summary.network_metrics.seizureProbabilityPct) / 100.0,
-                0.0,
-                1.0
-            );
-            const double suppressionFrac = std::clamp(
-                static_cast<double>(summary.network_metrics.suppressionPct) / 100.0,
-                0.0,
-                1.0
-            );
-            const double instabilityFrac = std::clamp(static_cast<double>(summary.network_metrics.nii), 0.0, 1.0);
-
-            toxicAccum += std::clamp(
-                0.60 * seizureFrac + 0.30 * suppressionFrac + 0.10 * instabilityFrac,
-                0.0,
-                1.0
-            );
+            const double seizureFrac    = std::clamp(static_cast<double>(summary.network_metrics.seizureProbabilityPct) / 100.0, 0.0, 1.0);
+            const double suppressFrac   = std::clamp(static_cast<double>(summary.network_metrics.suppressionPct) / 100.0, 0.0, 1.0);
+            const double instabilityFrac= std::clamp(static_cast<double>(summary.network_metrics.nii), 0.0, 1.0);
+            toxicAccum += std::clamp(0.60 * seizureFrac + 0.30 * suppressFrac + 0.10 * instabilityFrac, 0.0, 1.0);
         }
-
         const double meanToxicFrac = toxicAccum / static_cast<double>(kDoseReplicates);
         toxicityFrac.push_back(meanToxicFrac);
         toxicityPct.push_back(100.0 * meanToxicFrac);
     }
 
-    std::vector<double> effectFrac;
-    std::vector<double> effectPct;
+    std::vector<double> effectFrac, effectPct;
     effectFrac.reserve(doseGrid.size());
     effectPct.reserve(doseGrid.size());
 
@@ -2746,7 +2684,6 @@ void runInternalBiologicalBenchmarkSuite() {
             const double denom = std::max(0.05, toxAtZeroDose);
             effect = std::clamp((toxAtZeroDose - tox) / denom, 0.0, 1.0);
         }
-
         effectFrac.push_back(effect);
         effectPct.push_back(100.0 * effect);
     }
@@ -2760,9 +2697,9 @@ void runInternalBiologicalBenchmarkSuite() {
 
     const SigmoidFitResult sigmoidFit = fitSigmoidCurve(doseGrid, effectForFit);
     const double midSlopePctPerDose = 25.0 * sigmoidFit.k * sigmoidFit.emax;
-    const bool r2Pass = sigmoidFit.r2 > 0.85;
+    const bool r2Pass       = sigmoidFit.r2 > 0.85;
     const bool midpointPass = sigmoidFit.d50 > doseGrid.front() && sigmoidFit.d50 < doseGrid.back();
-    const bool steepPass = midSlopePctPerDose > 1.0;
+    const bool steepPass    = midSlopePctPerDose > 1.0;
 
     ValidationCheck doseCheck;
     doseCheck.name = "Dose Response (" + std::to_string(kDosePoints) + " runs)";
@@ -2774,18 +2711,11 @@ void runInternalBiologicalBenchmarkSuite() {
                 << "d50                    : " << formatRuntimeNumber(sigmoidFit.d50) << "\n"
                 << "emax                   : " << formatRuntimeNumber(sigmoidFit.emax) << "\n"
                 << "Mid Slope              : " << formatRuntimeNumber(midSlopePctPerDose) << " (%/dose)\n";
-
         if (!doseCheck.pass) {
             details << "Findings               :";
-            if (!r2Pass) {
-                details << " R2 <= 0.85.";
-            }
-            if (!midpointPass) {
-                details << " fitted d50 outside dose range.";
-            }
-            if (!steepPass) {
-                details << " transition slope too shallow.";
-            }
+            if (!r2Pass)       details << " R2 <= 0.85.";
+            if (!midpointPass) details << " fitted d50 outside dose range.";
+            if (!steepPass)    details << " transition slope too shallow.";
             details << "\n";
         }
         doseCheck.details = details.str();
@@ -2798,8 +2728,8 @@ void runInternalBiologicalBenchmarkSuite() {
                << "Runs: " << kDosePoints << "\n"
                << "sigmoid R2: " << std::fixed << std::setprecision(3) << sigmoidFit.r2 << "\n"
                << "k: " << std::fixed << std::setprecision(4) << sigmoidFit.k
-             << ", d50: " << std::fixed << std::setprecision(4) << sigmoidFit.d50
-             << ", emax: " << std::fixed << std::setprecision(4) << sigmoidFit.emax << "\n"
+               << ", d50: " << std::fixed << std::setprecision(4) << sigmoidFit.d50
+               << ", emax: " << std::fixed << std::setprecision(4) << sigmoidFit.emax << "\n"
                << "midSlope: " << std::fixed << std::setprecision(3) << midSlopePctPerDose << " (%/dose)\n"
                << "RESULT: " << (doseCheck.pass ? "PASS" : "FAIL") << "\n";
         reportBlocks.push_back(report.str());
@@ -2815,7 +2745,7 @@ void runInternalBiologicalBenchmarkSuite() {
         fitOut << std::fixed << std::setprecision(6);
         for (std::size_t i = 0; i < doseGrid.size(); ++i) {
             const double observedPct = 100.0 * effectForFit[i];
-            const double fitPct = 100.0 * sigmoidFit.predicted[i];
+            const double fitPct      = 100.0 * sigmoidFit.predicted[i];
             fitOut << doseGrid[i] << ','
                    << toxicityPct[i] << ','
                    << effectPct[i] << ','
@@ -2829,10 +2759,8 @@ void runInternalBiologicalBenchmarkSuite() {
         }
     }
 
-    // 4) Temporal evolution (multi-run, time-resolved)
-    std::vector<double> earlyToxicProb;
-    std::vector<double> lateToxicProb;
-    std::vector<double> t0ToxicProb;
+    // 4) Temporal evolution
+    std::vector<double> earlyToxicProb, lateToxicProb, t0ToxicProb;
     std::vector<spp::analyzer::TimeWindowMetrics> meanTimeSeries;
     earlyToxicProb.reserve(kStatRuns);
     lateToxicProb.reserve(kStatRuns);
@@ -2840,21 +2768,19 @@ void runInternalBiologicalBenchmarkSuite() {
 
     for (int run = 0; run < kStatRuns; ++run) {
         RuntimeInput temporalInput = baseInput;
-        temporalInput.config.dose = 16.0;
-        temporalInput.config.ic50_na = 220.0;
-        temporalInput.config.ic50_k = 7.0;
-        temporalInput.config.ic50_ca = 1000.0;
+        temporalInput.config.dose      = 16.0;
+        temporalInput.config.ic50_na   = 220.0;
+        temporalInput.config.ic50_k    = 7.0;
+        temporalInput.config.ic50_ca   = 1000.0;
         temporalInput.config.external_current += 0.15;
-        temporalInput.config.noise_level += 0.10;
+        temporalInput.config.noise_level      += 0.10;
 
         const std::uint32_t seed = makeSeedForRun(5, run);
         logRunMetadata("TemporalToxic", run + 1, seed, temporalInput);
 
         const SimulationTrace trace = runSingleSimulationWithTrace(temporalInput, seed);
         const auto windows = MetricsAnalyzer::computeTimeWindowMetrics(trace.result, kWindowMs, kWindowMs);
-        if (windows.empty()) {
-            continue;
-        }
+        if (windows.empty()) continue;
 
         if (meanTimeSeries.empty()) {
             meanTimeSeries = windows;
@@ -2866,31 +2792,25 @@ void runInternalBiologicalBenchmarkSuite() {
             }
         }
 
-        double earlyAvg = 0.0;
-        double lateAvg = 0.0;
-        double t0Avg = 0.0;
-        double earlyRateAvg = 0.0;
-        double lateRateAvg = 0.0;
-        int earlyCount = 0;
-        int lateCount = 0;
-        int t0Count = 0;
+        double earlyAvg = 0.0, lateAvg = 0.0, t0Avg = 0.0;
+        double earlyRateAvg = 0.0, lateRateAvg = 0.0;
+        int earlyCount = 0, lateCount = 0, t0Count = 0;
 
         const std::size_t commonCount = std::min(meanTimeSeries.size(), windows.size());
         for (std::size_t i = 0; i < commonCount; ++i) {
             const auto& w = windows[i];
-
-            meanTimeSeries[i].meanFiringRateHz += w.meanFiringRateHz;
-            meanTimeSeries[i].synchronizationIndex += w.synchronizationIndex;
-            meanTimeSeries[i].burstIndex += w.burstIndex;
-            meanTimeSeries[i].seizureProbability += w.seizureProbability;
+            meanTimeSeries[i].meanFiringRateHz      += w.meanFiringRateHz;
+            meanTimeSeries[i].synchronizationIndex  += w.synchronizationIndex;
+            meanTimeSeries[i].burstIndex            += w.burstIndex;
+            meanTimeSeries[i].seizureProbability    += w.seizureProbability;
 
             if (w.endMs <= 100.0f) {
-                earlyAvg += static_cast<double>(w.seizureProbability);
+                earlyAvg     += static_cast<double>(w.seizureProbability);
                 earlyRateAvg += static_cast<double>(w.meanFiringRateHz);
                 ++earlyCount;
             }
             if (w.startMs >= 300.0f && w.endMs <= 500.0f + 1.0e-4f) {
-                lateAvg += static_cast<double>(w.seizureProbability);
+                lateAvg     += static_cast<double>(w.seizureProbability);
                 lateRateAvg += static_cast<double>(w.meanFiringRateHz);
                 ++lateCount;
             }
@@ -2900,13 +2820,12 @@ void runInternalBiologicalBenchmarkSuite() {
             }
         }
 
-        const double earlyProb = (earlyCount > 0) ? (earlyAvg / static_cast<double>(earlyCount)) : 0.0;
-        const double lateProb = (lateCount > 0) ? (lateAvg / static_cast<double>(lateCount)) : 0.0;
-        const double t0Prob = (t0Count > 0) ? (t0Avg / static_cast<double>(t0Count)) : 0.0;
-        const double earlyRate = (earlyCount > 0) ? (earlyRateAvg / static_cast<double>(earlyCount)) : 0.0;
-        const double lateRate = (lateCount > 0) ? (lateRateAvg / static_cast<double>(lateCount)) : 0.0;
+        const double earlyProb = earlyCount > 0 ? earlyAvg / static_cast<double>(earlyCount) : 0.0;
+        const double lateProb  = lateCount  > 0 ? lateAvg  / static_cast<double>(lateCount)  : 0.0;
+        const double t0Prob    = t0Count    > 0 ? t0Avg    / static_cast<double>(t0Count)    : 0.0;
+        const double earlyRate = earlyCount > 0 ? earlyRateAvg / static_cast<double>(earlyCount) : 0.0;
+        const double lateRate  = lateCount  > 0 ? lateRateAvg  / static_cast<double>(lateCount)  : 0.0;
 
-        // Treat early hyperexcitation followed by late quiescence as depolarization-block toxicity.
         const double depolarizationBlockProxy = (earlyRate > 12.0 && lateRate < 2.0) ? 0.80 : 0.0;
 
         earlyToxicProb.push_back(earlyProb);
@@ -2915,41 +2834,34 @@ void runInternalBiologicalBenchmarkSuite() {
     }
 
     for (auto& window : meanTimeSeries) {
-        window.meanFiringRateHz /= static_cast<float>(std::max(1, kStatRuns));
+        window.meanFiringRateHz     /= static_cast<float>(std::max(1, kStatRuns));
         window.synchronizationIndex /= static_cast<float>(std::max(1, kStatRuns));
-        window.burstIndex /= static_cast<float>(std::max(1, kStatRuns));
-        window.seizureProbability /= static_cast<float>(std::max(1, kStatRuns));
+        window.burstIndex           /= static_cast<float>(std::max(1, kStatRuns));
+        window.seizureProbability   /= static_cast<float>(std::max(1, kStatRuns));
     }
 
     CsvWriter::writeTimeMetrics(outputDir + "/time_metrics.csv", meanTimeSeries);
 
     const MetricStats earlyStats = computeMetricStats(earlyToxicProb);
-    const MetricStats lateStats = computeMetricStats(lateToxicProb);
-    const MetricStats t0Stats = computeMetricStats(t0ToxicProb);
+    const MetricStats lateStats  = computeMetricStats(lateToxicProb);
+    const MetricStats t0Stats    = computeMetricStats(t0ToxicProb);
 
     ValidationCheck temporalCheck;
     temporalCheck.name = "Temporal Evolution (" + std::to_string(kStatRuns) + " runs)";
     const bool earlyPass = earlyStats.ci95High < 0.20;
-    const bool latePass = lateStats.ci95Low > 0.60;
-    const bool t0Pass = t0Stats.ci95High < 0.20;
+    const bool latePass  = lateStats.ci95Low   > 0.60;
+    const bool t0Pass    = t0Stats.ci95High    < 0.20;
     temporalCheck.pass = earlyPass && latePass && t0Pass;
     {
         std::ostringstream details;
         details << "Toxic Prob (0-100ms)   : " << formatStats(earlyStats, 2) << "\n"
                 << "Toxic Prob (300-500ms) : " << formatStats(lateStats, 2) << "\n"
                 << "Toxic Prob (t~0)       : " << formatStats(t0Stats, 2) << "\n";
-
         if (!temporalCheck.pass) {
             details << "Findings               :";
-            if (!earlyPass) {
-                details << " early toxic probability >= 0.2.";
-            }
-            if (!latePass) {
-                details << " late toxic probability <= 0.6.";
-            }
-            if (!t0Pass) {
-                details << " instant-onset toxic probability too high.";
-            }
+            if (!earlyPass) details << " early toxic probability >= 0.2.";
+            if (!latePass)  details << " late toxic probability <= 0.6.";
+            if (!t0Pass)    details << " instant-onset toxic probability too high.";
             details << "\n";
         }
         temporalCheck.details = details.str();
@@ -2960,42 +2872,40 @@ void runInternalBiologicalBenchmarkSuite() {
         std::ostringstream report;
         report << "TEST: Temporal Evolution\n"
                << "Runs: " << kStatRuns << "\n"
-               << "toxicProb(0-100ms): " << formatStats(earlyStats, 3) << "\n"
+               << "toxicProb(0-100ms): "   << formatStats(earlyStats, 3) << "\n"
                << "toxicProb(300-500ms): " << formatStats(lateStats, 3) << "\n"
-               << "toxicProb(t~0): " << formatStats(t0Stats, 3) << "\n"
+               << "toxicProb(t~0): "       << formatStats(t0Stats, 3) << "\n"
                << "RESULT: " << (temporalCheck.pass ? "PASS" : "FAIL") << "\n";
         reportBlocks.push_back(report.str());
     }
 
-    // 5) Calcium channel validation (multi-run)
-    std::vector<double> burstReductionPct;
-    std::vector<double> rateDeltaFrac;
-    std::vector<double> blockSeizureProb;
+    // 5) Calcium channel validation
+    std::vector<double> burstReductionPct, rateDeltaFrac, blockSeizureProb;
     burstReductionPct.reserve(kStatRuns);
     rateDeltaFrac.reserve(kStatRuns);
     blockSeizureProb.reserve(kStatRuns);
 
     for (int run = 0; run < kStatRuns; ++run) {
         RuntimeInput controlInput = baseInput;
-        controlInput.config.dose = 6.0;
-        controlInput.config.ic50_na = 1000.0;
-        controlInput.config.ic50_k = 1000.0;
-        controlInput.config.ic50_ca = 1000.0;
+        controlInput.config.dose     = 6.0;
+        controlInput.config.ic50_na  = 1000.0;
+        controlInput.config.ic50_k   = 1000.0;
+        controlInput.config.ic50_ca  = 1000.0;
 
         RuntimeInput blockInput = controlInput;
         blockInput.config.ic50_ca = 3.0;
 
         const std::uint32_t seedControl = makeSeedForRun(6, run);
-        const std::uint32_t seedBlock = makeSeedForRun(7, run);
+        const std::uint32_t seedBlock   = makeSeedForRun(7, run);
         logRunMetadata("CalciumControl", run + 1, seedControl, controlInput);
-        logRunMetadata("CalciumBlock", run + 1, seedBlock, blockInput);
+        logRunMetadata("CalciumBlock",   run + 1, seedBlock,   blockInput);
 
         const SimulationSummary control = runSingleSimulation(controlInput, seedControl);
-        const SimulationSummary blocked = runSingleSimulation(blockInput, seedBlock);
+        const SimulationSummary blocked = runSingleSimulation(blockInput,   seedBlock);
 
-        const double controlBurst = std::max(1.0e-6, static_cast<double>(control.network_metrics.burstIndex));
-        const double blockedBurst = static_cast<double>(blocked.network_metrics.burstIndex);
-        const double reductionPct = 100.0 * (controlBurst - blockedBurst) / controlBurst;
+        const double controlBurst  = std::max(1.0e-6, static_cast<double>(control.network_metrics.burstIndex));
+        const double blockedBurst  = static_cast<double>(blocked.network_metrics.burstIndex);
+        const double reductionPct  = 100.0 * (controlBurst - blockedBurst) / controlBurst;
 
         burstReductionPct.push_back(reductionPct);
         rateDeltaFrac.push_back(
@@ -3006,32 +2916,25 @@ void runInternalBiologicalBenchmarkSuite() {
     }
 
     const MetricStats burstReductionStats = computeMetricStats(burstReductionPct);
-    const MetricStats rateDeltaStats = computeMetricStats(rateDeltaFrac);
-    const MetricStats blockSeizureStats = computeMetricStats(blockSeizureProb);
+    const MetricStats rateDeltaStats      = computeMetricStats(rateDeltaFrac);
+    const MetricStats blockSeizureStats   = computeMetricStats(blockSeizureProb);
 
     ValidationCheck calciumCheck;
     calciumCheck.name = "Calcium Block (" + std::to_string(kStatRuns) + " runs)";
-    const bool burstPass = burstReductionStats.ci95Low >= 30.0;
-    const bool rateMinorPass = rateDeltaStats.ci95High <= 0.35;
-    const bool noSeizurePass = blockSeizureStats.ci95High < 0.30;
+    const bool burstPass     = burstReductionStats.ci95Low >= 30.0;
+    const bool rateMinorPass = rateDeltaStats.ci95High    <= 0.35;
+    const bool noSeizurePass = blockSeizureStats.ci95High  < 0.30;
     calciumCheck.pass = burstPass && rateMinorPass && noSeizurePass;
     {
         std::ostringstream details;
         details << "Burst Reduction (%)    : " << formatStats(burstReductionStats, 2) << "\n"
                 << "Rate Delta             : " << formatStats(rateDeltaStats, 2) << "\n"
                 << "Blocked Seizure Prob   : " << formatStats(blockSeizureStats, 2) << "\n";
-
         if (!calciumCheck.pass) {
             details << "Findings               :";
-            if (!burstPass) {
-                details << " burst decrease < 30%.";
-            }
-            if (!rateMinorPass) {
-                details << " firing-rate change not minor.";
-            }
-            if (!noSeizurePass) {
-                details << " seizure probability too high under Ca block.";
-            }
+            if (!burstPass)     details << " burst decrease < 30%.";
+            if (!rateMinorPass) details << " firing-rate change not minor.";
+            if (!noSeizurePass) details << " seizure probability too high under Ca block.";
             details << "\n";
         }
         calciumCheck.details = details.str();
@@ -3042,16 +2945,15 @@ void runInternalBiologicalBenchmarkSuite() {
         std::ostringstream report;
         report << "TEST: Calcium Block\n"
                << "Runs: " << kStatRuns << "\n"
-               << "burstReduction: " << formatStats(burstReductionStats, 3) << " %\n"
-               << "rateDelta: " << formatStats(rateDeltaStats, 3) << "\n"
+               << "burstReduction: "     << formatStats(burstReductionStats, 3) << " %\n"
+               << "rateDelta: "          << formatStats(rateDeltaStats, 3) << "\n"
                << "blockedSeizureProb: " << formatStats(blockSeizureStats, 3) << "\n"
                << "RESULT: " << (calciumCheck.pass ? "PASS" : "FAIL") << "\n";
         reportBlocks.push_back(report.str());
     }
 
-    // 6) Synaptic disruption validation (multi-run)
-    std::vector<double> disruptedSync;
-    std::vector<double> disruptedCoherence;
+    // 6) Synaptic disruption validation
+    std::vector<double> disruptedSync, disruptedCoherence;
     disruptedSync.reserve(kStatRuns);
     disruptedCoherence.reserve(kStatRuns);
 
@@ -3059,10 +2961,10 @@ void runInternalBiologicalBenchmarkSuite() {
         RuntimeInput disruptedInput = baseInput;
         disruptedInput.config.excitatory_weight_scale = 0.01;
         disruptedInput.config.inhibitory_weight_scale = 1.80;
-        disruptedInput.config.excitatory_ratio = 0.60;
-        disruptedInput.config.connectivity = 0.001;
-        disruptedInput.config.external_current = 0.0;
-        disruptedInput.config.noise_level = 1.50;
+        disruptedInput.config.excitatory_ratio        = 0.60;
+        disruptedInput.config.connectivity            = 0.001;
+        disruptedInput.config.external_current        = 0.0;
+        disruptedInput.config.noise_level             = 1.50;
 
         const std::uint32_t seed = baselineSeeds[static_cast<std::size_t>(run)];
         logRunMetadata("SynapticDisruption", run + 1, seed, disruptedInput);
@@ -3072,41 +2974,32 @@ void runInternalBiologicalBenchmarkSuite() {
         disruptedCoherence.push_back(computeCoherenceScore(summary.network_metrics));
     }
 
-    std::vector<double> syncReductionPct;
-    std::vector<double> coherenceReductionPct;
+    std::vector<double> syncReductionPct, coherenceReductionPct;
     syncReductionPct.reserve(kStatRuns);
     coherenceReductionPct.reserve(kStatRuns);
     for (int i = 0; i < kStatRuns; ++i) {
-        const double baseSync = std::max(1.0e-6, baselineSync[static_cast<std::size_t>(i)]);
+        const double baseSync      = std::max(1.0e-6, baselineSync[static_cast<std::size_t>(i)]);
         const double baseCoherence = std::max(1.0e-6, baselineCoherence[static_cast<std::size_t>(i)]);
-
         syncReductionPct.push_back(100.0 * (baseSync - disruptedSync[static_cast<std::size_t>(i)]) / baseSync);
-        coherenceReductionPct.push_back(
-            100.0 * (baseCoherence - disruptedCoherence[static_cast<std::size_t>(i)]) / baseCoherence
-        );
+        coherenceReductionPct.push_back(100.0 * (baseCoherence - disruptedCoherence[static_cast<std::size_t>(i)]) / baseCoherence);
     }
 
-    const MetricStats syncReductionStats = computeMetricStats(syncReductionPct);
+    const MetricStats syncReductionStats      = computeMetricStats(syncReductionPct);
     const MetricStats coherenceReductionStats = computeMetricStats(coherenceReductionPct);
 
     ValidationCheck synapticCheck;
     synapticCheck.name = "Synaptic Disruption (" + std::to_string(kStatRuns) + " runs)";
-    const bool syncReductionPass = syncReductionStats.ci95Low >= 40.0;
+    const bool syncReductionPass      = syncReductionStats.ci95Low      >= 40.0;
     const bool coherenceReductionPass = coherenceReductionStats.ci95Low >= 25.0;
     synapticCheck.pass = syncReductionPass && coherenceReductionPass;
     {
         std::ostringstream details;
         details << "Sync Reduction (%)     : " << formatStats(syncReductionStats, 2) << "\n"
                 << "Coherence Reduction(%) : " << formatStats(coherenceReductionStats, 2) << "\n";
-
         if (!synapticCheck.pass) {
             details << "Findings               :";
-            if (!syncReductionPass) {
-                details << " synchronization decrease < 40%.";
-            }
-            if (!coherenceReductionPass) {
-                details << " coherence decrease too small.";
-            }
+            if (!syncReductionPass)      details << " synchronization decrease < 40%.";
+            if (!coherenceReductionPass) details << " coherence decrease too small.";
             details << "\n";
         }
         synapticCheck.details = details.str();
@@ -3117,25 +3010,22 @@ void runInternalBiologicalBenchmarkSuite() {
         std::ostringstream report;
         report << "TEST: Synaptic Disruption\n"
                << "Runs: " << kStatRuns << "\n"
-               << "syncReduction: " << formatStats(syncReductionStats, 3) << " %\n"
-               << "coherenceReduction: " << formatStats(coherenceReductionStats, 3) << " %\n"
+               << "syncReduction: "       << formatStats(syncReductionStats, 3) << " %\n"
+               << "coherenceReduction: "  << formatStats(coherenceReductionStats, 3) << " %\n"
                << "RESULT: " << (synapticCheck.pass ? "PASS" : "FAIL") << "\n";
         reportBlocks.push_back(report.str());
     }
 
     int passCount = 0;
     for (const auto& check : checks) {
-        if (check.pass) {
-            ++passCount;
-        }
+        if (check.pass) ++passCount;
     }
 
     const auto suiteEnd = std::chrono::steady_clock::now();
     const double suiteSeconds = std::chrono::duration<double>(suiteEnd - suiteStart).count();
     const bool biologicalValidationPass = (passCount == static_cast<int>(checks.size()));
-    const bool runtimeConstraintPass = !baseInput.config.use_cuda || (suiteSeconds <= 300.0);
-    const bool overallPass =
-        biologicalValidationPass && runtimeConstraintPass;
+    const bool runtimeConstraintPass    = !baseInput.config.use_cuda || (suiteSeconds <= 300.0);
+    const bool overallPass              = biologicalValidationPass && runtimeConstraintPass;
 
     {
         const std::string reportPath = outputDir + "/internal_benchmark_report.txt";
@@ -3143,14 +3033,11 @@ void runInternalBiologicalBenchmarkSuite() {
         if (!reportOut.is_open()) {
             throw std::runtime_error("Unable to open validation report file: " + reportPath);
         }
-
         reportOut << "Silicon Patient Platform - Internal Biological Benchmark Report\n";
         reportOut << "Fixed Seed Mode: " << (fixedSeedMode ? "true" : "false") << "\n\n";
-
         for (const auto& block : reportBlocks) {
             reportOut << block << "\n";
         }
-
         reportOut << "PERFORMANCE CONSTRAINT (<5 min GPU): "
                   << (runtimeConstraintPass ? "PASS" : "FAIL")
                   << " (runtime=" << std::fixed << std::setprecision(2) << suiteSeconds << " s)\n";
@@ -3163,19 +3050,16 @@ void runInternalBiologicalBenchmarkSuite() {
         if (!metadataOut.is_open()) {
             throw std::runtime_error("Unable to open run metadata file: " + metadataPath);
         }
-
-        const auto now = std::chrono::system_clock::now();
+        const auto now     = std::chrono::system_clock::now();
         const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
-
         std::tm utcTm{};
-    #ifdef _MSC_VER
+#ifdef _MSC_VER
         gmtime_s(&utcTm, &nowTime);
-    #else
+#else
         if (const std::tm* tmPtr = std::gmtime(&nowTime); tmPtr != nullptr) {
             utcTm = *tmPtr;
         }
-    #endif
-
+#endif
         metadataOut << "timestamp_utc," << std::put_time(&utcTm, "%Y-%m-%d %H:%M:%S") << "\n";
         metadataOut << "fixed_seed_mode," << (fixedSeedMode ? "true" : "false") << "\n";
         metadataOut << "deterministic_base_seed," << deterministicBaseSeed << "\n";
@@ -3185,14 +3069,12 @@ void runInternalBiologicalBenchmarkSuite() {
         metadataOut << "window_ms," << kWindowMs << "\n\n";
         metadataOut << "runtime_seconds," << std::fixed << std::setprecision(2) << suiteSeconds << "\n";
         metadataOut << "runtime_constraint_pass," << (runtimeConstraintPass ? "true" : "false") << "\n\n";
-
         metadataOut << "base_profile,neurons=" << baseInput.config.neuron_count
                     << ",sim_time_ms=" << baseInput.config.sim_time
                     << ",dt_ms=" << baseInput.config.dt
                     << ",connectivity=" << baseInput.config.connectivity
                     << ",external_current=" << baseInput.config.external_current
                     << ",noise=" << baseInput.config.noise_level << "\n\n";
-
         metadataOut << "run_log\n";
         for (const auto& line : metadataLines) {
             metadataOut << line << '\n';
@@ -3201,14 +3083,11 @@ void runInternalBiologicalBenchmarkSuite() {
 
     printSection("FINAL SUMMARY");
     printMetricLine("Tests Passed", std::to_string(passCount) + " / 6");
-    printMetricLine(
-        "Performance",
-        std::string(runtimeConstraintPass ? "PASS" : "FAIL") + " (" + formatRuntimeNumber(suiteSeconds) + " sec)"
-    );
-    printMetricLine(
-        "System Status",
-        biologicalValidationPass ? "BIOLOGICALLY VALIDATED" : "BIOLOGICAL VALIDATION FAILED"
-    );
+    printMetricLine("Performance",
+                    std::string(runtimeConstraintPass ? "PASS" : "FAIL") +
+                    " (" + formatRuntimeNumber(suiteSeconds) + " sec)");
+    printMetricLine("System Status",
+                    biologicalValidationPass ? "BIOLOGICALLY VALIDATED" : "BIOLOGICAL VALIDATION FAILED");
 
     printSection("Artifacts");
     printMetricLine("Output Directory", outputDir);
@@ -3247,7 +3126,6 @@ int main(int argc, char** argv) {
         if (mode == "--simulate") {
             RuntimeInput input;
             input.run_dose_sweep = false;
-
             validateConfig(input.config);
             runSingleSimulationMode(input);
             return 0;
@@ -3258,27 +3136,25 @@ int main(int argc, char** argv) {
             input.run_dose_sweep = false;
             input.config.output_folder = "output_pharma_decision";
 
-            // Keep dose-eval on the same baseline + pharmacology regime used by validation dose-response fitting.
 #ifdef SPP_USE_CUDA
             input.config.neuron_count = 1420;
 #else
             input.config.neuron_count = 1320;
 #endif
-            input.config.sim_time = 500.0;
-            input.config.dt = 0.04;
-            input.config.connectivity = 0.05;
-            input.config.excitatory_ratio = 0.80;
-            input.config.external_current = 1.05;
-            input.config.noise_level = 0.72;
+            input.config.sim_time               = 500.0;
+            input.config.dt                     = 0.04;
+            input.config.connectivity           = 0.05;
+            input.config.excitatory_ratio       = 0.80;
+            input.config.external_current       = 1.05;
+            input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;
             input.config.inhibitory_weight_scale = 1.00;
 
             input.config.ic50_na = 200.0;
-            input.config.ic50_k = 8.0;
+            input.config.ic50_k  = 8.0;
             input.config.ic50_ca = 1000.0;
-            input.config.hill = 3.2;
+            input.config.hill    = 3.2;
 
-            // If a drug-config path is provided, attempt to load and prefer those values.
             std::string engineInputMode = "Default Internal Engine Config";
             std::optional<int> userRuns;
             if (!drugConfigPath.empty()) {

@@ -34,5 +34,5 @@ backend/.env
 .nojekyll
 DEPLOYMENT.md
 vercel.json
-echo "backend/artifacts/" >> .gitignore
-echo "backend/artifacts/*" >> .gitignore
+# Generated artifacts
+backend/artifacts/
