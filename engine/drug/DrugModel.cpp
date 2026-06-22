@@ -108,7 +108,7 @@ ConductanceResult DrugModel::applyWithDoseScale(
     result.blockK = blockK;
     result.blockCa = blockCa;
     result.gNaEff = std::max(0.05f * safeGNa, safeGNa * naResidual);
-    result.gKEff = std::max(0.05f * safeGK, safeGK * (1.0f - 2.5f * blockK));
+    result.gKEff = std::max(0.05f * safeGK, safeGK * (1.0f - blockK));
     result.gCaEff = std::max(0.02f * safeGCa, safeGCa * caResidual);
     return result;
 }
