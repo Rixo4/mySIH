@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include "SeizureDetector.h"
 
 namespace spp::analyzer {
 
@@ -31,6 +32,8 @@ struct DoseObservation {
     float blockNa = 0.0f;
     float blockK = 0.0f;
     float blockCa = 0.0f;
+    NetworkState networkState = NetworkState::Stable;
+    bool suppressionHasBaseline = false;
 };
 
 // ============================================================

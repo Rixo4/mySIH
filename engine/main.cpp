@@ -1473,7 +1473,7 @@ void runDoseEvaluationMode(
     {
         RuntimeInput bli=evalInput; bli.config.dose=0.0;
         const auto blResults=runMultipleSimulations(bli,0.0,std::min(runs,3),
-            0xBASE0001U,nullptr,nullptr,nullptr);
+            0xBA5E0001U,nullptr,nullptr,nullptr);
         if(!blResults.empty()){blMetrics=buildAggregatedNetworkMetrics(computeStats(blResults));haveBaseline=true;}
     }
     const NetworkMetrics* blPtr=haveBaseline?&blMetrics:nullptr;
@@ -2040,8 +2040,8 @@ void runInternalBiologicalBenchmarkSuite() {
     printMetricLine("Files","internal_benchmark_report.txt, time_metrics.csv, dose_curve_fit.csv, run_metadata.txt");
 }
 
-} // namespace
-
+}
+}
 // ─── main ─────────────────────────────────────────────────────────────────────
 int main(int argc, char** argv) {
     try {

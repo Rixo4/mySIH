@@ -48,6 +48,7 @@ struct SimulationResult {
 
     float dtMs = 0.01f;
     float durationMs = 0.0f;
+    float burstWindowMs = 0.0f;
 };
 
 class SimulationEngine {

@@ -24,6 +24,7 @@ struct NetworkMetrics {
     float voltageVariance = 0.0f;
     float irregularityIndex = 0.0f;
 
+
     float earlyWindowRateHz = 0.0f;
     float lateWindowRateHz = 0.0f;
 
@@ -32,6 +33,10 @@ struct NetworkMetrics {
     float stabilityScore = 1.0f;
 
     float nii = 0.0f;
+    float burstRateHz = 0.0f;
+    float burstingNeuronPct = 0.0f;
+    float excitabilityScore = 0.0f;
+    bool suppressionHasBaseline = false;
 };
 
 struct TimeWindowMetrics {
@@ -41,6 +46,10 @@ struct TimeWindowMetrics {
     float synchronizationIndex = 0.0f;
     float burstIndex = 0.0f;
     float seizureProbability = 0.0f;
+    float burstRateHz = 0.0f;
+    float burstingNeuronPct = 0.0f;
+    float irregularityIndex = 0.0f;
+    float nii = 0.0f;
 };
 
 class MetricsAnalyzer {
@@ -48,7 +57,8 @@ public:
     static std::vector<NeuronMetrics> computeNeuronMetrics(const simulation::SimulationResult& result);
     static NetworkMetrics computeNetworkMetrics(
         const simulation::SimulationResult& result,
-        const std::vector<NeuronMetrics>& neuronMetrics
+        const std::vector<NeuronMetrics>& neuronMetrics,
+        const NetworkMetrics* baseline = nullptr
     );
 
     static std::vector<TimeWindowMetrics> computeTimeWindowMetrics(
@@ -56,8 +66,11 @@ public:
         float windowMs,
         float stepMs
     );
-
-private:
+    static float computeWindowNII(
+        float irregularityIndex,
+        float synchronization,
+        float burstIndex
+    );
     static float computeNII(
         float populationVariance,
         float voltageVariance,
@@ -65,6 +78,7 @@ private:
         float synchronization,
         float burstIndex
     );
+
 };
 
 } // namespace spp::analyzer

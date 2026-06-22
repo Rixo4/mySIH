@@ -155,7 +155,7 @@ float computeSeizureProbabilityPct(
 // bin and the opening one). For synchronization purposes the proportional
 // split is more accurate than rounding.
 std::vector<float> rebinSpikeFractions(
-    const std::vector<std::uint64_t>& spikesPerStep,
+    const std::vector<std::uint32_t>& spikesPerStep,
     float dtMs,
     float neuronCount,
     float binMs
@@ -809,7 +809,7 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
         float sync = 0.0f;
         {
             // Slice the step counts for this window.
-            const std::vector<std::uint64_t> windowSteps(
+            const std::vector<std::uint32_t> windowSteps(
                 result.populationSpikesPerStep.begin() +
                     static_cast<std::ptrdiff_t>(startStep),
                 result.populationSpikesPerStep.begin() +

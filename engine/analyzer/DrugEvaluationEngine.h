@@ -19,6 +19,8 @@ struct DoseEvalPoint {
     float blockNa = 0.0f;  // Estimated channel blockade (0..1)
     float blockK = 0.0f;
     float blockCa = 0.0f;
+    float burstIndex = 0.0f;
+    bool suppressionHasBaseline = false;
 };
 
 struct BiologicalScores {
