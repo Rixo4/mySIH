@@ -103,38 +103,6 @@ constexpr float kExcitIrregDenom            = 1.5f;
 // ---------------------------------------------------------------------------
 namespace {
 
-// FIX (Bug 3): Seizure probability no longer includes NII as an input.
-// NII already encodes burst + sync + irregularity, so passing those same
-// signals in again alongside NII double-counted them and inflated scores.
-//
-// The revised formula uses only the four first-order physiological markers:
-//   sync  0.55 – strongest single ictal indicator
-//   burst 0.50 – epileptiform bursting
-//   irreg 0.25 – loss of tonic inhibition (Na/K-block)
-//   rate  0.10 – weakest standalone predictor
-//
-// Weights do not need to sum to 1; the sigmoid threshold absorbs the scale.
-float computeSeizureProbabilityPct(
-    float rateHz,
-    float synchronization,
-    float burstIndex,
-    float irregularityIndex
-) {
-    const float rateNorm  = std::clamp(rateHz            / cfg::kSeizureRateNormHz,  0.0f, 1.0f);
-    const float syncNorm  = std::clamp(synchronization,                               0.0f, 1.0f);
-    const float burstNorm = std::clamp(burstIndex,                                    0.0f, 1.0f);
-    const float irregNorm = std::clamp(irregularityIndex / cfg::kSeizureIrregDenom,  0.0f, 1.0f);
-
-    const float score =
-        0.10f * rateNorm  +
-        0.55f * syncNorm  +
-        0.50f * burstNorm +
-        0.25f * irregNorm;
-
-    const float logits    = cfg::kSeizureSigmoidGain * (score - cfg::kSeizureThreshold);
-    const float safeLogit = std::clamp(logits, -60.0f, 60.0f);
-    return 100.0f / (1.0f + std::exp(-safeLogit));
-}
 
 // Issue 1 FIX: Re-bin a per-step spike count vector into fixed-width bins of
 // exactly binMs milliseconds using time accumulation rather than a rounded
@@ -387,88 +355,11 @@ std::vector<NeuronMetrics> MetricsAnalyzer::computeNeuronMetrics(
 }
 
 // ---------------------------------------------------------------------------
-// MetricsAnalyzer::computeNII  (public, called from header declaration)
-// ---------------------------------------------------------------------------
-float MetricsAnalyzer::computeNII(
-    float populationVariance,
-    float voltageVariance,
-    float irregularityIndex,
-    float synchronization,
-    float burstIndex
-) {
-    // Issue 3 FIX: voltageVariance is removed from the NII formula.
-    //
-    // Reason: voltageVariance is computed from result.finalVoltages, which is
-    // a single-timestep snapshot. A wildly oscillating network and a stable
-    // network can produce nearly identical final-voltage distributions, so the
-    // metric carries almost no dynamic information. Including it at even 0.10
-    // weight introduces noise rather than signal.
-    //
-    // The weight previously assigned to voltageVariance (0.10) is redistributed
-    // equally across the remaining three physiological markers to preserve a
-    // sum of 1.00:
-    //   spikeDeviation  0.15 → 0.15  (unchanged; still informative for
-    //                                  heterogeneous-rate networks)
-    //   irregularity    0.25 → 0.285 (+0.035)
-    //   sync            0.25 → 0.285 (+0.035)
-    //   burst           0.25 → 0.285 (+0.035)
-    //   voltageVariance 0.10 → 0.00  (removed)
-    //
-    // voltageVariance is kept as a parameter so that the public API does not
-    // change; callers that forward it will simply have it ignored here.
-    (void)voltageVariance;
-
-    const float spikeDevNorm = std::clamp(populationVariance / cfg::kNiiPopVarDenom, 0.0f, 1.0f);
-    const float irregNorm    = std::clamp(irregularityIndex  / cfg::kNiiIrregDenom,  0.0f, 1.0f);
-    const float syncNorm     = std::clamp(synchronization,                            0.0f, 1.0f);
-    const float burstNorm    = std::clamp(burstIndex         / cfg::kNiiBurstDenom,  0.0f, 1.0f);
-
-    // Issue C FIX: weights now sum to exactly 1.0.
-    // spikeDeviation keeps 0.15; the remaining 0.85 is split equally across
-    // the three physiological markers: 0.85 / 3 = 0.28333...
-    // Using the fraction directly avoids the previous 0.285 × 3 = 0.855
-    // overshoot that required a comment explaining why clamp rescued it.
-    constexpr float kPhysioWeight = 0.85f / 3.0f;   // ≈ 0.28333
-
-    return std::clamp(
-        0.150f        * spikeDevNorm +
-        kPhysioWeight * irregNorm    +
-        kPhysioWeight * syncNorm     +
-        kPhysioWeight * burstNorm,
-        0.0f, 1.0f
-    );
-}
-
-// ---------------------------------------------------------------------------
-// FIX (Bug 4): Dedicated window NII that uses only the three markers that are
-// actually available at window granularity (irregularity, sync, burst).
-// Weights are renormalised to sum to 1.0 over those three components.
-// ---------------------------------------------------------------------------
-float MetricsAnalyzer::computeWindowNII(
-    float irregularityIndex,
-    float synchronization,
-    float burstIndex
-) {
-    const float irregNorm = std::clamp(irregularityIndex / cfg::kNiiIrregDenom,  0.0f, 1.0f);
-    const float syncNorm  = std::clamp(synchronization,                           0.0f, 1.0f);
-    const float burstNorm = std::clamp(burstIndex        / cfg::kNiiBurstDenom,  0.0f, 1.0f);
-
-    // Weights renormalised from 0.25/0.25/0.25 → each ÷ 0.75 ≈ 0.333.
-    return std::clamp(
-        (1.0f / 3.0f) * irregNorm +
-        (1.0f / 3.0f) * syncNorm  +
-        (1.0f / 3.0f) * burstNorm,
-        0.0f, 1.0f
-    );
-}
-
-// ---------------------------------------------------------------------------
 // MetricsAnalyzer::computeNetworkMetrics
 // ---------------------------------------------------------------------------
 NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
     const simulation::SimulationResult& result,
-    const std::vector<NeuronMetrics>&   neuronMetrics,
-    const NetworkMetrics*               baseline        // nullptr → no baseline
+    const std::vector<NeuronMetrics>&   neuronMetrics
 ) {
     NetworkMetrics net;
 
@@ -528,38 +419,23 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         );
         net.meanFiringRateHz = trimSum / static_cast<float>(hi - lo);
     }
-
-    // -----------------------------------------------------------------------
-    // 3. Suppression
-    //
-    // FIX (Bug 1 & Bug 2): Suppression is relative to the BASELINE population
-    // mean, not the current run's own mean. When no baseline is available we
-    // fall back to a within-run relative threshold (10 % of current mean) and
-    // set a flag so callers know the result is approximate.
-    // -----------------------------------------------------------------------
+    // firingRateStdHz
     {
-        float suppressionThreshold = 0.0f;
-        net.suppressionHasBaseline = (baseline != nullptr);
-
-        if (baseline != nullptr && baseline->meanFiringRateHz > 0.0f) {
-            // Biologically correct path: neuron is suppressed if it now fires
-            // at less than 50 % of the control mean (configurable via
-            // kSuppressionBaselineFraction).
-            suppressionThreshold =
-                cfg::kSuppressionBaselineFraction * baseline->meanFiringRateHz;
-        } else {
-            // Fallback: within-run relative threshold. Flagged via
-            // suppressionHasBaseline = false so the dose analyser can warn.
-            suppressionThreshold = 0.10f * net.meanFiringRateHz;
-        }
-
-        std::size_t suppressedCount = 0U;
+        float variance = 0.0f;
         for (float rate : firingRates) {
-            if (rate < suppressionThreshold) {
-                ++suppressedCount;
-            }
+            const float d = rate - net.meanFiringRateHz;
+            variance += d * d;
         }
-        net.suppressionPct = (100.0f * static_cast<float>(suppressedCount)) / neuronCount;
+        net.firingRateStdHz = std::sqrt(variance / neuronCount);
+    }
+
+    // silentNeuronPct
+    {
+        std::size_t silentCount = 0U;
+        for (float rate : firingRates) {
+            if (rate < 0.5f) ++silentCount;
+        }
+        net.silentNeuronPct = (100.0f * static_cast<float>(silentCount)) / neuronCount;
     }
 
     // -----------------------------------------------------------------------
@@ -572,34 +448,6 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
             var += d * d;
         }
         net.populationVariance = var / neuronCount;
-    }
-
-    // -----------------------------------------------------------------------
-    // 5. Voltage variance
-    //
-    // FIX (Bug 7): finalVoltages represents only the last simulation timestep,
-    // which is fragile. We still compute it because callers may rely on the
-    // field, but we zero it out when no voltage data is present and document
-    // the limitation. Future work: pass per-step voltage samples instead.
-    // -----------------------------------------------------------------------
-    net.voltageVariance = 0.0f;
-    if (!result.finalVoltages.empty()) {
-        float vSum   = 0.0f;
-        float vSumSq = 0.0f;
-        float vCount = 0.0f;
-        for (float v : result.finalVoltages) {
-            if (!std::isfinite(v)) { continue; }
-            vSum   += v;
-            vSumSq += v * v;
-            vCount += 1.0f;
-        }
-        if (vCount > 1.0f) {
-            // Sample variance of final-timestep voltages.
-            net.voltageVariance = std::max(
-                0.0f,
-                (vSumSq - vSum * vSum / vCount) / (vCount - 1.0f)
-            );
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -618,6 +466,15 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         );
         net.synchronizationIndex = computeSyncFromFractions(fractions, neuronCount);
     }
+    // peakSynchronizationIndex — max sync in any window
+    {
+        const auto windows = computeTimeWindowMetrics(result, 50.0f, 50.0f);
+        float peak = 0.0f;
+        for (const auto& w : windows) {
+            peak = std::max(peak, w.synchronizationIndex);
+        }
+        net.peakSynchronizationIndex = peak;
+    }
 
     // -----------------------------------------------------------------------
     // 7. Burst metrics
@@ -635,7 +492,7 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         std::uint64_t totalSpikes         = 0U;
         std::uint64_t totalBurstEvents    = 0U;
         std::uint64_t burstingNeuronCount = 0U;
-
+        float totalBurstDurationMs        = 0.0f;
         // Issue 2 FIX: use the neuron-type-specific burst window embedded in
         // the result when the simulator has set it; fall back to the default.
         const float effectiveBurstWindowMs =
@@ -649,11 +506,14 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
                                                       effectiveBurstWindowMs);
             totalBurstEvents    += bc.events;
             burstingNeuronCount += bc.burstingNeurons;
+            totalBurstDurationMs += (spikes[endOfBurst] - spikes[startOfBurst]);
         }
 
         const float durationSec = std::max(1.0e-6f, result.durationMs / 1000.0f);
 
         net.burstRateHz       = static_cast<float>(totalBurstEvents) / durationSec;
+        // meanBurstDurationMs
+        net.meanBurstDurationMs = (totalBurstEvents > 0U)? static_cast<float>(totalBurstDurationMs) / static_cast<float>(totalBurstEvents): 0.0f;
         net.burstingNeuronPct = (100.0f * static_cast<float>(burstingNeuronCount)) / neuronCount;
 
         // Issue A FIX: sigmoid normalization preserves ranking above 10 Hz.
@@ -679,52 +539,6 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         net.lateWindowRateHz     = static_cast<float>(lateSpikes)  / (neuronCount * halfSec);
     }
 
-    // -----------------------------------------------------------------------
-    // 9. NII and stability
-    // -----------------------------------------------------------------------
-    net.nii = computeNII(
-        net.populationVariance,
-        net.voltageVariance,
-        net.irregularityIndex,
-        net.synchronizationIndex,
-        net.burstIndex
-    );
-    net.stabilityScore = std::clamp(1.0f - net.nii, 0.0f, 1.0f);
-
-    // -----------------------------------------------------------------------
-    // 10. Seizure probability
-    //
-    // FIX (Bug 3): NII removed from inputs — it double-counted burst, sync,
-    // and irregularity that are already passed in directly. The four
-    // first-order markers (rate, sync, burst, irregularity) are sufficient.
-    // -----------------------------------------------------------------------
-    net.seizureProbabilityPct = computeSeizureProbabilityPct(
-        net.meanFiringRateHz,
-        net.synchronizationIndex,
-        net.burstIndex,
-        net.irregularityIndex
-    );
-
-    // -----------------------------------------------------------------------
-    // 11. Excitability score
-    //
-    // FIX (Bug 2): The raw score is stored here. The dose analyser MUST
-    // compute deltaExcitability = drug.excitabilityScore - baseline.excitabilityScore.
-    // This file cannot do that because it operates on a single run at a time.
-    //
-    // Issue D: burstNorm now reads from net.burstIndex which is sigmoid-based
-    // (Issue A fix), so excitabilityScore automatically inherits calibrated
-    // burst sensitivity without further changes here.
-    // -----------------------------------------------------------------------
-    {
-        const float rateNorm  = std::clamp(net.meanFiringRateHz  / cfg::kExcitRateNormHz, 0.0f, 1.0f);
-        const float burstNorm = std::clamp(net.burstIndex,                                  0.0f, 1.0f);
-        const float irregNorm = std::clamp(net.irregularityIndex / cfg::kExcitIrregDenom,  0.0f, 1.0f);
-        net.excitabilityScore = std::clamp(
-            0.35f * rateNorm + 0.40f * burstNorm + 0.25f * irregNorm,
-            0.0f, 1.0f
-        );
-    }
 
     // -----------------------------------------------------------------------
     // 12. Sanitize — guard against any remaining NaN / Inf
@@ -733,22 +547,19 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         return std::isfinite(v) ? v : fallback;
     };
 
-    net.meanFiringRateHz      = sanitize(net.meanFiringRateHz,      0.0f);
-    net.synchronizationIndex  = std::clamp(sanitize(net.synchronizationIndex,  0.0f), 0.0f,   1.0f);
-    net.burstIndex            = std::clamp(sanitize(net.burstIndex,            0.0f), 0.0f,   1.0f);
-    net.burstRateHz           = sanitize(net.burstRateHz,           0.0f);
-    net.burstingNeuronPct     = std::clamp(sanitize(net.burstingNeuronPct,     0.0f), 0.0f, 100.0f);
-    net.populationVariance    = sanitize(net.populationVariance,    0.0f);
-    net.voltageVariance       = sanitize(net.voltageVariance,       0.0f);
-    net.irregularityIndex     = sanitize(net.irregularityIndex,     0.0f);
-    net.earlyWindowRateHz     = sanitize(net.earlyWindowRateHz,     0.0f);
-    net.lateWindowRateHz      = sanitize(net.lateWindowRateHz,      0.0f);
-    net.suppressionPct        = std::clamp(sanitize(net.suppressionPct,        0.0f), 0.0f, 100.0f);
-    net.seizureProbabilityPct = std::clamp(sanitize(net.seizureProbabilityPct, 0.0f), 0.0f, 100.0f);
-    net.stabilityScore        = std::clamp(sanitize(net.stabilityScore,        1.0f), 0.0f,   1.0f);
-    net.nii                   = std::clamp(sanitize(net.nii,                   0.0f), 0.0f,   1.0f);
-    net.excitabilityScore     = std::clamp(sanitize(net.excitabilityScore,     0.0f), 0.0f,   1.0f);
-
+    net.meanFiringRateHz     = sanitize(net.meanFiringRateHz,     0.0f);
+    net.synchronizationIndex = sanitize(net.synchronizationIndex, 0.0f);
+    net.burstIndex           = sanitize(net.burstIndex,           0.0f);
+    net.burstRateHz          = sanitize(net.burstRateHz,          0.0f);
+    net.burstingNeuronPct    = sanitize(net.burstingNeuronPct,    0.0f);
+    net.populationVariance   = sanitize(net.populationVariance,   0.0f);
+    net.irregularityIndex    = sanitize(net.irregularityIndex,    0.0f);
+    net.earlyWindowRateHz    = sanitize(net.earlyWindowRateHz,    0.0f);
+    net.lateWindowRateHz     = sanitize(net.lateWindowRateHz,     0.0f);
+    net.firingRateStdHz      = sanitize(net.firingRateStdHz,      0.0f);
+    net.silentNeuronPct      = sanitize(net.silentNeuronPct,      0.0f);
+    net.peakSynchronizationIndex = sanitize(net.peakSynchronizationIndex, 0.0f);
+    net.meanBurstDurationMs  = sanitize(net.meanBurstDurationMs,  0.0f);
     return net;
 }
 
@@ -898,17 +709,7 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
         const float windowBurstRateHz = static_cast<float>(totalBurstEvents) / durationSec;
         const float windowBurstIndex  = burstRateToIndex(windowBurstRateHz);
 
-        // FIX (Bug 4): Use dedicated window NII (only 3 components available).
-        const float windowNii = computeWindowNII(windowIrregularity, sync, windowBurstIndex);
-
-        // FIX (Bug 3): Window seizure probability uses 4 first-order markers, no NII.
-        const float seizureProbPct = computeSeizureProbabilityPct(
-            std::isfinite(meanRateHz) ? std::max(0.0f, meanRateHz) : 0.0f,
-            sync,
-            windowBurstIndex,
-            windowIrregularity
-        );
-
+    
         TimeWindowMetrics m;
         m.startMs              = startMs;
         m.endMs                = endMs;
@@ -921,8 +722,9 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
             0.0f, 100.0f
         );
         m.irregularityIndex    = std::clamp(windowIrregularity, 0.0f, 5.0f);
-        m.nii                  = std::clamp(windowNii,          0.0f, 1.0f);
-        m.seizureProbability   = std::clamp(seizureProbPct / 100.0f, 0.0f, 1.0f);
+        m.meanBurstDurationMs  = (totalBurstEvents > 0)
+            ? totalBurstDurationMs / static_cast<float>(totalBurstEvents)
+            : 0.0f;
 
         windows.push_back(m);
     }
