@@ -5,37 +5,10 @@
 
 #include <string>
 #include <vector>
-#include "SeizureDetector.h"
+#include "AnalyzedDose.h"
+#include "DoseObservation.h"
 
 namespace spp::analyzer {
-
-// ============================================================
-// STAGE 1-3: Channel Blockade → Neuron Dynamics → Network Dynamics
-// These are already computed by the simulation engine
-// and delivered here in DoseObservation format.
-// ============================================================
-
-struct DoseObservation {
-    float dose = 0.0f;
-    
-    // STAGE 3: Network-level metrics (emergent biology)
-    float meanFiringRateHz = 0.0f;
-    float synchronizationIndex = 0.0f;
-    float burstIndex = 0.0f;
-    float nii = 0.0f;  // Neural Instability Index
-    float isiCv = 0.0f;
-    float seizureProbabilityPct = 0.0f;
-    float suppressionPct = 0.0f;
-    
-    // Molecular blockade information (for mechanistic evidence only)
-    // Never used for direct prediction, only for explaining observed biology
-    float blockNa = 0.0f;
-    float blockK = 0.0f;
-    float blockCa = 0.0f;
-    NetworkState networkState = NetworkState::Stable;
-    bool suppressionHasBaseline = false;
-};
-
 // ============================================================
 // STAGE 4: Per-Dose Metrics collected
 // ============================================================
@@ -113,14 +86,6 @@ struct MechanisticEvidence {
 // Each dose classified independently based on metrics
 // ============================================================
 
-enum class BiologicalState {
-    LimitedEffect,
-    ControlledSuppression,
-    NeuralSilencing,
-    Hyperexcitability,
-    NetworkStabilization,
-    ToxicInstability
-};
 
 struct PerDoseClassification {
     double dose = 0.0;
@@ -190,21 +155,6 @@ struct ConfidenceAnalysis {
     std::string confidence_level;     // "LOW", "MEDIUM", "HIGH"
 };
 
-// ============================================================
-// Old data structures (kept for backward compatibility)
-// ============================================================
-
-struct DoseFeatures {
-    double dose = 0.0;
-    double rate_change = 0.0;
-    double sync = 0.0;
-    double isi_cv = 0.0;
-    double seizure_prob = 0.0;
-    double toxicity_score = 0.0;
-
-    bool is_effective = false;
-    bool is_toxic = false;
-};
 
 enum class DrugRiskTier {
     Safe,
@@ -241,10 +191,16 @@ struct PharmaDecisionReport {
     // ============================================================
     // STAGE 4-7: Per-dose data and classifications
     // ============================================================
-    std::vector<DoseFeatures> features;  // Backward compat
     std::vector<PerDoseBiologicalInterpretation> per_dose_interpretations;
     std::vector<PerDoseClassification> per_dose_classifications;
     std::vector<MechanisticEvidence> mechanistic_evidence;
+
+    // ============================================================
+    // Mechanism Summary
+    // ============================================================
+    MechanismSignature dominantMechanism = MechanismSignature::Unknown;
+    std::string mechanismText;
+    std::vector<AnalyzedDose> analyzedDoses;
 
     // ============================================================
     // STAGE 8: Dose-Response Analysis
@@ -264,7 +220,7 @@ struct PharmaDecisionReport {
     // STAGE 10: Safety Analysis
     // ============================================================
     SafetyAnalysis safety;
-    
+
     bool hasToxicThresholdExact = false;
     double toxicThresholdDoseEval = 0.0;
     std::string toxicThresholdText = "N/A";
@@ -275,15 +231,7 @@ struct PharmaDecisionReport {
     ConfidenceAnalysis confidence_analysis;
 
     // ============================================================
-    // STAGE 7: Overall Biological State (summary)
-    // ============================================================
-    BiologicalState biologicalState = BiologicalState::LimitedEffect;
-    std::string biologicalStateText = "Limited effect";
-    std::string primaryChangeText = "Not observed";
-    std::string safetyInterpretationText = "Not observed";
-
-    // ============================================================
-    // Therapeutic Window (backward compat)
+    // Therapeutic Window (backward compatibility)
     // ============================================================
     bool hasSuppressionThreshold = false;
     double suppressionThresholdDose = 0.0;
@@ -301,15 +249,15 @@ struct PharmaDecisionReport {
     std::string confidence = "LOW";
     std::string riskLevel = "LOW";
     std::string responseMode = "NO_SIGNIFICANT_RESPONSE";
-    
+
     double syncReductionPct = 0.0;
     double niiReductionPct = 0.0;
     double niiIncreasePct = 0.0;
     double seizureReductionPct = 0.0;
     double burstReductionPct = 0.0;
-    double calciumEffectMagnitude = 0.0;
-    bool meaningfulCaBlock = false;
+
     std::string seizureTrendText = "No significant change in seizure-risk markers";
+
     bool hasSafeRange = false;
     float safeMinDose = 0.0f;
     float safeMaxDose = 0.0f;
@@ -320,7 +268,7 @@ struct PharmaDecisionReport {
     std::vector<double> excitatoryRiskDoses;
     std::vector<double> overSuppressionDoses;
     std::vector<double> stabilizationSaturationDoses;
-    
+
     bool hasEffectiveDose = false;
     float effectiveMinDose = 0.0f;
 
@@ -344,10 +292,11 @@ struct PharmaDecisionReport {
 class PharmaDecisionEngine {
 public:
     static PharmaDecisionReport evaluate(
-        const std::vector<DoseObservation>& observations,
-        const DecisionStabilityInput& stabilityInput = {}
+    const std::vector<AnalyzedDose>& analyzedDoses,
+    const DecisionStabilityInput& stabilityInput
     );
-    static std::string toString(BiologicalState state);
+    static std::string toString(NetworkState state);
+    static std::string toString(MechanismSignature signature);
     static std::string toString(DrugRiskTier tier);
 };
 
