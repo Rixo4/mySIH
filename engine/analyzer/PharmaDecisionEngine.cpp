@@ -1,0 +1,662 @@
+#include "PharmaDecisionEngine.h"
+#include "NetworkAnalyzer.h"
+#include "AnalyzedDose.h"
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace spp::analyzer {
+
+namespace {
+
+float clamp01(float v) { return std::clamp(v, 0.0f, 1.0f); }
+double clamp01d(double v) { return std::clamp(v, 0.0, 1.0); }
+
+float safeNonNegative(float v) {
+    return (!std::isfinite(v) || v < 0.0f) ? 0.0f : v;
+}
+double safeNonNegativeD(double v) {
+    return (!std::isfinite(v) || v < 0.0) ? 0.0 : v;
+}
+
+// ─── Risk tier ───────────────────────────────────────────────────────────────
+DrugRiskTier classifyTier(float seizureProb, float suppressionScore, float riskScore) {
+    if (seizureProb > 0.80f || suppressionScore > 0.80f || riskScore >= 80.0f)
+        return DrugRiskTier::Toxic;
+    if (riskScore >= 65.0f) return DrugRiskTier::HighRisk;
+    if (riskScore >= 35.0f) return DrugRiskTier::ModerateRisk;
+    return DrugRiskTier::Safe;
+}
+
+// ─── Contiguous range helper ──────────────────────────────────────────────────
+struct Range { double lo = 0.0, hi = 0.0; std::size_t points = 0U; };
+
+std::vector<Range> contiguousRanges(const std::vector<double>& doses, double step) {
+    std::vector<Range> out;
+    if (doses.empty()) return out;
+    const double expected = std::max(1.0e-6, step);
+    Range current{doses.front(), doses.front(), 1U};
+    for (std::size_t i = 1; i < doses.size(); ++i) {
+        if (doses[i] - doses[i-1U] <= 2.0 * expected + 1.0e-6) {
+            current.hi = doses[i]; ++current.points;
+        } else {
+            out.push_back(current);
+            current = {doses[i], doses[i], 1U};
+        }
+    }
+    out.push_back(current);
+    return out;
+}
+
+// ─── Sigmoid R² fit ───────────────────────────────────────────────────────────
+double computeBestSigmoidR2(
+    const std::vector<double>& dose,
+    const std::vector<double>& effect01)
+{
+    if (dose.size() != effect01.size() || dose.size() < 4U) return 0.0;
+    const auto [dminIt, dmaxIt] = std::minmax_element(dose.begin(), dose.end());
+    const double dMin = *dminIt, dMax = *dmaxIt;
+    double meanY = 0.0;
+    for (double y : effect01) meanY += y;
+    meanY /= static_cast<double>(effect01.size());
+    double sst = 0.0;
+    for (double y : effect01) { double dy = y - meanY; sst += dy*dy; }
+    if (sst <= 1.0e-12) return 1.0;
+    double bestSse = std::numeric_limits<double>::infinity();
+    const double dStep = std::max(0.25, (dMax - dMin) / 120.0);
+    for (double k = 0.02; k <= 2.51; k += 0.02) {
+        for (double d50 = dMin; d50 <= dMax + 1.0e-9; d50 += dStep) {
+            double numer = 0.0, denom = 0.0;
+            for (std::size_t i = 0; i < dose.size(); ++i) {
+                const double z = std::clamp(-k*(dose[i]-d50), -60.0, 60.0);
+                const double s = 1.0/(1.0+std::exp(z));
+                numer += effect01[i]*s; denom += s*s;
+            }
+            if (denom <= 1.0e-12) continue;
+            const double emax = std::clamp(numer/denom, 0.0, 1.0);
+            double sse = 0.0;
+            for (std::size_t i = 0; i < dose.size(); ++i) {
+                const double z = std::clamp(-k*(dose[i]-d50), -60.0, 60.0);
+                const double s = 1.0/(1.0+std::exp(z));
+                const double err = effect01[i] - emax*s;
+                sse += err*err;
+            }
+            bestSse = std::min(bestSse, sse);
+        }
+    }
+    if (!std::isfinite(bestSse)) return 0.0;
+    return std::clamp(1.0 - bestSse/(sst+1.0e-12), -1.0, 1.0);
+}
+
+// ─── Confidence ───────────────────────────────────────────────────────────────
+std::string computeConfidence(
+    NetworkState state,
+    double sigmoidR2,
+    bool therapeuticWindowExists,
+    bool hasContinuousWindow,
+    bool fragmentedWindow,
+    float rateVariability,
+    float toxicityVariability,
+    double maxEffectPct,
+    float peakRiskScore,
+    float peakSeizureProb,
+    int runCount)
+{
+    double score = 0.0;
+
+    const bool isClear = (state != NetworkState::Stable);
+    const bool isTherapeutic = (state == NetworkState::Stable); // handled below
+    const bool isDanger = (state == NetworkState::SeizureActive  ||
+                           state == NetworkState::SeizureRisk    ||
+                           state == NetworkState::NeuralSuppression ||
+                           state == NetworkState::DepolarizationBlock ||
+                           state == NetworkState::Hyperexcitable);
+
+    if (isClear) { score += 30.0; if (isDanger) score += 10.0; }
+    else { score += (maxEffectPct > 10.0) ? 8.0 : 2.0; }
+
+    if (isDanger) {
+        if      (peakRiskScore >= 70.0f || peakSeizureProb >= 0.70f) score += 20.0;
+        else if (peakRiskScore >= 50.0f || peakSeizureProb >= 0.50f) score += 15.0;
+        else                                                           score += 10.0;
+    } else {
+        score += (maxEffectPct > 20.0) ? 10.0 : (maxEffectPct > 10.0) ? 5.0 : 0.0;
+    }
+
+    if      (sigmoidR2 >= 0.95) score += 20.0;
+    else if (sigmoidR2 >= 0.90) score += 17.0;
+    else if (sigmoidR2 >= 0.85) score += 14.0;
+    else if (sigmoidR2 >= 0.75) score +=  9.0;
+    else if (sigmoidR2 >= 0.65) score +=  5.0;
+
+    if      (therapeuticWindowExists && hasContinuousWindow && !fragmentedWindow) score += 10.0;
+    else if (therapeuticWindowExists && hasContinuousWindow)                       score +=  8.0;
+    else if (therapeuticWindowExists)                                              score +=  5.0;
+    else if (isDanger)                                                             score +=  5.0;
+
+    if      (rateVariability < 1.0f  && toxicityVariability <  5.0f) score += 10.0;
+    else if (rateVariability < 1.5f  && toxicityVariability <  7.5f) score +=  8.0;
+    else if (rateVariability < 2.0f  && toxicityVariability < 10.0f) score +=  5.0;
+    else                                                               score +=  2.0;
+
+    const double clamped = std::clamp(score, 0.0, 100.0);
+    if (runCount < 2) {
+        if (clamped >= 80.0) return "HIGH";
+        if (clamped >= 70.0) return "MEDIUM";
+        return "LOW";
+    }
+    if (clamped >= 80.0) return "HIGH";
+    if (clamped >= 50.0) return "MEDIUM";
+    return "LOW";
+}
+
+// ─── Narrative generation ─────────────────────────────────────────────────────
+std::string buildNarrative(
+    const AnalyzedDose& peakDose,
+    MechanismSignature mechanism,
+    const std::string& responseMode)
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(1);
+
+    if (responseMode == "EXCITATORY_RESPONSE") {
+        oss << "Burst rate increased by "
+            << std::max(0.0f, peakDose.burstRateDelta) << " Hz from baseline. "
+            << "Irregularity index rose by "
+            << std::max(0.0f, peakDose.irregularityDelta) << " units. ";
+        if (peakDose.rateChangePct > 5.0f)
+            oss << "Firing rate increased " << peakDose.rateChangePct << "% from baseline. ";
+        oss << "Network excitability exceeded safe stability limits.";
+
+    } else if (responseMode == "STABILIZING_RESPONSE") {
+        oss << "Synchronization reduced by " << peakDose.syncReductionPct << "% from baseline. "
+            << "Burst duration shortened by "
+            << std::max(0.0f, -peakDose.burstDurationDelta) << " ms. "
+            << "Firing rate remained within viable range ("
+            << (peakDose.rateChangePct >= 0 ? "+" : "")
+            << peakDose.rateChangePct << "% from baseline).";
+
+    } else if (responseMode == "SUPPRESSIVE_RESPONSE") {
+        oss << "Firing rate reduced by "
+            << std::fabs(std::min(0.0f, peakDose.rateChangePct)) << "% from baseline. "
+            << "Silent neuron fraction increased by "
+            << std::max(0.0f, peakDose.silentNeuronDelta) << "%.";
+
+    } else {
+        oss << "No biologically significant change detected across the tested dose range.";
+    }
+
+    (void)mechanism;
+    return oss.str();
+}
+
+std::string buildSafetyText(
+    NetworkState dominantState,
+    bool toxicityBeforeTherapy,
+    bool toxicityAfterTherapy,
+    bool lowStability)
+{
+    switch (dominantState) {
+        case NetworkState::NeuralSuppression:
+            return "Complete suppression of neural activity is incompatible with "
+                   "therapeutic use.";
+        case NetworkState::Hyperexcitable:
+            return "Observed increases in firing rate, burst activity, or irregularity "
+                   "represent an unacceptable safety risk.";
+        case NetworkState::SeizureActive:
+        case NetworkState::SeizureRisk:
+            return "Seizure-risk markers escalated to dangerous levels within the "
+                   "tested dose range.";
+        case NetworkState::DepolarizationBlock:
+            return "Depolarization block pattern detected; network activity collapsed "
+                   "following initial excitation.";
+        default:
+            if (toxicityBeforeTherapy)
+                return "Toxicity markers appeared before the therapeutic window; "
+                       "dose-response ordering is unsafe.";
+            if (toxicityAfterTherapy)
+                return "Therapeutic window exists but is narrow; careful dose titration required.";
+            if (lowStability)
+                return "Therapeutic window present but inter-run variability reduces confidence.";
+            return "No significant toxicity observed within the tested dose range. "
+                   "Safety profile appears favorable.";
+    }
+}
+
+} // anonymous namespace
+
+// ─── riskLevelText ────────────────────────────────────────────────────────────
+std::string riskLevelText(DrugRiskTier tier) {
+    switch (tier) {
+        case DrugRiskTier::Safe:         return "LOW";
+        case DrugRiskTier::ModerateRisk: return "MODERATE";
+        default:                          return "HIGH";
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PharmaDecisionEngine::evaluate
+// Input: AnalyzedDose[] from NetworkAnalyzer (already has deltas + scores + state)
+// ════════════════════════════════════════════════════════════════════════════
+
+PharmaDecisionReport PharmaDecisionEngine::evaluate(
+    const std::vector<AnalyzedDose>& analyzedDoses,
+    const DecisionStabilityInput& stabilityInput)
+{
+    PharmaDecisionReport report;
+    if (analyzedDoses.empty()) return report;
+
+    // Sort by dose ascending
+    std::vector<AnalyzedDose> sorted = analyzedDoses;
+    std::sort(sorted.begin(), sorted.end(),
+        [](const AnalyzedDose& a, const AnalyzedDose& b){ return a.dose < b.dose; });
+
+    report.minTestedDose = safeNonNegativeD(sorted.front().dose);
+    report.maxTestedDose = safeNonNegativeD(sorted.back().dose);
+    report.rateVariability     = std::max(0.0f, stabilityInput.rateStd);
+    report.toxicityVariability = std::max(0.0f, stabilityInput.toxicityStd);
+    report.stabilityScore      = stabilityInput.stabilityScore.empty()
+                                   ? "UNSPECIFIED" : stabilityInput.stabilityScore;
+
+    double inferredStep = 0.0;
+    for (std::size_t i = 1; i < sorted.size(); ++i) {
+        const double dx = safeNonNegativeD(sorted[i].dose) - safeNonNegativeD(sorted[i-1].dose);
+        if (dx > 1.0e-6)
+            inferredStep = (inferredStep <= 0.0) ? dx : std::min(inferredStep, dx);
+    }
+    report.stepDose = inferredStep;
+
+    // ─── Step 1: Evidence accumulation ───────────────────────────────────────
+    // All scores already computed by NetworkAnalyzer. Just sum them up.
+    double cumulativeSuppression    = 0.0;
+    double cumulativeExcitation     = 0.0;
+    double cumulativeStabilization  = 0.0;
+    double cumulativeToxicity       = 0.0;
+    double maxEffectPct             = 0.0;
+
+    std::vector<double> xDose;
+    std::vector<double> suppressionCurve;
+    std::vector<double> excitationCurve;
+    std::vector<double> stabilizationCurve;
+    std::vector<double> therapeuticDoses;
+    std::vector<double> safeDoses;
+    std::vector<double> excitatoryRiskDoses;
+    std::vector<double> overSuppressionDoses;
+
+    bool hasOnsetDose    = false;
+    bool sawToxicEffect  = false;
+    double onsetDose     = 0.0;
+
+    report.points.reserve(sorted.size());
+    report.analyzedDoses = sorted;
+
+    for (std::size_t i = 0; i < sorted.size(); ++i) {
+        const AnalyzedDose& dose = sorted[i];
+
+        cumulativeSuppression   += static_cast<double>(dose.suppressionScore);
+        cumulativeExcitation    += static_cast<double>(dose.excitabilityScore);
+        cumulativeStabilization += static_cast<double>(dose.stabilizationScore);
+        cumulativeToxicity      += static_cast<double>(dose.seizureProbability);
+
+        // Effect magnitude for curve fitting
+        const double suppEff  = std::max(0.0, -static_cast<double>(dose.rateChangePct) / 100.0);
+        const double exciEff  = std::max(0.0,  static_cast<double>(dose.rateChangePct) / 100.0);
+        const double stabilEff= static_cast<double>(dose.stabilizationScore);
+        const double effMag   = std::clamp(std::max({suppEff, exciEff, stabilEff}), 0.0, 1.0);
+        maxEffectPct = std::max(maxEffectPct, effMag * 100.0);
+
+        xDose.push_back(static_cast<double>(dose.dose));
+        suppressionCurve.push_back(suppEff);
+        excitationCurve.push_back(exciEff);
+        stabilizationCurve.push_back(stabilEff);
+
+        // Risk scoring per dose
+        const float seizureProb  = std::clamp(dose.seizureProbability, 0.0f, 1.0f);
+        const float suppScore    = std::clamp(dose.suppressionScore,   0.0f, 1.0f);
+        const float riskScore    = 100.0f * std::clamp(
+            0.55f * seizureProb + 0.30f * static_cast<float>(dose.nii) +
+            0.15f * suppScore, 0.0f, 1.0f);
+
+        const DrugRiskTier tier = classifyTier(seizureProb, suppScore, riskScore);
+
+        float seizureSlopePctPerDose = 0.0f;
+        if (i > 0U) {
+            const float deltaDose = std::max(1.0e-6f, dose.dose - sorted[i-1U].dose);
+            seizureSlopePctPerDose =
+                (dose.seizureProbability - sorted[i-1U].seizureProbability) / deltaDose;
+        }
+
+        const float earlyWarningIndex = 100.0f * std::clamp(
+            0.55f * seizureProb +
+            0.30f * std::clamp(std::max(0.0f, seizureSlopePctPerDose) / 25.0f, 0.0f, 1.0f) +
+            0.15f * std::clamp(static_cast<float>(dose.nii), 0.0f, 1.0f),
+            0.0f, 1.0f);
+
+        report.points.push_back(DrugDecisionPoint{
+            dose.dose,
+            dose.seizureProbability * 100.0f,
+            dose.suppressionScore  * 100.0f,
+            riskScore,
+            toString(tier),
+            earlyWarningIndex,
+            seizureSlopePctPerDose
+        });
+
+        report.peakRiskScore             = std::max(report.peakRiskScore, riskScore);
+        report.peakSeizureProbabilityPct = std::max(report.peakSeizureProbabilityPct,
+                                                      dose.seizureProbability * 100.0f);
+        report.peakSuppressionPct        = std::max(report.peakSuppressionPct,
+                                                      dose.suppressionScore * 100.0f);
+        report.peakEarlyWarningIndex     = std::max(report.peakEarlyWarningIndex, earlyWarningIndex);
+        report.maxSeizureSlopePctPerDose = std::max(report.maxSeizureSlopePctPerDose,
+                                                      seizureSlopePctPerDose);
+
+        // Classify dose band
+        const bool isEffective =
+            (dose.networkState == NetworkState::MildInstability ||
+             dose.networkState == NetworkState::Stable) &&
+            (dose.suppressionScore > 0.20f || dose.stabilizationScore > 0.20f);
+
+        const bool isToxic =
+            (dose.networkState == NetworkState::SeizureActive ||
+             dose.networkState == NetworkState::SeizureRisk   ||
+             dose.networkState == NetworkState::NeuralSuppression ||
+             dose.networkState == NetworkState::DepolarizationBlock ||
+             dose.networkState == NetworkState::Hyperexcitable);
+
+        if (isEffective) {
+            therapeuticDoses.push_back(static_cast<double>(dose.dose));
+            if (!hasOnsetDose) {
+                hasOnsetDose = true;
+                onsetDose    = static_cast<double>(dose.dose);
+                report.hasEffectiveDose = true;
+                report.effectiveMinDose = dose.dose;
+            }
+        } else if (isToxic) {
+            excitatoryRiskDoses.push_back(static_cast<double>(dose.dose));
+            if (!sawToxicEffect) {
+                sawToxicEffect = true;
+                report.hasToxicThreshold      = true;
+                report.toxicMinDose           = dose.dose;
+                report.hasToxicThresholdExact = true;
+                report.toxicThresholdDoseEval = static_cast<double>(dose.dose);
+                report.toxicThresholdText     = std::to_string(report.toxicThresholdDoseEval);
+            }
+        } else {
+            safeDoses.push_back(static_cast<double>(dose.dose));
+        }
+    }
+
+    // ─── Step 2: Response mode ────────────────────────────────────────────────
+    if (cumulativeExcitation > cumulativeSuppression * 1.2 &&
+        cumulativeExcitation > cumulativeStabilization) {
+        report.responseMode = "EXCITATORY_RESPONSE";
+    } else if (cumulativeStabilization > cumulativeSuppression * 1.2 &&
+               cumulativeStabilization > cumulativeExcitation) {
+        report.responseMode = "STABILIZING_RESPONSE";
+    } else if (cumulativeSuppression < 0.5 &&
+               cumulativeExcitation   < 0.5 &&
+               cumulativeStabilization < 0.5) {
+        report.responseMode = "NO_SIGNIFICANT_RESPONSE";
+    } else {
+        report.responseMode = "SUPPRESSIVE_RESPONSE";
+    }
+
+    // ─── Step 3: Dominant mechanism ───────────────────────────────────────────
+    int naCount=0, kCount=0, caCount=0, mixedCount=0;
+    for (const auto& dose : sorted) {
+        switch (dose.mechanismSignature) {
+            case MechanismSignature::NaBlock: ++naCount;    break;
+            case MechanismSignature::KBlock:  ++kCount;     break;
+            case MechanismSignature::CaBlock: ++caCount;    break;
+            case MechanismSignature::Mixed:   ++mixedCount; break;
+            default: break;
+        }
+    }
+    const int maxCount = std::max({naCount, kCount, caCount, mixedCount});
+    if      (maxCount == 0)         report.dominantMechanism = MechanismSignature::Unknown;
+    else if (naCount == maxCount)   report.dominantMechanism = MechanismSignature::NaBlock;
+    else if (kCount  == maxCount)   report.dominantMechanism = MechanismSignature::KBlock;
+    else if (caCount == maxCount)   report.dominantMechanism = MechanismSignature::CaBlock;
+    else                            report.dominantMechanism = MechanismSignature::Mixed;
+    report.mechanismText = toString(report.dominantMechanism);
+
+    // ─── Step 4: Dominant network state (worst state seen across doses) ───────
+    NetworkState dominantState = NetworkState::Stable;
+    auto severity = [](NetworkState s) -> int {
+        switch (s) {
+            case NetworkState::NeuralSuppression:   return 6;
+            case NetworkState::DepolarizationBlock: return 5;
+            case NetworkState::SeizureActive:       return 4;
+            case NetworkState::SeizureRisk:         return 3;
+            case NetworkState::Hyperexcitable:      return 2;
+            case NetworkState::MildInstability:     return 1;
+            default:                                return 0;
+        }
+    };
+    for (const auto& dose : sorted) {
+        if (severity(dose.networkState) > severity(dominantState))
+            dominantState = dose.networkState;
+    }
+
+    // ─── Step 5: Therapeutic window ───────────────────────────────────────────
+    auto sortDedup = [](std::vector<double>& v) {
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end(),
+            [](double a, double b){ return std::fabs(a-b)<=1.0e-6; }), v.end());
+    };
+    sortDedup(safeDoses);
+    sortDedup(therapeuticDoses);
+    sortDedup(excitatoryRiskDoses);
+
+    const auto therapeuticRanges = contiguousRanges(therapeuticDoses, inferredStep);
+    const auto safeRanges        = contiguousRanges(safeDoses,        inferredStep);
+
+    if (!therapeuticRanges.empty()) {
+        const auto& widest = *std::max_element(therapeuticRanges.begin(), therapeuticRanges.end(),
+            [](const Range& a, const Range& b){ return (a.hi-a.lo) < (b.hi-b.lo); });
+        report.hasContinuousEffectiveWindow = true;
+        report.effectiveRangeMin  = widest.lo;
+        report.effectiveRangeMax  = widest.hi;
+        report.hasTherapeuticWindow = true;
+        report.therapeuticWindow  = static_cast<float>(widest.hi - widest.lo);
+        report.windowQuality      = therapeuticRanges.size() > 1U ? "Fragmented" : "Continuous";
+        onsetDose    = widest.lo;
+        hasOnsetDose = true;
+    } else {
+        report.hasContinuousEffectiveWindow = false;
+        report.hasTherapeuticWindow = false;
+        report.therapeuticWindow    = 0.0f;
+        report.windowQuality        = "Not observed";
+    }
+
+    if (!safeRanges.empty()) {
+        const auto& widest = *std::max_element(safeRanges.begin(), safeRanges.end(),
+            [](const Range& a, const Range& b){ return (a.hi-a.lo) < (b.hi-b.lo); });
+        report.hasSafeRange = true;
+        report.safeMinDose  = safeNonNegative(static_cast<float>(widest.lo));
+        report.safeMaxDose  = safeNonNegative(static_cast<float>(widest.hi));
+    }
+
+    report.excitatoryRiskDoses = excitatoryRiskDoses;
+
+    const bool therapeuticWindowExists = report.hasContinuousEffectiveWindow;
+    const bool fragmentedWindow        = therapeuticRanges.size() > 1U;
+    const bool lowStability = (report.stabilityScore == "LOW") ||
+                               (report.rateVariability    >= 2.0f) ||
+                               (report.toxicityVariability >= 10.0f);
+    const bool toxicityBeforeTherapy =
+        report.hasToxicThreshold &&
+        (!therapeuticWindowExists ||
+         report.toxicThresholdDoseEval <= report.effectiveRangeMin);
+    const bool toxicityAfterTherapy =
+        report.hasToxicThreshold && therapeuticWindowExists &&
+        report.toxicThresholdDoseEval > report.effectiveRangeMax;
+
+    // ─── Step 6: Peak dose for narrative ─────────────────────────────────────
+    std::size_t peakIdx = 0;
+    float peakScore = 0.0f;
+    for (std::size_t i = 0; i < sorted.size(); ++i) {
+        const float s = std::max({sorted[i].suppressionScore,
+                                  sorted[i].excitabilityScore,
+                                  sorted[i].stabilizationScore});
+        if (s > peakScore) { peakScore = s; peakIdx = i; }
+    }
+
+    // ─── Step 7: Sigmoid fit ──────────────────────────────────────────────────
+    const std::vector<double>* fitSource = &suppressionCurve;
+    if (report.responseMode == "EXCITATORY_RESPONSE")  fitSource = &excitationCurve;
+    if (report.responseMode == "STABILIZING_RESPONSE") fitSource = &stabilizationCurve;
+    std::vector<double> monotonicCurve = *fitSource;
+    for (std::size_t i = 1; i < monotonicCurve.size(); ++i)
+        if (monotonicCurve[i] < monotonicCurve[i-1]) monotonicCurve[i] = monotonicCurve[i-1];
+    report.sigmoidR2 = computeBestSigmoidR2(xDose, monotonicCurve);
+    if      (report.sigmoidR2 >= 0.95) report.curveType = "Sigmoidal";
+    else if (report.sigmoidR2 >= 0.85) report.curveType = "Weak Sigmoidal";
+    else                                report.curveType = "Non-sigmoidal";
+    if (report.responseMode == "STABILIZING_RESPONSE")
+        report.curveType = (report.sigmoidR2 >= 0.95)
+                            ? "Sigmoidal Stabilization" : "Stabilizing Response";
+
+    // ─── Step 8: Narrative ────────────────────────────────────────────────────
+    report.primaryChangeText = buildNarrative(
+        sorted[peakIdx], report.dominantMechanism, report.responseMode);
+    report.safetyInterpretationText = buildSafetyText(
+        dominantState, toxicityBeforeTherapy, toxicityAfterTherapy, lowStability);
+
+    // Metric reductions at final dose
+    const AnalyzedDose& finalDose = sorted.back();
+    report.syncReductionPct    = std::max(0.0f, finalDose.syncReductionPct);
+    report.seizureReductionPct = std::max(0.0f, -finalDose.syncDelta * 100.0f);
+    report.niiReductionPct     = 0.0f; // niiDelta not directly stored; computed in NetworkAnalyzer
+    report.burstReductionPct   = std::max(0.0f, -finalDose.burstRateDelta);
+    report.calciumEffectMagnitude = std::max({
+        static_cast<double>(report.syncReductionPct),
+        static_cast<double>(report.burstReductionPct)
+    });
+    report.meaningfulCaBlock = (report.dominantMechanism == MechanismSignature::CaBlock &&
+                                 report.stabilizationScore > 0.30f);
+
+    // ─── Step 9: Recommendation ───────────────────────────────────────────────
+    const bool dangerous =
+        dominantState == NetworkState::NeuralSuppression ||
+        dominantState == NetworkState::SeizureActive     ||
+        dominantState == NetworkState::DepolarizationBlock;
+    const bool excitatory =
+        dominantState == NetworkState::Hyperexcitable ||
+        report.responseMode == "EXCITATORY_RESPONSE";
+    const bool stabilizing = report.responseMode == "STABILIZING_RESPONSE";
+
+    if (dangerous || excitatory || toxicityBeforeTherapy) {
+        report.recommendation = "NOT RECOMMENDED";
+        report.riskLevel      = "HIGH";
+        report.overallTier    = DrugRiskTier::Toxic;
+        if (excitatory)
+            report.reason = "Burst rate, irregularity, and excitability markers exceeded "
+                            "safe neural stability limits across the tested dose range.";
+        else if (dangerous)
+            report.reason = "Network activity collapsed or seizure-level instability "
+                            "was observed within the tested dose range.";
+        else
+            report.reason = "Instability markers appeared at doses below the therapeutic "
+                            "window; the dose-response ordering is unsafe.";
+
+    } else if (stabilizing && !report.hasToxicThreshold && !lowStability) {
+        report.recommendation = "PROMISING";
+        report.riskLevel      = "LOW";
+        report.overallTier    = DrugRiskTier::Safe;
+        report.reason = "Synchronization, burst duration, and network instability reduced "
+                        "from baseline while firing activity was preserved.";
+
+    } else if (therapeuticWindowExists && toxicityAfterTherapy) {
+        report.recommendation = "CAUTION";
+        report.riskLevel      = "MODERATE";
+        report.overallTier    = DrugRiskTier::ModerateRisk;
+        report.reason = "A therapeutic window was identified but is narrow; "
+                        "instability markers appeared at higher doses.";
+
+    } else if (therapeuticWindowExists) {
+        report.recommendation = lowStability ? "CAUTION"    : "PROMISING";
+        report.riskLevel      = lowStability ? "MODERATE"   : "LOW";
+        report.overallTier    = lowStability ? DrugRiskTier::ModerateRisk : DrugRiskTier::Safe;
+        report.reason = lowStability
+            ? "Therapeutic response detected but inter-run variability reduces confidence."
+            : "Continuous therapeutic window identified with no accompanying instability.";
+
+    } else {
+        report.recommendation = "LIMITED EFFICACY";
+        report.riskLevel      = "LOW";
+        report.overallTier    = DrugRiskTier::Safe;
+        report.reason = "No meaningful biological response detected across the tested dose range.";
+    }
+
+    // ─── Step 10: Confidence ──────────────────────────────────────────────────
+    report.confidence = computeConfidence(
+        dominantState, report.sigmoidR2,
+        therapeuticWindowExists, report.hasContinuousEffectiveWindow,
+        fragmentedWindow, report.rateVariability, report.toxicityVariability,
+        maxEffectPct, report.peakRiskScore, report.peakSeizureProbabilityPct / 100.0f,
+        stabilityInput.runCount);
+
+    report.hasToxicThresholdExact = report.hasToxicThreshold;
+    report.toxicThresholdText = report.hasToxicThreshold
+        ? std::to_string(report.toxicThresholdDoseEval)
+        : ">" + std::to_string(report.maxTestedDose);
+
+    const double midDose = 0.5 * (report.minTestedDose + report.maxTestedDose);
+    if (report.sigmoidR2 >= 0.95 && hasOnsetDose && onsetDose <= midDose)
+        report.responseStrength = "Strong";
+    else if (report.sigmoidR2 >= 0.85)
+        report.responseStrength = "Moderate-to-Strong";
+    else
+        report.responseStrength = "Weak";
+
+    report.seizureTrendText =
+        (finalDose.seizureProbability > sorted.front().seizureProbability + 0.05f)
+            ? "Seizure-risk markers increased with dose"
+        : (finalDose.seizureProbability < sorted.front().seizureProbability - 0.05f)
+            ? "Seizure-risk markers decreased with dose"
+            : "Seizure-risk markers remained broadly stable";
+
+    return report;
+}
+
+// ─── toString helpers ─────────────────────────────────────────────────────────
+std::string PharmaDecisionEngine::toString(DrugRiskTier tier) {
+    switch (tier) {
+        case DrugRiskTier::Safe:         return "Safe";
+        case DrugRiskTier::ModerateRisk: return "Moderate Risk";
+        case DrugRiskTier::HighRisk:     return "High Risk";
+        case DrugRiskTier::Toxic:        return "Toxic";
+        default:                          return "Safe";
+    }
+}
+
+std::string PharmaDecisionEngine::toString(NetworkState state) {
+    switch (state) {
+        case NetworkState::Stable:             return "Stable";
+        case NetworkState::MildInstability:    return "Mild Instability";
+        case NetworkState::Hyperexcitable:     return "Hyperexcitable";
+        case NetworkState::SeizureRisk:        return "Seizure Risk";
+        case NetworkState::SeizureActive:      return "Active Seizure";
+        case NetworkState::DepolarizationBlock:return "Depolarization Block";
+        case NetworkState::NeuralSuppression:  return "Neural Suppression";
+        default:                               return "Unknown";
+    }
+}
+
+std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
+    switch (sig) {
+        case MechanismSignature::NaBlock:  return "Na-Channel Block";
+        case MechanismSignature::KBlock:   return "K-Channel Block";
+        case MechanismSignature::CaBlock:  return "Ca-Channel Block";
+        case MechanismSignature::Mixed:    return "Mixed Channel Block";
+        default:                           return "Unknown";
+    }
+}
+
+} // namespace spp::analyzer
