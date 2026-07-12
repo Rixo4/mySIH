@@ -1,73 +1,92 @@
-// This file defines the MetricsAnalyzer class...
-// These metrics can be used for further analysis,
-// such as seizure detection or drug response evaluation.
-             //to
-// This file defines the MetricsAnalyzer class which computes
-// pure measured quantities from simulation results.
-// No decisions, scores, or interpretations are made here.
+// Metrics.h
+// Defines MetricsAnalyzer — computes PURE MEASURED QUANTITIES only.
+// No decisions, no scores, no probabilities, no interpretations.
+// All derived scores (NII, seizure probability, suppression %) are
+// computed downstream in NetworkAnalyzer.
 #pragma once
-#include "RawMetrics.h"
 
 #include <cstddef>
-#include <string>
 #include <vector>
-
 #include "../simulation/SimulationEngine.h"
+#include "RawMetrics.h"
 
 namespace spp::analyzer {
 
+// ─── Per-neuron metrics ───────────────────────────────────────────────────────
 struct NeuronMetrics {
-    std::size_t spikeCount = 0;
-    float firingRateHz = 0.0f;
-    float isiMeanMs = 0.0f;
-    float isiVarianceMs = 0.0f;
+    std::size_t spikeCount  = 0;
+    float firingRateHz      = 0.0f;
+    float isiMeanMs         = 0.0f;
+    float isiVarianceMs     = 0.0f;  // sample variance (÷ n-1)
 };
 
+// ─── Network-level raw measurements ──────────────────────────────────────────
+// This is what Metrics.cpp produces.
+// NOTHING here is a decision or score.
 struct NetworkMetrics {
-    float meanFiringRateHz = 0.0f;
-    float synchronizationIndex = 0.0f;
-    float burstIndex = 0.0f;
-    float burstRateHz = 0.0f;
-    float burstingNeuronPct = 0.0f;
-    float populationVariance = 0.0f;
-    float voltageVariance = 0.0f;
-    float irregularityIndex = 0.0f;
 
+    // Firing rate
+    float meanFiringRateHz          = 0.0f;
+    float firingRateStdHz           = 0.0f;
+    float silentNeuronPct           = 0.0f;  // % neurons < 0.5 Hz
+    float earlyWindowRateHz         = 0.0f;
+    float lateWindowRateHz          = 0.0f;
 
-    float earlyWindowRateHz = 0.0f;
-    float lateWindowRateHz = 0.0f;
-    float firingRateStdHz = 0.0f;
-    float silentNeuronPct = 0.0f;
-    float peakSynchronizationIndex = 0.0f;
-    float meanBurstDurationMs = 0.0f;
+    // Synchronization
+    float synchronizationIndex      = 0.0f;
+    float peakSynchronizationIndex  = 0.0f;
+
+    // Burst
+    float burstIndex                = 0.0f;  // sigmoid-normalised burstRateHz
+    float burstRateHz               = 0.0f;  // raw burst events per second
+    float burstingNeuronPct         = 0.0f;  // % neurons with >=1 burst
+    float meanBurstDurationMs       = 0.0f;
+
+    // Irregularity
+    float irregularityIndex         = 0.0f;  // mean ISI-CV
+
+    // Population
+    float populationVariance        = 0.0f;
+
+    // Kept for backward compat with CsvWriter / output layer
+    // Set to 0 — not computed here anymore
+    float stabilityScore            = 0.0f;
 };
 
+// ─── Time window metrics ──────────────────────────────────────────────────────
 struct TimeWindowMetrics {
-    float startMs = 0.0f;
-    float endMs = 0.0f;
-    float meanFiringRateHz = 0.0f;
-    float synchronizationIndex = 0.0f;
-    float burstIndex = 0.0f;
-    float burstRateHz = 0.0f;
-    float burstingNeuronPct = 0.0f;
-    float irregularityIndex = 0.0f;
+    float startMs               = 0.0f;
+    float endMs                 = 0.0f;
+    float meanFiringRateHz      = 0.0f;
+    float synchronizationIndex  = 0.0f;
+    float burstIndex            = 0.0f;
+    float burstRateHz           = 0.0f;
+    float burstingNeuronPct     = 0.0f;
+    float irregularityIndex     = 0.0f;
+    // Note: no seizureProbability, no nii — those are NetworkAnalyzer's job
 };
 
+// ─── Analyzer ─────────────────────────────────────────────────────────────────
 class MetricsAnalyzer {
 public:
-    static std::vector<NeuronMetrics> computeNeuronMetrics(const simulation::SimulationResult& result);
+    // Compute per-neuron metrics from simulation result
+    static std::vector<NeuronMetrics> computeNeuronMetrics(
+        const simulation::SimulationResult& result
+    );
+
+    // Compute network-level raw measurements
+    // No baseline parameter — suppression is NetworkAnalyzer's job
     static NetworkMetrics computeNetworkMetrics(
         const simulation::SimulationResult& result,
         const std::vector<NeuronMetrics>& neuronMetrics
     );
 
+    // Compute sliding window raw metrics
     static std::vector<TimeWindowMetrics> computeTimeWindowMetrics(
         const simulation::SimulationResult& result,
         float windowMs,
         float stepMs
     );
-
-
 };
 
 } // namespace spp::analyzer
