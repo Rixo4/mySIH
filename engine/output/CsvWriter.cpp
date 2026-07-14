@@ -44,13 +44,13 @@ void CsvWriter::writeNetworkMetrics(
             << rec.metrics.synchronizationIndex << ','
             << rec.metrics.burstIndex << ','
             << rec.metrics.populationVariance << ','
-            << rec.metrics.voltageVariance << ','
+            << 0.0 << ','
             << rec.metrics.irregularityIndex << ','
             << rec.metrics.earlyWindowRateHz << ','
             << rec.metrics.lateWindowRateHz << ','
-            << rec.metrics.nii << ','
-            << rec.metrics.seizureProbabilityPct << ','
-            << rec.metrics.suppressionPct << ','
+            << 0.0 << ','
+            << 0.0 << ','
+            << 0.0 << ','
             << rec.metrics.stabilityScore << '\n';
     }
 }
@@ -112,7 +112,7 @@ void CsvWriter::writeTimeMetrics(
         throw std::runtime_error("Unable to open time metrics output file: " + filePath);
     }
 
-    out << "time_start_ms,time_end_ms,mean_firing_rate_hz,synchronization,burst_index,seizure_probability\n";
+    out << "time_start_ms,time_end_ms,mean_firing_rate_hz,synchronization,burst_index,burst_rate_hz,bursting_neuron_pct,irregularity_index,mean_burst_duration_ms\n";
     out << std::fixed << std::setprecision(6);
 
     for (const auto& p : points) {
@@ -121,7 +121,10 @@ void CsvWriter::writeTimeMetrics(
             << p.meanFiringRateHz << ','
             << p.synchronizationIndex << ','
             << p.burstIndex << ','
-            << p.seizureProbability << '\n';
+            << p.burstRateHz << ','
+            << p.burstingNeuronPct << ','
+            << p.irregularityIndex << ','
+            << p.meanBurstDurationMs << '\n';
     }
 }
 

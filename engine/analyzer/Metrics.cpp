@@ -245,7 +245,11 @@ float computeSyncFromFractions(
 // Count burst events and bursting neurons within a spike-time span [begin, end).
 // Returns {burstEvents, burstingNeuronCount} for the whole spike array slice.
 // Used by both the full-network burst path and the time-window path.
-struct BurstCounts { std::uint64_t events; std::uint64_t burstingNeurons; };
+struct BurstCounts {
+    std::uint64_t events          = 0U;
+    std::uint64_t burstingNeurons = 0U;
+    float totalDurationMs         = 0.0f;
+};
 
 BurstCounts countBurstsInRange(
     const std::vector<float>& spikes,
@@ -265,11 +269,14 @@ BurstCounts countBurstsInRange(
         if ((spikes[j + 2U] - spikes[j]) <= burstWindowMs) {
             ++bc.events;
             neuronBursted = true;
+            const float burstStart = spikes[j];
             std::size_t k = j + 3U;
             while (k < idxEnd &&
                    (spikes[k] - spikes[k - 1U]) <= burstWindowMs) {
                 ++k;
             }
+            const float burstEnd = spikes[k - 1U];
+            bc.totalDurationMs += (burstEnd - burstStart);
             j = k;
         } else {
             ++j;
@@ -506,7 +513,7 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
                                                       effectiveBurstWindowMs);
             totalBurstEvents    += bc.events;
             burstingNeuronCount += bc.burstingNeurons;
-            totalBurstDurationMs += (spikes[endOfBurst] - spikes[startOfBurst]);
+            totalBurstDurationMs += bc.totalDurationMs;
         }
 
         const float durationSec = std::max(1.0e-6f, result.durationMs / 1000.0f);
@@ -642,6 +649,7 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
         std::uint64_t totalWindowSpikes   = 0U;
         std::uint64_t totalBurstEvents    = 0U;
         std::uint64_t burstingNeuronCount = 0U;
+        float totalBurstDurationMs        = 0.0f;
 
         float windowIrregularitySum   = 0.0f;
         std::size_t windowIrregCount  = 0U;
@@ -693,6 +701,7 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
                                                       effectiveBurstWindowMs);
             totalBurstEvents    += bc.events;
             burstingNeuronCount += bc.burstingNeurons;
+            totalBurstDurationMs += bc.totalDurationMs;
         }
 
         const float windowIrregularity = (windowIrregCount > 0U)

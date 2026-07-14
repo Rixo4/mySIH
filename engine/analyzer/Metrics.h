@@ -63,6 +63,7 @@ struct TimeWindowMetrics {
     float burstRateHz           = 0.0f;
     float burstingNeuronPct     = 0.0f;
     float irregularityIndex     = 0.0f;
+    float meanBurstDurationMs = 0.0f;
     // Note: no seizureProbability, no nii — those are NetworkAnalyzer's job
 };
 

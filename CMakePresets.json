@@ -7,39 +7,36 @@
   },
   "configurePresets": [
     {
-      "name": "mingw-release",
-      "displayName": "MinGW Release",
-      "description": "MinGW toolchain with CUDA enabled when available",
-      "generator": "MinGW Makefiles",
+      "name": "linux-release",
+      "displayName": "Linux Release",
+      "description": "Linux GCC/G++ Release Build",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "C:/msys64/ucrt64/bin/gcc.exe",
-        "CMAKE_CXX_COMPILER": "C:/msys64/ucrt64/bin/g++.exe"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {
-      "name": "nmake-cuda-release",
-      "displayName": "NMake CUDA Release",
-      "description": "NMake + MSVC + nvcc CUDA build (run from vcvars64 environment)",
-      "generator": "NMake Makefiles",
-      "binaryDir": "${sourceDir}/build-cuda",
+      "name": "linux-debug",
+      "displayName": "Linux Debug",
+      "description": "Linux GCC/G++ Debug Build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_COMPILER": "cl.exe",
-        "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2/bin/nvcc.exe",
-        "CMAKE_CUDA_ARCHITECTURES": "86"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "mingw-release",
-      "configurePreset": "mingw-release"
+      "name": "linux-release",
+      "configurePreset": "linux-release"
     },
     {
-      "name": "nmake-cuda-release",
-      "configurePreset": "nmake-cuda-release"
+      "name": "linux-debug",
+      "configurePreset": "linux-debug"
     }
   ]
 }

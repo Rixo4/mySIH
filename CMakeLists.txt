@@ -5,8 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Prefer the local GPU architecture when CUDA is enabled so the binary is
-# compiled for the installed device instead of relying on PTX JIT at runtime.
 set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -21,15 +19,15 @@ set(SPP_SOURCES
     engine/network/Network.cpp
     engine/simulation/SimulationEngine.cpp
     engine/analyzer/Metrics.cpp
-    engine/analyzer/SeizureDetector.cpp
+    engine/analyzer/NetworkAnalyzer.cpp
     engine/analyzer/PharmaDecisionEngine.cpp
-    engine/analyzer/DrugEvaluationEngine.cpp
     engine/output/CsvWriter.cpp
     engine/cuda/CudaSimulator.cpp
 )
 
 set(SPP_ENABLE_CUDA OFF)
 set(SPP_CAN_ENABLE_CUDA ON)
+
 if(WIN32)
     if(CMAKE_GENERATOR MATCHES "Visual Studio")
         message(STATUS "Visual Studio generator detected; enabling CUDA host compiler discovery via MSVC toolchain.")
@@ -63,45 +61,25 @@ endif()
 
 add_executable(silicon_patient ${SPP_SOURCES})
 
-add_executable(ontology_regression
-    engine/tests/ontology_regression.cpp
-    engine/analyzer/PharmaDecisionEngine.cpp
-    engine/drug/DrugModel.cpp
+target_include_directories(silicon_patient PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
 )
-
-target_include_directories(silicon_patient PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
-target_include_directories(ontology_regression PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 
 if(SPP_ENABLE_CUDA)
     target_compile_definitions(silicon_patient PRIVATE SPP_USE_CUDA)
-endif()
-
-if(SPP_ENABLE_CUDA)
-    target_compile_definitions(ontology_regression PRIVATE SPP_USE_CUDA)
-endif()
-
-if(SPP_ENABLE_CUDA)
-    set_target_properties(silicon_patient PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+    set_target_properties(silicon_patient PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+    )
     target_link_libraries(silicon_patient PRIVATE CUDA::cudart)
-endif()
-
-if(SPP_ENABLE_CUDA)
-    set_target_properties(ontology_regression PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
-    target_link_libraries(ontology_regression PRIVATE CUDA::cudart)
 endif()
 
 if(MSVC)
     target_compile_options(silicon_patient PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:/W4 /O2>
     )
-    target_compile_options(ontology_regression PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:/W4 /O2>
-    )
 else()
     target_compile_options(silicon_patient PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O3>
-    )
-    target_compile_options(ontology_regression PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -O3>
     )
 endif()
