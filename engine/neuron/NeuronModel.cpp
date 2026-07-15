@@ -143,14 +143,16 @@ HHDerivatives computeDerivatives(
     const float iNa = gNaEff * state.m * state.m * state.m * state.h * (state.v - params.eNa);
     const float iK = gKEff * state.n * state.n * state.n * state.n * (state.v - params.eK);
     const float iCa = gCaEff * state.s * state.s * (state.v - params.eCa);
+    const float iAHP = params.gAHP * state.caCa * (state.v - params.eK);
     const float iL = params.gL * (state.v - params.eL);
 
     HHDerivatives d;
-    d.dv = (iTotal - iNa - iK - iCa - iL) / params.cm;
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL) / params.cm;
     d.dm = alphaM(state.v) * (1.0f - state.m) - betaM(state.v) * state.m;
     d.dh = alphaH(state.v) * (1.0f - state.h) - betaH(state.v) * state.h;
     d.dn = alphaN(state.v) * (1.0f - state.n) - betaN(state.v) * state.n;
     d.ds = (sInf(state.v) - state.s) / tauS(state.v);
+    d.dcaCa = -state.caCa / params.tauCa + 0.002f * std::max(0.0f, -(iCa));
 
     return d;
 }

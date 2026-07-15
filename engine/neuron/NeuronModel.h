@@ -16,6 +16,8 @@ struct HHParameters {
     float eK = -77.0f;           // mV
     float eCa = 120.0f;          // mV
     float eL = -54.4f;           // mV
+    float gAHP  = 5.0f;          // Ca-activated K conductance mS/cm²
+    float tauCa = 80.0f;         // Ca decay time constant ms
     float restingVoltage = -65.0f;
 };
 
@@ -25,6 +27,7 @@ struct HHState {
     float h = 0.6f;
     float n = 0.32f;
     float s = 0.05f;
+    float caCa = 0.0f; // intracellular calcium concentration
 };
 
 struct HHDerivatives {
@@ -33,6 +36,7 @@ struct HHDerivatives {
     float dh = 0.0f;
     float dn = 0.0f;
     float ds = 0.0f;
+    float dcaCa = 0.0f; // derivative of intracellular calcium concentration
 };
 
 class NeuronPopulation {
