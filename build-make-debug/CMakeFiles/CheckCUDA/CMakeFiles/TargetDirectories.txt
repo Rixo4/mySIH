@@ -1,0 +1,2 @@
+/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug/CMakeFiles/CheckCUDA/CMakeFiles/edit_cache.dir
+/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug/CMakeFiles/CheckCUDA/CMakeFiles/rebuild_cache.dir

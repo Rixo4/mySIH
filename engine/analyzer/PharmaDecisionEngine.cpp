@@ -359,7 +359,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const bool isEffective =
             (dose.networkState == NetworkState::MildInstability ||
              dose.networkState == NetworkState::Stable) &&
-            (dose.suppressionScore > 0.20f || dose.stabilizationScore > 0.20f);
+            (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f);
 
         const bool isToxic =
             (dose.networkState == NetworkState::SeizureActive ||

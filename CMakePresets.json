@@ -10,9 +10,11 @@
       "name": "linux-release",
       "displayName": "Linux Release",
       "description": "Linux GCC/G++ Release Build",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-make",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -21,9 +23,11 @@
       "name": "linux-debug",
       "displayName": "Linux Debug",
       "description": "Linux GCC/G++ Debug Build",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-debug",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-make-debug",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }

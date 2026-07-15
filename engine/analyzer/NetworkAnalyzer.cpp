@@ -258,7 +258,7 @@ MechanismSignature NetworkAnalyzer::detectMechanism(
     // sync reduces + rate preserved + NOT strongly negative irregularity (Na-block exclusion)
     // burstDurationDelta removed as primary — may be 0 if baseline bursts are 0
     const bool caPattern =
-        dose.syncReductionPct  >  8.0f &&
+        dose.syncReductionPct  > 12.0f &&
         dose.rateChangePct     > -20.0f &&
         dose.irregularityDelta > -0.30f;
 

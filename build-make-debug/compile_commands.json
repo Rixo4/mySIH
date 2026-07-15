@@ -1,0 +1,74 @@
+[
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/main.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/main.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/main.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/main.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/neuron/NeuronModel.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/neuron/NeuronModel.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/neuron/NeuronModel.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/neuron/NeuronModel.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/drug/DrugModel.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/drug/DrugModel.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/drug/DrugModel.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/drug/DrugModel.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/synapse/Synapse.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/Synapse.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/Synapse.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/synapse/Synapse.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/network/Network.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/network/Network.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/network/Network.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/network/Network.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/simulation/SimulationEngine.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/simulation/SimulationEngine.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/analyzer/Metrics.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/Metrics.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/Metrics.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/analyzer/Metrics.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/analyzer/NetworkAnalyzer.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/NetworkAnalyzer.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/NetworkAnalyzer.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/analyzer/NetworkAnalyzer.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/analyzer/PharmaDecisionEngine.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/PharmaDecisionEngine.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/PharmaDecisionEngine.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/analyzer/PharmaDecisionEngine.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/output/CsvWriter.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/output/CsvWriter.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/cuda/CudaSimulator.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/CudaSimulator.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/CudaSimulator.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/cuda/CudaSimulator.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/nvcc -forward-unknown-to-host-compiler -DSPP_USE_CUDA --options-file CMakeFiles/silicon_patient.dir/includes_CUDA.rsp -g -std=c++17 -arch=native -x cu -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/NeuronUpdate.cu -o CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/NeuronUpdate.cu",
+  "output": "CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o"
+}
+]
