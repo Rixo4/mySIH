@@ -61,9 +61,9 @@ constexpr float kSyncSensitivityGain        = 6.0f;
 // To add neuron-type support: populate result.burstWindowMs in
 // SimulationResult before calling computeNetworkMetrics /
 // computeTimeWindowMetrics. Add the field to SimulationResult if not present.
-constexpr float kBurstWindowMsDefault       = 10.0f;
+constexpr float kBurstWindowMsDefault       = 5.0f;
 // Minimum spikes to count a neuron as "bursting" when computing burstingNeuronPct.
-constexpr std::size_t kBurstMinSpikes       = 3U;
+constexpr std::size_t kBurstMinSpikes       = 4U;
 
 // Suppression: a per-neuron rate below this fraction of the BASELINE
 // population mean is considered suppressed. Requires a baseline to be
@@ -440,7 +440,7 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
     {
         std::size_t silentCount = 0U;
         for (float rate : firingRates) {
-            if (rate < 0.5f) ++silentCount;
+            if (rate < 2.0f) ++silentCount;
         }
         net.silentNeuronPct = (100.0f * static_cast<float>(silentCount)) / neuronCount;
     }

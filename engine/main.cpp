@@ -398,19 +398,22 @@ float computeStd(const std::vector<float>& v, float mean) {
 AggregatedStats computeStats(const std::vector<RunResult>& results) {
     AggregatedStats stats;
     if (results.empty()) return stats;
-    std::vector<float> rates,syncs,bursts,isis;
-    rates.reserve(results.size()); syncs.reserve(results.size());
-    bursts.reserve(results.size()); isis.reserve(results.size());
+    std::vector<float> rates,syncs,bursts,burstRates,isis;
+    rates.reserve(results.size());      syncs.reserve(results.size());
+    bursts.reserve(results.size());     isis.reserve(results.size());
+    burstRates.reserve(results.size());
     for (const auto& r : results) {
         rates.push_back(r.firingRate);
         syncs.push_back(r.sync);
         bursts.push_back(r.burst);
+        burstRates.push_back(r.burstRateHz);
         isis.push_back(r.isiCV);
     }
-    stats.meanRate  = computeMean(rates);  stats.stdRate  = computeStd(rates,  stats.meanRate);
-    stats.meanSync  = computeMean(syncs);  stats.stdSync  = computeStd(syncs,  stats.meanSync);
-    stats.meanBurst = computeMean(bursts); stats.stdBurst = computeStd(bursts, stats.meanBurst);
-    stats.meanISI   = computeMean(isis);   stats.stdISI   = computeStd(isis,   stats.meanISI);
+    stats.meanRate      = computeMean(rates);      stats.stdRate  = computeStd(rates,  stats.meanRate);
+    stats.meanSync      = computeMean(syncs);      stats.stdSync  = computeStd(syncs,  stats.meanSync);
+    stats.meanBurst     = computeMean(bursts);     stats.stdBurst = computeStd(bursts, stats.meanBurst);
+    stats.meanBurstRate = computeMean(burstRates); // FIX: was never computed — always 0
+    stats.meanISI       = computeMean(isis);       stats.stdISI   = computeStd(isis,   stats.meanISI);
     stats.stdRate2  = stats.stdRate; // used as stability proxy
     return stats;
 }

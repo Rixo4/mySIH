@@ -170,9 +170,9 @@ float NetworkAnalyzer::computeExcitabilityScore(
     const float irregDrive = clamp01(irregularityDelta / 1.0f);
 
     return clamp01(
-        0.30f * rateDrive  +
-        0.45f * burstDrive +
-        0.25f * irregDrive
+        0.20f * rateDrive  +
+        0.30f * burstDrive +
+        0.50f * irregDrive  // irregularity is the strongest K-block network signal
     );
 }
 
@@ -187,8 +187,11 @@ float NetworkAnalyzer::computeStabilizationScore(
     float niiDelta,
     float rateChangePct)
 {
-    // Rate must be preserved — not suppressed
-    const bool rateViable = (rateChangePct > -40.0f);
+    // Rate must be genuinely preserved.
+    // K-block drops rate significantly — this must NOT score as stabilization.
+    // Threshold tightened from -40% to -15% so only true Ca-block patterns
+    // (rate preserved ±15%) trigger stabilization.
+    const bool rateViable = (rateChangePct > -15.0f);
     if (!rateViable) return 0.0f;
 
     // Sync reduction — primary Ca-block signal
@@ -236,25 +239,28 @@ MechanismSignature NetworkAnalyzer::detectMechanism(
     const AnalyzedDose& dose)
 {
     // Na-block pattern:
-    // rate drops strongly + silent neurons increase + more regular firing
+    // rate drops strongly + firing becomes MORE regular (irregularity decreases)
+    // silentNeuronDelta removed — threshold depends on network config
     const bool naPattern =
-        dose.rateChangePct      < -30.0f &&
-        dose.silentNeuronDelta  >  20.0f &&
-        dose.irregularityDelta  < -0.10f;
+        dose.rateChangePct     < -25.0f &&
+        dose.irregularityDelta < -0.10f;
 
     // K-block pattern:
-    // burst increases + irregularity increases + bursting neurons increase
+    // irregularity rises strongly (primary signal — always present with K-block)
+    // corroborated by burst increase OR rate change OR burstingNeuronPct
     const bool kPattern =
-        dose.burstRateDelta     >  2.0f  &&
-        dose.irregularityDelta  >  0.20f &&
-        dose.metrics.burstingNeuronPct > 20.0f;
+        dose.irregularityDelta  >  0.10f &&
+        (dose.burstRateDelta    >  0.5f  ||
+         dose.metrics.burstingNeuronPct > 5.0f ||
+         dose.excitabilityScore > 0.20f);
 
     // Ca-block pattern:
-    // burst duration shortens + sync reduces + rate preserved
+    // sync reduces + rate preserved + NOT strongly negative irregularity (Na-block exclusion)
+    // burstDurationDelta removed as primary — may be 0 if baseline bursts are 0
     const bool caPattern =
-        dose.burstDurationDelta < -10.0f &&
-        dose.syncReductionPct   >  10.0f &&
-        dose.rateChangePct      > -20.0f;
+        dose.syncReductionPct  >  8.0f &&
+        dose.rateChangePct     > -20.0f &&
+        dose.irregularityDelta > -0.30f;
 
     // Count matches
     const int matches = (naPattern ? 1 : 0)
