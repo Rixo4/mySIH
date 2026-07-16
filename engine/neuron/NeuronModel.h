@@ -58,6 +58,7 @@ public:
     std::vector<float> gNa;
     std::vector<float> gK;
     std::vector<float> gCa;
+    std::vector<float> caCa;
     std::vector<float> gL;
 
     std::vector<float> threshold;

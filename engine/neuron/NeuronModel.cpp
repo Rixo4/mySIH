@@ -32,6 +32,7 @@ NeuronPopulation::NeuronPopulation(std::size_t neuronCount)
       s(neuronCount),
       gNa(neuronCount),
       gK(neuronCount),
+      caCa(neuronCount),
       gCa(neuronCount),
       gL(neuronCount),
       threshold(neuronCount),
@@ -66,6 +67,7 @@ void NeuronPopulation::initialize(
         threshold[i] = 0.0f + thresholdVariation(rng);
         noiseStd[i] = std::max(0.11f, baseNoiseStd * (1.0f + noiseVariation(rng)));
         extCurrent[i] = baseExternalCurrent + extJitter(rng);
+        caCa[i] = 0.0f;
 
         const float v0 = params.restingVoltage + initialVoltageJitter(rng);
         const HHState steady = steadyStateAtVoltage(v0);
@@ -127,7 +129,7 @@ HHState steadyStateAtVoltage(float vMv) {
     state.h = ah / (ah + bh + kEpsilon);
     state.n = an / (an + bn + kEpsilon);
     state.s = sInf(vMv);
-
+    state.caCa = 0.0f;
     clampState(state);
     return state;
 }
@@ -145,6 +147,7 @@ HHDerivatives computeDerivatives(
     const float iCa = gCaEff * state.s * state.s * (state.v - params.eCa);
     const float iAHP = params.gAHP * state.caCa * (state.v - params.eK);
     const float iL = params.gL * (state.v - params.eL);
+    const float caInflux = -iCa;
 
     HHDerivatives d;
     d.dv = (iTotal - iNa - iK - iCa - iAHP - iL) / params.cm;
@@ -152,7 +155,7 @@ HHDerivatives computeDerivatives(
     d.dh = alphaH(state.v) * (1.0f - state.h) - betaH(state.v) * state.h;
     d.dn = alphaN(state.v) * (1.0f - state.n) - betaN(state.v) * state.n;
     d.ds = (sInf(state.v) - state.s) / tauS(state.v);
-    d.dcaCa = -state.caCa / params.tauCa + 0.002f * std::max(0.0f, -(iCa));
+    d.dcaCa = caInflux - state.caCa / params.tauCa;
 
     return d;
 }
@@ -174,6 +177,7 @@ void rk4Step(
     y2.h += 0.5f * dtMs * k1.dh;
     y2.n += 0.5f * dtMs * k1.dn;
     y2.s += 0.5f * dtMs * k1.ds;
+    y2.caCa += 0.5f * dtMs * k1.dcaCa;
     clampState(y2);
     const HHDerivatives k2 = computeDerivatives(y2, iTotal, gNaEff, gKEff, gCaEff, params);
 
@@ -183,6 +187,7 @@ void rk4Step(
     y3.h += 0.5f * dtMs * k2.dh;
     y3.n += 0.5f * dtMs * k2.dn;
     y3.s += 0.5f * dtMs * k2.ds;
+    y3.caCa += 0.5f * dtMs * k2.dcaCa;
     clampState(y3);
     const HHDerivatives k3 = computeDerivatives(y3, iTotal, gNaEff, gKEff, gCaEff, params);
 
@@ -192,6 +197,7 @@ void rk4Step(
     y4.h += dtMs * k3.dh;
     y4.n += dtMs * k3.dn;
     y4.s += dtMs * k3.ds;
+    y4.caCa += dtMs * k3.dcaCa;
     clampState(y4);
     const HHDerivatives k4 = computeDerivatives(y4, iTotal, gNaEff, gKEff, gCaEff, params);
 
@@ -200,6 +206,7 @@ void rk4Step(
     state.h += (dtMs / 6.0f) * (k1.dh + 2.0f * k2.dh + 2.0f * k3.dh + k4.dh);
     state.n += (dtMs / 6.0f) * (k1.dn + 2.0f * k2.dn + 2.0f * k3.dn + k4.dn);
     state.s += (dtMs / 6.0f) * (k1.ds + 2.0f * k2.ds + 2.0f * k3.ds + k4.ds);
+    state.caCa += (dtMs / 6.0f) * (k1.dcaCa + 2.0f * k2.dcaCa + 2.0f * k3.dcaCa + k4.dcaCa);
 
     clampState(state);
 
@@ -213,7 +220,8 @@ bool isFiniteState(const HHState& state) {
            std::isfinite(state.m) &&
            std::isfinite(state.h) &&
            std::isfinite(state.n) &&
-           std::isfinite(state.s);
+           std::isfinite(state.s) &&
+           std::isfinite(state.caCa);
 }
 
 void clampState(HHState& state) {
@@ -222,6 +230,7 @@ void clampState(HHState& state) {
     state.h = clamp01(state.h);
     state.n = clamp01(state.n);
     state.s = clamp01(state.s);
+    state.caCa = clamp01(state.caCa);
 }
 
 } // namespace spp::neuron
