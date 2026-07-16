@@ -521,7 +521,7 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     for (std::size_t d = 0; d < doses.size(); ++d) {
         perDoseResults[d].reserve(static_cast<std::size_t>(runs));
         for (int r = 0; r < runs; ++r, ++idx) {
-            const spp::analyzer::NeuronMetrics nm = MetricsAnalyzer::computeNeuronMetrics(blockResults[idx]);
+            const std::vector<spp::analyzer::NeuronMetrics> nm = MetricsAnalyzer::computeNeuronMetrics(blockResults[idx]);
             const NetworkMetrics netm = MetricsAnalyzer::computeNetworkMetrics(blockResults[idx], nm);
             if (outLastNeuronMetrics) *outLastNeuronMetrics = nm;
 

@@ -269,11 +269,12 @@ void SimulationEngine::cpuStep(
         const float oldV = population_.v[i];
 
         neuron::HHState state;
-        state.v = population_.v[i];
-        state.m = population_.m[i];
-        state.h = population_.h[i];
-        state.n = population_.n[i];
-        state.s = population_.s[i];
+        state.v    = population_.v[i];
+        state.m    = population_.m[i];
+        state.h    = population_.h[i];
+        state.n    = population_.n[i];
+        state.s    = population_.s[i];
+        state.caCa = population_.caCa[i];  // FIX: carry Ca concentration across timesteps
 
         float iTotal = externalCurrent[i] + synapticCurrent[i] + noiseCurrent[i];
         if (!std::isfinite(iTotal)) {
@@ -291,11 +292,12 @@ void SimulationEngine::cpuStep(
             population_.lastSpikeTime[i] = timeMs;
         }
 
-        population_.v[i] = state.v;
-        population_.m[i] = state.m;
-        population_.h[i] = state.h;
-        population_.n[i] = state.n;
-        population_.s[i] = state.s;
+        population_.v[i]    = state.v;
+        population_.m[i]    = state.m;
+        population_.h[i]    = state.h;
+        population_.n[i]    = state.n;
+        population_.s[i]    = state.s;
+        population_.caCa[i] = state.caCa;  // FIX: write Ca concentration back
 
         spikes[i] = didSpike;
     }
