@@ -258,16 +258,18 @@ MechanismSignature NetworkAnalyzer::detectMechanism(
     // sync reduces + rate preserved + NOT strongly negative irregularity (Na-block exclusion)
     // burstDurationDelta removed as primary — may be 0 if baseline bursts are 0
     const bool caPattern =
-        dose.syncReductionPct  > 12.0f &&
-        dose.rateChangePct     > -20.0f &&
-        dose.irregularityDelta > -0.30f;
+    dose.syncReductionPct  > 12.0f &&
+    dose.rateChangePct     > -20.0f &&
+    dose.irregularityDelta > -0.30f &&
+    dose.burstRateDelta    <  5.0f;  // exclude K-block which has high burst delta
 
     // Count matches
     const int matches = (naPattern ? 1 : 0)
                       + (kPattern  ? 1 : 0)
                       + (caPattern ? 1 : 0);
 
-    if (matches > 1)   return MechanismSignature::Mixed;
+    if (matches > 1 && !kPattern) return MechanismSignature::Mixed;
+    if (matches > 1 &&  kPattern) return MechanismSignature::KBlock;
     if (naPattern)     return MechanismSignature::NaBlock;
     if (kPattern)      return MechanismSignature::KBlock;
     if (caPattern)     return MechanismSignature::CaBlock;

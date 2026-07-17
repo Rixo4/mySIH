@@ -392,8 +392,14 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     }
 
     // ─── Step 2: Response mode ────────────────────────────────────────────────
-    if (cumulativeExcitation > cumulativeSuppression * 1.2 &&
-        cumulativeExcitation > cumulativeStabilization) {
+    // K-block: even when rate drops, if irregularity and burst rose
+// AND mechanism is K-block, classify as excitatory
+    const bool kBlockExcitation = (report.dominantMechanism == MechanismSignature::KBlock) &&
+        (cumulativeExcitation > cumulativeSuppression * 0.5);
+
+    if (kBlockExcitation ||
+        (cumulativeExcitation > cumulativeSuppression * 1.2 &&
+         cumulativeExcitation > cumulativeStabilization)) {
         report.responseMode = "EXCITATORY_RESPONSE";
     } else if (cumulativeStabilization > cumulativeSuppression * 1.2 &&
                cumulativeStabilization > cumulativeExcitation) {
