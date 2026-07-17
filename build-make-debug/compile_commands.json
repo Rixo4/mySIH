@@ -37,6 +37,12 @@
 },
 {
   "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/simulation/BatchedSimulationEngine.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/simulation/BatchedSimulationEngine.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
   "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/analyzer/Metrics.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/Metrics.cpp",
   "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/analyzer/Metrics.cpp",
   "output": "CMakeFiles/silicon_patient.dir/engine/analyzer/Metrics.cpp.o"
