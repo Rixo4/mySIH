@@ -260,14 +260,19 @@ MechanismSignature NetworkAnalyzer::detectMechanism(
     const bool caPattern =
         dose.syncReductionPct  > 12.0f &&
         dose.rateChangePct     > -20.0f &&
-        dose.irregularityDelta > -0.30f;
+        dose.irregularityDelta > -0.30f &&
+        dose.burstRateDelta       <  5.0f; // exclude K-block which has high burst delta
 
     // Count matches
     const int matches = (naPattern ? 1 : 0)
-                      + (kPattern  ? 1 : 0)
-                      + (caPattern ? 1 : 0);
+                  + (kPattern  ? 1 : 0)
+                  + (caPattern ? 1 : 0);
 
-    if (matches > 1)   return MechanismSignature::Mixed;
+// Only flag Mixed if two strong patterns both score above threshold.
+// K-block at high doses can weakly trigger Ca pattern due to sync reduction.
+// K-block dominates when kPattern is true — prefer specific over mixed.
+    if (matches > 1 && !kPattern) return MechanismSignature::Mixed;
+    if (matches > 1 &&  kPattern) return MechanismSignature::KBlock;
     if (naPattern)     return MechanismSignature::NaBlock;
     if (kPattern)      return MechanismSignature::KBlock;
     if (caPattern)     return MechanismSignature::CaBlock;

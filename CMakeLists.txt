@@ -18,7 +18,6 @@ set(SPP_SOURCES
     engine/synapse/Synapse.cpp
     engine/network/Network.cpp
     engine/simulation/SimulationEngine.cpp
-    engine/simulation/BatchedSimulationEngine.cpp
     engine/analyzer/Metrics.cpp
     engine/analyzer/NetworkAnalyzer.cpp
     engine/analyzer/PharmaDecisionEngine.cpp

@@ -10,7 +10,7 @@ struct HHParameters {
     float cm = 1.0f;             // uF/cm^2
     float gNa = 120.0f;          // mS/cm^2
     float gK = 36.0f;            // mS/cm^2
-    float gCa = 1.2f;            // mS/cm^2
+    float gCa = 8.0f;            // mS/cm^2
     float gL = 0.3f;             // mS/cm^2
     float eNa = 50.0f;           // mV
     float eK = -77.0f;           // mV

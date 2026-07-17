@@ -7,7 +7,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 
@@ -241,10 +240,6 @@ NeuronUpdateLaunchInfo computeNeuronUpdateLaunchInfo(
     return NeuronUpdateLaunchInfo{safeBlockSize, gridSize};
 }
 
-// Number of per-step input arrays packed into one contiguous transfer:
-// iSyn, iExt, iNoise, gNaEff, gKEff, gCaEff (in this order).
-constexpr int kPackedInputCount = 6;
-
 struct CudaSimulator::DeviceBuffers {
     float* v = nullptr;
     float* m = nullptr;
@@ -255,11 +250,6 @@ struct CudaSimulator::DeviceBuffers {
     float* threshold = nullptr;
     float* lastSpikeTime = nullptr;
 
-    // One contiguous device allocation holding all six per-step input
-    // arrays back-to-back. Sub-pointers below point *into* this block at
-    // fixed offsets, so the kernel signature (six separate pointers) does
-    // not need to change even though the transfer is now a single call.
-    float* inputBlock = nullptr;
     float* iSyn = nullptr;
     float* iExt = nullptr;
     float* iNoise = nullptr;
@@ -268,14 +258,6 @@ struct CudaSimulator::DeviceBuffers {
     float* gCaEff = nullptr;
 
     std::uint8_t* spikes = nullptr;
-
-    // Pinned (page-locked) host staging buffers. Packing happens into
-    // these on the host (cheap memcpy) before a single H2D transfer, and
-    // spikes are copied out via these before/after a single D2H transfer.
-    // Page-locked memory avoids the driver's internal staging copy that
-    // pageable std::vector-backed memory requires on every transfer.
-    float* pinnedInput = nullptr;
-    std::uint8_t* pinnedSpikes = nullptr;
 };
 
 CudaSimulator::CudaSimulator(std::size_t neuronCount)
@@ -294,7 +276,6 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
     try {
         const std::size_t floatBytes = neuronCount_ * sizeof(float);
         const std::size_t spikeBytes = neuronCount_ * sizeof(std::uint8_t);
-        const std::size_t inputBlockBytes = floatBytes * static_cast<std::size_t>(kPackedInputCount);
 
         checkCuda(cudaMalloc(&buffers_->v, floatBytes), "cudaMalloc v");
         checkCuda(cudaMalloc(&buffers_->m, floatBytes), "cudaMalloc m");
@@ -305,21 +286,14 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
         checkCuda(cudaMalloc(&buffers_->threshold, floatBytes), "cudaMalloc threshold");
         checkCuda(cudaMalloc(&buffers_->lastSpikeTime, floatBytes), "cudaMalloc lastSpikeTime");
 
-        checkCuda(cudaMalloc(&buffers_->inputBlock, inputBlockBytes), "cudaMalloc inputBlock");
-        buffers_->iSyn   = buffers_->inputBlock + 0 * neuronCount_;
-        buffers_->iExt   = buffers_->inputBlock + 1 * neuronCount_;
-        buffers_->iNoise = buffers_->inputBlock + 2 * neuronCount_;
-        buffers_->gNaEff = buffers_->inputBlock + 3 * neuronCount_;
-        buffers_->gKEff  = buffers_->inputBlock + 4 * neuronCount_;
-        buffers_->gCaEff = buffers_->inputBlock + 5 * neuronCount_;
+        checkCuda(cudaMalloc(&buffers_->iSyn, floatBytes), "cudaMalloc iSyn");
+        checkCuda(cudaMalloc(&buffers_->iExt, floatBytes), "cudaMalloc iExt");
+        checkCuda(cudaMalloc(&buffers_->iNoise, floatBytes), "cudaMalloc iNoise");
+        checkCuda(cudaMalloc(&buffers_->gNaEff, floatBytes), "cudaMalloc gNaEff");
+        checkCuda(cudaMalloc(&buffers_->gKEff, floatBytes), "cudaMalloc gKEff");
+        checkCuda(cudaMalloc(&buffers_->gCaEff, floatBytes), "cudaMalloc gCaEff");
 
         checkCuda(cudaMalloc(&buffers_->spikes, spikeBytes), "cudaMalloc spikes");
-
-        checkCuda(cudaHostAlloc(&buffers_->pinnedInput, inputBlockBytes, cudaHostAllocDefault),
-                   "cudaHostAlloc pinnedInput");
-        checkCuda(cudaHostAlloc(reinterpret_cast<void**>(&buffers_->pinnedSpikes), spikeBytes, cudaHostAllocDefault),
-                   "cudaHostAlloc pinnedSpikes");
-
         available_ = true;
     } catch (...) {
         available_ = false;
@@ -331,10 +305,13 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->s);
             cudaFree(buffers_->threshold);
             cudaFree(buffers_->lastSpikeTime);
-            cudaFree(buffers_->inputBlock);
+            cudaFree(buffers_->iSyn);
+            cudaFree(buffers_->iExt);
+            cudaFree(buffers_->iNoise);
+            cudaFree(buffers_->gNaEff);
+            cudaFree(buffers_->gKEff);
+            cudaFree(buffers_->gCaEff);
             cudaFree(buffers_->spikes);
-            if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
-            if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
             delete buffers_;
             buffers_ = nullptr;
         }
@@ -356,15 +333,14 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->threshold);
     cudaFree(buffers_->lastSpikeTime);
 
-    // iSyn/iExt/iNoise/gNaEff/gKEff/gCaEff are offsets into inputBlock,
-    // not separate allocations — only inputBlock itself is freed.
-    cudaFree(buffers_->inputBlock);
+    cudaFree(buffers_->iSyn);
+    cudaFree(buffers_->iExt);
+    cudaFree(buffers_->iNoise);
+    cudaFree(buffers_->gNaEff);
+    cudaFree(buffers_->gKEff);
+    cudaFree(buffers_->gCaEff);
 
     cudaFree(buffers_->spikes);
-
-    if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
-    if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
-
     delete buffers_;
     buffers_ = nullptr;
 }
@@ -435,19 +411,13 @@ void CudaSimulator::step(
 
     const std::size_t floatBytes = neuronCount_ * sizeof(float);
     const std::size_t spikeBytes = neuronCount_ * sizeof(std::uint8_t);
-    const std::size_t inputBlockBytes = floatBytes * static_cast<std::size_t>(kPackedInputCount);
 
-    // Pack all six per-step arrays into the pinned staging buffer (cheap
-    // host-side memcpy), then issue exactly one H2D transfer instead of six.
-    std::memcpy(buffers_->pinnedInput + 0 * neuronCount_, iSyn.data(), floatBytes);
-    std::memcpy(buffers_->pinnedInput + 1 * neuronCount_, iExt.data(), floatBytes);
-    std::memcpy(buffers_->pinnedInput + 2 * neuronCount_, iNoise.data(), floatBytes);
-    std::memcpy(buffers_->pinnedInput + 3 * neuronCount_, gNaEff.data(), floatBytes);
-    std::memcpy(buffers_->pinnedInput + 4 * neuronCount_, gKEff.data(), floatBytes);
-    std::memcpy(buffers_->pinnedInput + 5 * neuronCount_, gCaEff.data(), floatBytes);
-
-    checkCuda(cudaMemcpy(buffers_->inputBlock, buffers_->pinnedInput, inputBlockBytes, cudaMemcpyHostToDevice),
-              "copy packed inputs H2D");
+    checkCuda(cudaMemcpy(buffers_->iSyn, iSyn.data(), floatBytes, cudaMemcpyHostToDevice), "copy iSyn H2D");
+    checkCuda(cudaMemcpy(buffers_->iExt, iExt.data(), floatBytes, cudaMemcpyHostToDevice), "copy iExt H2D");
+    checkCuda(cudaMemcpy(buffers_->iNoise, iNoise.data(), floatBytes, cudaMemcpyHostToDevice), "copy iNoise H2D");
+    checkCuda(cudaMemcpy(buffers_->gNaEff, gNaEff.data(), floatBytes, cudaMemcpyHostToDevice), "copy gNaEff H2D");
+    checkCuda(cudaMemcpy(buffers_->gKEff, gKEff.data(), floatBytes, cudaMemcpyHostToDevice), "copy gKEff H2D");
+    checkCuda(cudaMemcpy(buffers_->gCaEff, gCaEff.data(), floatBytes, cudaMemcpyHostToDevice), "copy gCaEff H2D");
 
     const NeuronUpdateLaunchInfo launchInfo = computeNeuronUpdateLaunchInfo(neuronCount_, 256);
 
@@ -481,9 +451,7 @@ void CudaSimulator::step(
 
     checkCuda(cudaGetLastError(), "kernel launch");
 
-    checkCuda(cudaMemcpy(buffers_->pinnedSpikes, buffers_->spikes, spikeBytes, cudaMemcpyDeviceToHost),
-              "copy spikes D2H");
-    std::memcpy(spikes.data(), buffers_->pinnedSpikes, spikeBytes);
+    checkCuda(cudaMemcpy(spikes.data(), buffers_->spikes, spikeBytes, cudaMemcpyDeviceToHost), "copy spikes D2H");
 }
 
 void CudaSimulator::downloadState(

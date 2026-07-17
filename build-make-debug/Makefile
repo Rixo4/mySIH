@@ -369,30 +369,6 @@ engine/output/CsvWriter.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.s
 .PHONY : engine/output/CsvWriter.cpp.s
 
-engine/simulation/BatchedSimulationEngine.o: engine/simulation/BatchedSimulationEngine.cpp.o
-.PHONY : engine/simulation/BatchedSimulationEngine.o
-
-# target to build an object file
-engine/simulation/BatchedSimulationEngine.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o
-.PHONY : engine/simulation/BatchedSimulationEngine.cpp.o
-
-engine/simulation/BatchedSimulationEngine.i: engine/simulation/BatchedSimulationEngine.cpp.i
-.PHONY : engine/simulation/BatchedSimulationEngine.i
-
-# target to preprocess a source file
-engine/simulation/BatchedSimulationEngine.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.i
-.PHONY : engine/simulation/BatchedSimulationEngine.cpp.i
-
-engine/simulation/BatchedSimulationEngine.s: engine/simulation/BatchedSimulationEngine.cpp.s
-.PHONY : engine/simulation/BatchedSimulationEngine.s
-
-# target to generate assembly for a file
-engine/simulation/BatchedSimulationEngine.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.s
-.PHONY : engine/simulation/BatchedSimulationEngine.cpp.s
-
 engine/simulation/SimulationEngine.o: engine/simulation/SimulationEngine.cpp.o
 .PHONY : engine/simulation/SimulationEngine.o
 
@@ -480,9 +456,6 @@ help:
 	@echo "... engine/output/CsvWriter.o"
 	@echo "... engine/output/CsvWriter.i"
 	@echo "... engine/output/CsvWriter.s"
-	@echo "... engine/simulation/BatchedSimulationEngine.o"
-	@echo "... engine/simulation/BatchedSimulationEngine.i"
-	@echo "... engine/simulation/BatchedSimulationEngine.s"
 	@echo "... engine/simulation/SimulationEngine.o"
 	@echo "... engine/simulation/SimulationEngine.i"
 	@echo "... engine/simulation/SimulationEngine.s"

@@ -27,7 +27,6 @@
 #include "network/Network.h"
 #include "output/CsvWriter.h"
 #include "simulation/SimulationEngine.h"
-#include "simulation/BatchedSimulationEngine.h"
 
 namespace {
 
@@ -47,8 +46,6 @@ using spp::output::CsvWriter;
 using spp::output::DoseResponsePoint;
 using spp::output::NetworkMetricRecord;
 using spp::simulation::SimulationEngine;
-using spp::simulation::BatchedSimulationEngine;
-using spp::simulation::BatchBlockSpec;
 
 constexpr int kMinNeuronCount     = 1000;
 constexpr int kMaxNeuronCount     = 100000;
@@ -454,89 +451,6 @@ std::vector<RunResult> runMultipleSimulations(
         results.push_back(r);
     }
     return results;
-}
-
-// ─── Batched multi-dose, multi-repeat sweep ──────────────────────────────────
-// Runs EVERY (dose x repeat) combination as one BatchedSimulationEngine
-// instead of looping runSingleSimulation once per combination. This is what
-// stops CUDA call count (and CudaSimulator construction/teardown) from
-// scaling with sweep size: one shared timestep loop, one set of GPU
-// transfers per step, covering the whole sweep at once.
-//
-// Each block gets its own independently-generated network topology (a
-// fresh Network::buildRandom() with its own seed) so that repeats are true
-// biological replicates, not the same network measured three times with
-// only the noise stream varying.
-std::vector<std::vector<RunResult>> runAllDosesBatched(
-    const RuntimeInput& evalInput,
-    const std::vector<double>& doses,
-    int runs,
-    std::uint32_t baseSeed,
-    std::vector<spp::analyzer::NeuronMetrics>* outLastNeuronMetrics)
-{
-    std::vector<std::vector<RunResult>> perDoseResults(doses.size());
-    if (doses.empty() || runs <= 0) return perDoseResults;
-
-    // Network/engine config only depend on population size and simulation
-    // timing, not on dose — dose only affects the per-block DrugModel
-    // dosing. One template network config is shared as the *statistical*
-    // template; each block still gets its own random instantiation.
-    const NetworkConfig networkCfgTemplate = buildNetworkConfig(evalInput.config, baseSeed);
-    const spp::simulation::SimulationConfig engineCfg = buildEngineConfig(evalInput.config, baseSeed);
-
-    const ChannelDrugProfile profile{
-        static_cast<float>(evalInput.config.ic50_na),
-        static_cast<float>(evalInput.config.ic50_k),
-        static_cast<float>(evalInput.config.ic50_ca),
-        static_cast<float>(evalInput.config.hill),
-        static_cast<float>(evalInput.config.hill),
-        static_cast<float>(evalInput.config.hill)
-    };
-
-    std::vector<BatchBlockSpec> blocks;
-    blocks.reserve(doses.size() * static_cast<std::size_t>(runs));
-    for (std::size_t d = 0; d < doses.size(); ++d) {
-        for (int r = 0; r < runs; ++r) {
-            // Same seed formula as the old per-run loop (baseSeed + dose
-            // offset + run offset), so a given (dose, repeat) pair gets the
-            // same network seed it would have under the old sequential path.
-            const std::uint32_t seed = baseSeed
-                + static_cast<std::uint32_t>(d * 7919U)
-                + static_cast<std::uint32_t>(r * 9973 + 101);
-            blocks.push_back(BatchBlockSpec{static_cast<float>(doses[d]), seed});
-        }
-    }
-
-    BatchedSimulationEngine batched(
-        static_cast<std::size_t>(evalInput.config.neuron_count),
-        networkCfgTemplate,
-        engineCfg,
-        profile,
-        blocks
-    );
-
-    std::vector<spp::simulation::SimulationResult> blockResults = batched.run();
-
-    std::size_t idx = 0;
-    for (std::size_t d = 0; d < doses.size(); ++d) {
-        perDoseResults[d].reserve(static_cast<std::size_t>(runs));
-        for (int r = 0; r < runs; ++r, ++idx) {
-            const std::vector<spp::analyzer::NeuronMetrics> nm = MetricsAnalyzer::computeNeuronMetrics(blockResults[idx]);
-            const NetworkMetrics netm = MetricsAnalyzer::computeNetworkMetrics(blockResults[idx], nm);
-            if (outLastNeuronMetrics) *outLastNeuronMetrics = nm;
-
-            RunResult rr;
-            rr.firingRate  = netm.meanFiringRateHz;
-            rr.sync        = netm.synchronizationIndex;
-            rr.burst       = netm.burstIndex;
-            rr.burstRateHz = netm.burstRateHz;
-            rr.isiCV       = computeMeanIsiCv(nm);
-            rr.popVariance = netm.populationVariance;
-            perDoseResults[d].push_back(rr);
-        }
-    }
-
-    return perDoseResults;
 }
 
 // ─── Build aggregated NetworkMetrics from multi-run stats ─────────────────────
@@ -1054,12 +968,11 @@ void runDoseEvaluationMode(
     std::vector<spp::analyzer::NeuronMetrics> finalNM;
     const std::uint32_t baseSeed = 0xD05E0001U;
 
-    // One batched call covers every (dose x repeat) combination in a single
-    // shared timestep loop, instead of looping runMultipleSimulations per dose.
-    const auto perDoseResults = runAllDosesBatched(evalInput, doses, runs, baseSeed, &finalNM);
-
     for(std::size_t i=0; i<doses.size(); ++i) {
-        const auto& rr = perDoseResults[i];
+        const auto rr = runMultipleSimulations(
+            evalInput, doses[i], runs,
+            baseSeed + static_cast<std::uint32_t>(i*7919U),
+            &finalNM);
         if(rr.empty()) continue;
 
         const AggregatedStats ds = computeStats(rr);
