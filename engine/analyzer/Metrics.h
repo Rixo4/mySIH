@@ -28,7 +28,7 @@ struct NetworkMetrics {
     // Firing rate
     float meanFiringRateHz          = 0.0f;
     float firingRateStdHz           = 0.0f;
-    float silentNeuronPct           = 0.0f;  // % neurons < 0.5 Hz
+    float silentNeuronPct           = 0.0f;  // % neurons < 2 Hz
     float earlyWindowRateHz         = 0.0f;
     float lateWindowRateHz          = 0.0f;
 

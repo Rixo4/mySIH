@@ -1,4 +1,5 @@
 #include "NetworkAnalyzer.h"
+#include <array>
 #include <algorithm>
 #include <cmath>
 
@@ -235,45 +236,23 @@ float NetworkAnalyzer::computeSeizureProbability(
 
 // ─── Mechanism Detection ─────────────────────────────────────────────────────
 
-MechanismSignature NetworkAnalyzer::detectMechanism(
-    const AnalyzedDose& dose)
-{
-    // Na-block pattern:
-    // rate drops strongly + firing becomes MORE regular (irregularity decreases)
-    // silentNeuronDelta removed — threshold depends on network config
-    const bool naPattern =
-        dose.rateChangePct     < -25.0f &&
-        dose.irregularityDelta < -0.10f;
+MechanismSignature NetworkAnalyzer::detectMechanism(const AnalyzedDose& dose) {
+    constexpr float kMinBlock = 0.05f;  // 5% block floor before attributing a channel
 
-    // K-block pattern:
-    // irregularity rises strongly (primary signal — always present with K-block)
-    // corroborated by burst increase OR rate change OR burstingNeuronPct
-    const bool kPattern =
-        dose.irregularityDelta  >  0.10f &&
-        (dose.burstRateDelta    >  0.5f  ||
-         dose.metrics.burstingNeuronPct > 5.0f ||
-         dose.excitabilityScore > 0.20f);
+    const float na = dose.blockNa, k = dose.blockK, ca = dose.blockCa;
+    const float maxBlock = std::max({na, k, ca});
+    if (maxBlock < kMinBlock) return MechanismSignature::Unknown;
 
-    // Ca-block pattern:
-    // sync reduces + rate preserved + NOT strongly negative irregularity (Na-block exclusion)
-    // burstDurationDelta removed as primary — may be 0 if baseline bursts are 0
-    const bool caPattern =
-    dose.syncReductionPct  > 12.0f &&
-    dose.rateChangePct     > -20.0f &&
-    dose.irregularityDelta > -0.30f &&
-    dose.burstRateDelta    <  5.0f;  // exclude K-block which has high burst delta
+    const int meaningful = (na > kMinBlock) + (k > kMinBlock) + (ca > kMinBlock);
+    if (meaningful >= 2) {
+        std::array<float,3> vals{na, k, ca};
+        std::sort(vals.begin(), vals.end(), std::greater<float>());
+        if (vals[1] > vals[0] * 0.6f) return MechanismSignature::Mixed;  // genuinely comparable
+    }
 
-    // Count matches
-    const int matches = (naPattern ? 1 : 0)
-                      + (kPattern  ? 1 : 0)
-                      + (caPattern ? 1 : 0);
-
-    if (matches==0)    return MechanismSignature::Unknown;
-    if (naPattern)     return MechanismSignature::NaBlock;
-    if (kPattern)      return MechanismSignature::KBlock;
-    if (caPattern)     return MechanismSignature::CaBlock;
-
-    return MechanismSignature::Unknown;
+    if (maxBlock == na) return MechanismSignature::NaBlock;
+    if (maxBlock == k)  return MechanismSignature::KBlock;
+    return MechanismSignature::CaBlock;
 }
 
 // ─── Network State Classification ────────────────────────────────────────────
@@ -289,16 +268,15 @@ NetworkState NetworkAnalyzer::classifyState(
     const float suppScore    = dose.suppressionScore;
 
     // 1. Neural Suppression — firing collapsed
-    if (silentPct > 80.0f) {
+    if (silentPct > 80.0f || dose.rateChangePct <= -90.0f) {
         return NetworkState::NeuralSuppression;
     }
 
     // 2. Depolarization Block
     // Was highly active then crashed to silence
-    if (silentPct > 50.0f &&
-        dose.rateChangePct < -60.0f &&
-        dose.metrics.peakSynchronizationIndex > 0.60f) {
-        return NetworkState::DepolarizationBlock;
+    if (dose.rateChangePct < -60.0f &&
+    dose.metrics.peakSynchronizationIndex > 0.60f) {
+    return NetworkState::DepolarizationBlock;
     }
 
     // 3. Seizure Active

@@ -717,7 +717,7 @@ std::vector<TimeWindowMetrics> MetricsAnalyzer::computeTimeWindowMetrics(
         // unconditionally — its gentle slope at high rates already reduces the
         // impact — but we also store the raw rate so callers can apply their own
         // minimum-window filter if needed.
-        const float windowBurstRateHz = static_cast<float>(totalBurstEvents) / durationSec;
+        const float windowBurstRateHz = static_cast<float>(totalBurstEvents) / (durationSec * neuronCountF);
         const float windowBurstIndex  = burstRateToIndex(windowBurstRateHz);
 
     

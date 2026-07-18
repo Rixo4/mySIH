@@ -118,6 +118,13 @@ struct RunResult {
     float burstRateHz = 0.0f;
     float isiCV       = 0.0f;
     float popVariance = 0.0f;
+    float peakSync            = 0.0f;
+    float burstingNeuronPct   = 0.0f;
+    float meanBurstDurationMs = 0.0f;
+    float firingRateStdHz     = 0.0f;
+    float silentNeuronPct     = 0.0f;
+    float earlyWindowRateHz   = 0.0f;
+    float lateWindowRateHz    = 0.0f;
 };
 
 struct AggregatedStats {
@@ -127,7 +134,14 @@ struct AggregatedStats {
     float meanBurstRate = 0.0f;
     float meanISI       = 0.0f; float stdISI       = 0.0f;
     float meanPopVar    = 0.0f;
-    float stdRate2      = 0.0f; // re-used as stdToxicity placeholder for stability
+    float stdRate2      = 0.0f;
+    float meanPeakSync            = 0.0f;
+    float meanBurstingNeuronPct   = 0.0f;
+    float meanBurstDurationMs     = 0.0f;
+    float meanFiringRateStdHz     = 0.0f;
+    float meanSilentNeuronPct     = 0.0f;
+    float meanEarlyWindowRateHz   = 0.0f;
+    float meanLateWindowRateHz    = 0.0f;
 };
 
 struct SigmoidFitResult {
@@ -402,22 +416,45 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     AggregatedStats stats;
     if (results.empty()) return stats;
     std::vector<float> rates,syncs,bursts,burstRates,isis;
+    std::vector<float> peakSyncs, burstingPcts, burstDurs, rateStds, silentPcts, earlyRates, lateRates;
     rates.reserve(results.size());      syncs.reserve(results.size());
     bursts.reserve(results.size());     isis.reserve(results.size());
     burstRates.reserve(results.size());
+    peakSyncs.reserve(results.size());  burstingPcts.reserve(results.size());
+    burstDurs.reserve(results.size());  rateStds.reserve(results.size());
+    silentPcts.reserve(results.size()); earlyRates.reserve(results.size());
+    lateRates.reserve(results.size());
+
     for (const auto& r : results) {
         rates.push_back(r.firingRate);
         syncs.push_back(r.sync);
         bursts.push_back(r.burst);
         burstRates.push_back(r.burstRateHz);
         isis.push_back(r.isiCV);
+        peakSyncs.push_back(r.peakSync);
+        burstingPcts.push_back(r.burstingNeuronPct);
+        burstDurs.push_back(r.meanBurstDurationMs);
+        rateStds.push_back(r.firingRateStdHz);
+        silentPcts.push_back(r.silentNeuronPct);
+        earlyRates.push_back(r.earlyWindowRateHz);
+        lateRates.push_back(r.lateWindowRateHz);
     }
+
     stats.meanRate      = computeMean(rates);      stats.stdRate  = computeStd(rates,  stats.meanRate);
     stats.meanSync      = computeMean(syncs);      stats.stdSync  = computeStd(syncs,  stats.meanSync);
     stats.meanBurst     = computeMean(bursts);     stats.stdBurst = computeStd(bursts, stats.meanBurst);
     stats.meanBurstRate = computeMean(burstRates); // FIX: was never computed — always 0
     stats.meanISI       = computeMean(isis);       stats.stdISI   = computeStd(isis,   stats.meanISI);
     stats.stdRate2  = stats.stdRate; // used as stability proxy
+
+    stats.meanPeakSync          = computeMean(peakSyncs);
+    stats.meanBurstingNeuronPct = computeMean(burstingPcts);
+    stats.meanBurstDurationMs   = computeMean(burstDurs);
+    stats.meanFiringRateStdHz   = computeMean(rateStds);
+    stats.meanSilentNeuronPct   = computeMean(silentPcts);
+    stats.meanEarlyWindowRateHz = computeMean(earlyRates);
+    stats.meanLateWindowRateHz  = computeMean(lateRates);
+
     return stats;
 }
 
@@ -549,6 +586,13 @@ NetworkMetrics buildAggregatedNetworkMetrics(const AggregatedStats& stats) {
     m.burstRateHz          = stats.meanBurstRate;
     m.irregularityIndex    = stats.meanISI;
     m.populationVariance   = stats.meanPopVar;
+    m.peakSynchronizationIndex = stats.meanPeakSync;
+    m.burstingNeuronPct        = stats.meanBurstingNeuronPct;
+    m.meanBurstDurationMs      = stats.meanBurstDurationMs;
+    m.firingRateStdHz          = stats.meanFiringRateStdHz;
+    m.silentNeuronPct          = stats.meanSilentNeuronPct;
+    m.earlyWindowRateHz        = stats.meanEarlyWindowRateHz;
+    m.lateWindowRateHz         = stats.meanLateWindowRateHz;
     return m;
 }
 
