@@ -147,7 +147,7 @@ HHDerivatives computeDerivatives(
     const float iCa = gCaEff * state.s * state.s * (state.v - params.eCa);
     const float iAHP = params.gAHP * state.caCa * (state.v - params.eK);
     const float iL = params.gL * (state.v - params.eL);
-    const float caInflux = -iCa;
+    const float caInflux = params.kCa * std::max(0.0f, -iCa);
 
     HHDerivatives d;
     d.dv = (iTotal - iNa - iK - iCa - iAHP - iL) / params.cm;
