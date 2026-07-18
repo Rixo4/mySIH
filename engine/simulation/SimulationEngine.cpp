@@ -160,7 +160,6 @@ SimulationResult SimulationEngine::run() {
                 population_.gCa[i],
                 doseScale
             );
-            const float kBlock = std::clamp(std::isfinite(geff.blockK) ? geff.blockK : 0.0f, 0.0f, 1.0f);
             gNaEff[i] = (std::isfinite(geff.gNaEff) && geff.gNaEff >= 0.0f)
                             ? geff.gNaEff
                             : 0.05f * std::max(0.0f, population_.gNa[i]);
@@ -170,16 +169,6 @@ SimulationResult SimulationEngine::run() {
             gCaEff[i] = (std::isfinite(geff.gCaEff) && geff.gCaEff >= 0.0f)
                             ? geff.gCaEff
                             : 0.02f * std::max(0.0f, population_.gCa[i]);
-
-            if (kBlock > 0.30f) {
-                effectiveExternalCurrent[i] += 2.0f * (kBlock - 0.30f);
-            }
-
-            if (iSyn[i] > 0.0f) {
-                iSyn[i] *= (1.0f + 1.5f * kBlock);
-            } else if (iSyn[i] < 0.0f) {
-                iSyn[i] *= std::clamp(1.0f - 0.35f * kBlock, 0.60f, 1.0f);
-            }
         }
 
         if (runOnGpu) {
