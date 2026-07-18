@@ -268,8 +268,7 @@ MechanismSignature NetworkAnalyzer::detectMechanism(
                       + (kPattern  ? 1 : 0)
                       + (caPattern ? 1 : 0);
 
-    if (matches > 1 && !kPattern) return MechanismSignature::Mixed;
-    if (matches > 1 &&  kPattern) return MechanismSignature::KBlock;
+    if (matches==0)    return MechanismSignature::Unknown;
     if (naPattern)     return MechanismSignature::NaBlock;
     if (kPattern)      return MechanismSignature::KBlock;
     if (caPattern)     return MechanismSignature::CaBlock;

@@ -518,7 +518,9 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
 
         const float durationSec = std::max(1.0e-6f, result.durationMs / 1000.0f);
 
-        net.burstRateHz       = static_cast<float>(totalBurstEvents) / durationSec;
+        // Normalise by neuron count so burstRateHz is per-neuron per-second
+        // This prevents large networks from producing artificially high burst rates
+        net.burstRateHz = static_cast<float>(totalBurstEvents) /(durationSec * neuronCount);
         // meanBurstDurationMs
         net.meanBurstDurationMs = (totalBurstEvents > 0U)? static_cast<float>(totalBurstDurationMs) / static_cast<float>(totalBurstEvents): 0.0f;
         net.burstingNeuronPct = (100.0f * static_cast<float>(burstingNeuronCount)) / neuronCount;
