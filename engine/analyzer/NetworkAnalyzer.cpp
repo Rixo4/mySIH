@@ -172,8 +172,8 @@ float NetworkAnalyzer::computeExcitabilityScore(
     const float irregDrive = clamp01(irregularityDelta / 1.0f);
 
     return clamp01(
-        0.20f * rateDrive  +
-        0.30f * burstDrive +
+        0.30f * rateDrive  +
+        0.20f * burstDrive +
         0.50f * irregDrive  // irregularity is the strongest K-block network signal
     );
 }

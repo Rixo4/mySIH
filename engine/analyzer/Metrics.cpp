@@ -61,9 +61,9 @@ constexpr float kSyncSensitivityGain        = 6.0f;
 // To add neuron-type support: populate result.burstWindowMs in
 // SimulationResult before calling computeNetworkMetrics /
 // computeTimeWindowMetrics. Add the field to SimulationResult if not present.
-constexpr float kBurstWindowMsDefault       = 5.0f;
+constexpr float kBurstWindowMsDefault       = 12.0f;
 // Minimum spikes to count a neuron as "bursting" when computing burstingNeuronPct.
-constexpr std::size_t kBurstMinSpikes       = 4U;
+constexpr std::size_t kBurstMinSpikes       = 3U;
 
 // Suppression: a per-neuron rate below this fraction of the BASELINE
 // population mean is considered suppressed. Requires a baseline to be
