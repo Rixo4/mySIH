@@ -268,7 +268,7 @@ NetworkConfig buildNetworkConfig(const SimulationConfig& cfg, std::uint32_t seed
     netCfg.minDelaySteps         = 1;
     netCfg.maxDelaySteps         = 24;
     netCfg.excitatoryWeightMean  = 1.25f * excScale * neuronScale;
-    netCfg.inhibitoryWeightMean  = 3.80f * inhScale * neuronScale;
+    netCfg.inhibitoryWeightMean  = 2.20f * inhScale * neuronScale;
     netCfg.weightStdFraction     = 0.40f;
     netCfg.excitatoryWeightMin   = 0.45f * excScale * neuronScale;
     netCfg.excitatoryWeightMax   = 2.40f * excScale * neuronScale;

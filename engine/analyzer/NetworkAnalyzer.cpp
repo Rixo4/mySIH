@@ -70,7 +70,8 @@ std::vector<AnalyzedDose> NetworkAnalyzer::analyze(
             analyzed.syncReductionPct,
             analyzed.burstDurationDelta,
             niiDelta,
-            analyzed.rateChangePct
+            analyzed.rateChangePct,
+            analyzed.irregularityDelta
         );
 
         analyzed.seizureProbability = computeSeizureProbability(
@@ -186,29 +187,18 @@ float NetworkAnalyzer::computeStabilizationScore(
     float syncReductionPct,
     float burstDurationDelta,
     float niiDelta,
-    float rateChangePct)
+    float rateChangePct,
+    float irregularityDelta)
 {
-    // Rate must be genuinely preserved.
-    // K-block drops rate significantly — this must NOT score as stabilization.
-    // Threshold tightened from -40% to -15% so only true Ca-block patterns
-    // (rate preserved ±15%) trigger stabilization.
     const bool rateViable = (rateChangePct > -15.0f);
-    if (!rateViable) return 0.0f;
+    const bool notExcitatoryPattern = (irregularityDelta < 0.08f);
+    if (!rateViable || !notExcitatoryPattern) return 0.0f;
 
-    // Sync reduction — primary Ca-block signal
-    const float syncBenefit = clamp01(syncReductionPct / 30.0f);
-
-    // Burst duration shortening — key Ca-block signature
+    const float syncBenefit  = clamp01(syncReductionPct / 30.0f);
     const float burstBenefit = clamp01(-burstDurationDelta / 20.0f);
+    const float niiBenefit   = clamp01(-niiDelta / 0.30f);
 
-    // NII reduction
-    const float niiBenefit = clamp01(-niiDelta / 0.30f);
-
-    return clamp01(
-        0.40f * syncBenefit  +
-        0.35f * burstBenefit +
-        0.25f * niiBenefit
-    );
+    return clamp01(0.40f * syncBenefit + 0.35f * burstBenefit + 0.25f * niiBenefit);
 }
 
 // ─── Seizure Probability ─────────────────────────────────────────────────────

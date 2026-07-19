@@ -39,7 +39,8 @@ private:
         float syncReductionPct,
         float burstDurationDelta,
         float niiDelta,
-        float rateChangePct
+        float rateChangePct,
+        float irregularityDelta
     );
 
     static float computeSeizureProbability(

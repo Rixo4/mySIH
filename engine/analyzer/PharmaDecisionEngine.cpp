@@ -397,19 +397,18 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     const bool kBlockExcitation = (report.dominantMechanism == MechanismSignature::KBlock) &&
         (cumulativeExcitation > cumulativeSuppression * 0.5);
 
-    if (kBlockExcitation ||
-        (cumulativeExcitation > cumulativeSuppression * 1.2 &&
-         cumulativeExcitation > cumulativeStabilization)) {
+    if (kBlockExcitation || (cumulativeExcitation > cumulativeSuppression * 1.2 && cumulativeExcitation > cumulativeStabilization)) {
         report.responseMode = "EXCITATORY_RESPONSE";
-    } else if (cumulativeStabilization > cumulativeSuppression * 1.2 &&
-               cumulativeStabilization > cumulativeExcitation) {
+    } else if (cumulativeStabilization > cumulativeSuppression * 1.2 && cumulativeStabilization > cumulativeExcitation) {
         report.responseMode = "STABILIZING_RESPONSE";
-    } else if (cumulativeSuppression < 0.5 &&
-               cumulativeExcitation   < 0.5 &&
-               cumulativeStabilization < 0.5) {
+    } else if (cumulativeSuppression < 0.5 && cumulativeExcitation < 0.5 && cumulativeStabilization < 0.5) {
         report.responseMode = "NO_SIGNIFICANT_RESPONSE";
-    } else {
+    } else if (cumulativeSuppression >= cumulativeExcitation && cumulativeSuppression >= cumulativeStabilization) {
         report.responseMode = "SUPPRESSIVE_RESPONSE";
+    } else if (cumulativeExcitation >= cumulativeStabilization) {
+        report.responseMode = "EXCITATORY_RESPONSE";
+    } else {
+        report.responseMode = "STABILIZING_RESPONSE";
     }
 
     // ─── Step 3: Dominant mechanism ───────────────────────────────────────────

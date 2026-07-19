@@ -16,7 +16,7 @@ struct HHParameters {
     float eK = -77.0f;           // mV
     float eCa = 120.0f;          // mV
     float eL = -54.4f;           // mV
-    float gAHP  = 5.0f;          // Ca-activated K conductance mS/cm²
+    float gAHP  = 2.0f;          // Ca-activated K conductance mS/cm²
     float tauCa = 80.0f;         // Ca decay time constant ms
     float kCa  = 0.002f;
     float restingVoltage = -65.0f;
