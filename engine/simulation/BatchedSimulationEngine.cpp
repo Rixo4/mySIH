@@ -194,6 +194,9 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             config_.adaptationMaxCurrent,
             config_.adaptationInhibitoryScale,
             config_.maxTotalCurrent,
+            config_.synTauExcMs,
+            config_.synTauInhMs,
+            config_.maxSynCurrent,
             config_.drugOnsetTauMs,
             config_.randomSeed,
             50U

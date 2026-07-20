@@ -936,6 +936,9 @@ void CudaSimulator::initializeBatchedSimulation(
     float adaptationMaxCurrent,
     float adaptationInhibitoryScale,
     float maxTotalCurrent,
+    float synTauExcMs,
+    float synTauInhMs,
+    float maxSynCurrent,
     float /*drugOnsetTauMs*/,
     std::uint32_t rngSeed,
     std::size_t batchWindowSteps
@@ -990,9 +993,9 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedBatchWindowSteps = std::max<std::size_t>(1, batchWindowSteps);
     buffers_->batchedRefractoryMs = refractoryMs;
     buffers_->batchedDtMs = dtMs;
-    buffers_->batchedSynTauExcMs = 5.0f;
-    buffers_->batchedSynTauInhMs = 10.0f;
-    buffers_->batchedMaxSynCurrent = 300.0f;
+    buffers_->batchedSynTauExcMs = synTauExcMs;
+    buffers_->batchedSynTauInhMs = synTauInhMs;
+    buffers_->batchedMaxSynCurrent = maxSynCurrent;
     buffers_->batchedMaxTotalCurrent = maxTotalCurrent;
     buffers_->batchedAdaptationTauMs = adaptationTauMs;
     buffers_->batchedAdaptationIncrement = adaptationIncrement;

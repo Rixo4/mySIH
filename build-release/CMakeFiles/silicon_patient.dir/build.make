@@ -286,6 +286,7 @@ silicon_patient: CMakeFiles/silicon_patient.dir/engine/cuda/CudaSimulator.cpp.o
 silicon_patient: CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o
 silicon_patient: CMakeFiles/silicon_patient.dir/build.make
 silicon_patient: /usr/lib/x86_64-linux-gnu/libcudart.so
+silicon_patient: /usr/lib/x86_64-linux-gnu/libcurand.so
 silicon_patient: CMakeFiles/silicon_patient.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/ranjith/projectubantu/Neuro_drug_testing/build-release/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Linking CXX executable silicon_patient"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/silicon_patient.dir/link.txt --verbose=$(VERBOSE)

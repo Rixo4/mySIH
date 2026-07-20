@@ -84,6 +84,9 @@ public:
         float adaptationMaxCurrent,
         float adaptationInhibitoryScale,
         float maxTotalCurrent,
+        float synTauExcMs,
+        float synTauInhMs,
+        float maxSynCurrent,
         float drugOnsetTauMs,
         std::uint32_t rngSeed,
         std::size_t batchWindowSteps

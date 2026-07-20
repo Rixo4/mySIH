@@ -218,6 +218,25 @@ CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o : /home/ranjith/pro
     /usr/include/c++/12/bits/vector.tcc \
     /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/../neuron/NeuronModel.h \
     /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/NeuronUpdate.h \
+    /usr/include/curand_kernel.h \
+    /usr/include/nv/target \
+    /usr/include/nv/detail/__target_macros \
+    /usr/include/nv/detail/__preprocessor \
+    /usr/include/curand.h \
+    /usr/include/curand_discrete.h \
+    /usr/include/curand_precalc.h \
+    /usr/include/curand_mrg32k3a.h \
+    /usr/include/curand_mtgp32_kernel.h \
+    /usr/include/memory.h \
+    /usr/include/curand_mtgp32.h \
+    /usr/include/curand_philox4x32_x.h \
+    /usr/include/curand_globals.h \
+    /usr/include/curand_uniform.h \
+    /usr/include/curand_normal.h \
+    /usr/include/curand_normal_static.h \
+    /usr/include/curand_lognormal.h \
+    /usr/include/curand_poisson.h \
+    /usr/include/curand_discrete2.h \
     /usr/include/c++/12/cstring \
     /usr/include/c++/12/stdexcept \
     /usr/include/c++/12/exception \

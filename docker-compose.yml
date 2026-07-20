@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://silicon_patient:silicon_patient@postgres:5432/silicon_patient
       REDIS_URL: redis://redis:6379/0
-      ENGINE_PATH: /app/build-validate/silicon_patient
+      ENGINE_PATH: /app/build-release/silicon_patient
       LOG_LEVEL: INFO
       MAX_CONCURRENT_SIMULATIONS: 2
       SIMULATION_TIMEOUT_SECONDS: 3600
@@ -45,6 +45,13 @@ services:
       - ./backend/runs:/app/backend/runs
       - ./backend/reports:/app/backend/reports
       - ./backend/artifacts:/app/backend/artifacts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   worker:
     build:
@@ -53,7 +60,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://silicon_patient:silicon_patient@postgres:5432/silicon_patient
       REDIS_URL: redis://redis:6379/0
-      ENGINE_PATH: /app/build-validate/silicon_patient
+      ENGINE_PATH: /app/build-release/silicon_patient
       LOG_LEVEL: INFO
       MAX_CONCURRENT_SIMULATIONS: 2
       SIMULATION_TIMEOUT_SECONDS: 3600
@@ -67,6 +74,13 @@ services:
       - ./backend/runs:/app/backend/runs
       - ./backend/reports:/app/backend/reports
       - ./backend/artifacts:/app/backend/artifacts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   postgres_data:

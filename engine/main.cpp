@@ -713,7 +713,8 @@ static std::optional<double> extractJsonNumber(
 
 static bool loadDrugConfigFromJsonFile(
     const std::string& path, RuntimeInput& out,
-    std::optional<int>& outRuns, std::string& outMode)
+    std::optional<int>& outRuns, std::string& outMode,
+    std::optional<double>& outDoseMin, std::optional<double>& outDoseMax, std::optional<double>& outDoseStep)
 {
     const std::string c=readFileToString(path); if(c.empty()) return false;
     if(auto v=extractJsonString(c,"drug_name");v) out.drug_name=*v;
@@ -736,7 +737,11 @@ static bool loadDrugConfigFromJsonFile(
         }
     }
     const auto drP=c.find("\"dose_range\"");
-    if(drP!=c.npos){if(auto v=extractJsonNumber(c,"min",drP);v) out.config.dose=*v;}
+    if(drP!=c.npos){
+        if(auto v=extractJsonNumber(c,"min",drP);v)  { out.config.dose=*v; outDoseMin=*v; }
+        if(auto v=extractJsonNumber(c,"max",drP);v)  outDoseMax=*v;
+        if(auto v=extractJsonNumber(c,"step",drP);v) outDoseStep=*v;
+    }
     if(auto v=extractJsonNumber(c,"runs");v) outRuns=static_cast<int>(*v);
     if(auto v=extractJsonString(c,"mode");v) outMode=*v;
     return true;
@@ -1052,7 +1057,10 @@ void runSingleSimulationMode(const RuntimeInput& input) {
 void runDoseEvaluationMode(
     const RuntimeInput& baseInput,
     const std::string& engineInputMode = "Default Internal Engine Config",
-    const std::optional<int>& userRuns = std::nullopt)
+    const std::optional<int>& userRuns = std::nullopt,
+    const std::optional<double>& jsonDoseMin = std::nullopt,
+    const std::optional<double>& jsonDoseMax = std::nullopt,
+    const std::optional<double>& jsonDoseStep = std::nullopt)
 {
     constexpr double kDefaultMinDose  = 0.0;
     constexpr double kDefaultMaxDose  = 20.0;
@@ -1073,7 +1081,9 @@ void runDoseEvaluationMode(
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL");   v&&*v>=1&&*v<=6) evalInput.config.hill=*v;
     }
 
-    double minD=kDefaultMinDose, maxD=kDefaultMaxDose, stepD=kDefaultStepDose;
+    double minD  = jsonDoseMin.value_or(kDefaultMinDose);
+    double maxD  = jsonDoseMax.value_or(kDefaultMaxDose);
+    double stepD = jsonDoseStep.value_or(kDefaultStepDose);
     if(auto v=tryEnvDouble("SPP_DOSE_EVAL_MIN"); v&&*v>=0)   minD=*v;
     if(auto v=tryEnvDouble("SPP_DOSE_EVAL_MAX"); v&&*v>minD) maxD=*v;
     if(auto v=tryEnvDouble("SPP_DOSE_EVAL_STEP");v&&*v>0)    stepD=*v;
@@ -1224,15 +1234,16 @@ int main(int argc, char** argv) {
 
             std::string engineMode = "Default Internal Engine Config";
             std::optional<int> userRuns;
+            std::optional<double> jsonDoseMin, jsonDoseMax, jsonDoseStep;
             if(!drugConfigPath.empty()) {
                 std::optional<int> ro; std::string mt;
-                if(loadDrugConfigFromJsonFile(drugConfigPath, input, ro, mt)) {
+                if(loadDrugConfigFromJsonFile(drugConfigPath, input, ro, mt, jsonDoseMin, jsonDoseMax, jsonDoseStep)) {
                     engineMode = "User Drug Config";
                     if(ro) userRuns = *ro;
                 }
             }
             validateConfig(input.config);
-            runDoseEvaluationMode(input, engineMode, userRuns);
+            runDoseEvaluationMode(input, engineMode, userRuns, jsonDoseMin, jsonDoseMax, jsonDoseStep);
             return 0;
         }
 

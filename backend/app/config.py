@@ -25,6 +25,7 @@ def _resolve_from_backend_root(path_value: str | Path) -> Path:
 
 def _default_engine_path() -> Path:
     candidates = [
+        PROJECT_ROOT / "build-release" / "silicon_patient",
         PROJECT_ROOT / "build-validate" / "silicon_patient",
         PROJECT_ROOT / "build-linux" / "silicon_patient",
         PROJECT_ROOT / "build-cuda" / "silicon_patient.exe",
