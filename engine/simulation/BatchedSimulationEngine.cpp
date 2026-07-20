@@ -1,6 +1,7 @@
 #include "BatchedSimulationEngine.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -111,16 +112,26 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             }
     }
 
+    // ---- Cache per-block dose and the two possible drug profiles
+    // ---- (excitatory/inhibitory), so the hot loop can compute Hill-equation
+    // ---- block fractions once per (block, type) pair per timestep instead
+    // ---- of once per neuron (all neurons of the same type in the same
+    // ---- block share an identical dose + profile, so this is exact, not
+    // ---- an approximation).
+    blockDoses_.resize(blockCount_);
+    for (std::size_t b = 0; b < blockCount_; ++b) {
+        blockDoses_[b] = blocks[b].dose;
+    }
+    excProfile_ = drugProfile;
+    inhProfile_ = drugProfile;
+    inhProfile_.ic50K *= 1.75f;
+
     // ---- Single CudaSimulator sized for the WHOLE batch. This is the crux
     // ---- of the fix: one set of H2D/kernel/D2H calls per timestep covers
     // ---- every dose x repeat at once, instead of one set per run.
     cudaSimulator_ = std::make_unique<cuda::CudaSimulator>(totalNeurons_);
-    std::fprintf(stderr,
-        "[SPP-DIAG] totalNeurons=%zu config_.useGpu=%d cudaSimulator_available=%d -> runOnGpu=%d\n",
-        totalNeurons_,
-        static_cast<int>(config_.useGpu),
-        static_cast<int>(cudaSimulator_->available()),
-        static_cast<int>(config_.useGpu && cudaSimulator_->available()));
+    std::fprintf(stderr, "[SPP-DIAG] totalNeurons=%zu useGpu=%d cudaAvailable=%d\n",
+        totalNeurons_, static_cast<int>(config_.useGpu), static_cast<int>(cudaSimulator_->available()));
     if (config_.useGpu && cudaSimulator_->available()) {
         cudaSimulator_->uploadInitialState(
             population_.v,
@@ -171,6 +182,11 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<std::uint8_t> spikes(totalNeurons_, 0U);
     std::vector<std::uint32_t> blockSpikeCount(blockCount_, 0U);
 
+    // Per-(block, type) Hill-equation block fractions, recomputed once per
+    // timestep instead of once per neuron. Index = block * 2 + type
+    // (type: 0 = inhibitory, 1 = excitatory). {blockNa, blockK, blockCa}.
+    std::vector<std::array<float, 3>> blockTypeBlockFrac(blockCount_ * 2);
+
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
@@ -199,6 +215,18 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
 
         matrix_.accumulateSynapticCurrents(delayBuffer_, iExcPulse, iInhPulse);
 
+        for (std::size_t b = 0; b < blockCount_; ++b) {
+            const float effDose = blockDoses_[b] * doseScale;
+            for (int t = 0; t < 2; ++t) {
+                const drug::ChannelDrugProfile& prof = (t == 1) ? excProfile_ : inhProfile_;
+                blockTypeBlockFrac[b * 2 + static_cast<std::size_t>(t)] = {
+                    drug::DrugModel::hillBlock(effDose, prof.ic50Na, prof.hillNa),
+                    drug::DrugModel::hillBlock(effDose, prof.ic50K,  prof.hillK),
+                    drug::DrugModel::hillBlock(effDose, prof.ic50Ca, prof.hillCa)
+                };
+            }
+        }
+
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
@@ -223,22 +251,24 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float extWithAdapt = extCurrentWithBackground[i] - adaptationCurrent[i];
             effectiveExternalCurrent[i] = std::isfinite(extWithAdapt) ? extWithAdapt : 0.0f;
 
-            const drug::ConductanceResult geff = drugModel_.applyWithDoseScale(
-                i,
-                population_.gNa[i],
-                population_.gK[i],
-                population_.gCa[i],
-                doseScale
-            );
-            gNaEff[i] = (std::isfinite(geff.gNaEff) && geff.gNaEff >= 0.0f)
-                            ? geff.gNaEff
-                            : 0.05f * std::max(0.0f, population_.gNa[i]);
-            gKEff[i] = (std::isfinite(geff.gKEff) && geff.gKEff >= 0.0f)
-                           ? geff.gKEff
-                           : 0.0f;
-            gCaEff[i] = (std::isfinite(geff.gCaEff) && geff.gCaEff >= 0.0f)
-                            ? geff.gCaEff
-                            : 0.02f * std::max(0.0f, population_.gCa[i]);
+            // Cached per-(block, type) Hill block fractions instead of a
+            // per-neuron DrugModel::applyWithDoseScale call — mathematically
+            // identical since every neuron of a given type in a given block
+            // shares the same dose and profile, just far fewer pow() calls.
+            const std::size_t block = i / neuronsPerBlock_;
+            const std::size_t type  = population_.neuronType[i];
+            const std::array<float, 3>& frac = blockTypeBlockFrac[block * 2 + type];
+            const float blockNa = frac[0];
+            const float blockK  = frac[1];
+            const float blockCa = frac[2];
+
+            const float safeGNa = (std::isfinite(population_.gNa[i]) && population_.gNa[i] > 0.0f) ? population_.gNa[i] : 0.0f;
+            const float safeGK  = (std::isfinite(population_.gK[i])  && population_.gK[i]  > 0.0f) ? population_.gK[i]  : 0.0f;
+            const float safeGCa = (std::isfinite(population_.gCa[i]) && population_.gCa[i] > 0.0f) ? population_.gCa[i] : 0.0f;
+
+            gNaEff[i] = std::max(0.05f * safeGNa, safeGNa * std::max(0.0f, 1.0f - blockNa));
+            gKEff[i]  = std::max(0.05f * safeGK,  safeGK  * (1.0f - blockK));
+            gCaEff[i] = std::max(0.02f * safeGCa, safeGCa * std::max(0.0f, 1.0f - blockCa));
         }
 
         if (runOnGpu) {

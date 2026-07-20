@@ -53,6 +53,9 @@ private:
 
     SimulationConfig config_;
     drug::DrugModel drugModel_;
+    std::vector<float> blockDoses_;
+    drug::ChannelDrugProfile excProfile_;
+    drug::ChannelDrugProfile inhProfile_;
 
     neuron::NeuronPopulation population_;
     synapse::DelayBuffer delayBuffer_;
