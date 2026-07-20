@@ -130,8 +130,6 @@ BatchedSimulationEngine::BatchedSimulationEngine(
     // ---- of the fix: one set of H2D/kernel/D2H calls per timestep covers
     // ---- every dose x repeat at once, instead of one set per run.
     cudaSimulator_ = std::make_unique<cuda::CudaSimulator>(totalNeurons_);
-    std::fprintf(stderr, "[SPP-DIAG] totalNeurons=%zu useGpu=%d cudaAvailable=%d\n",
-        totalNeurons_, static_cast<int>(config_.useGpu), static_cast<int>(cudaSimulator_->available()));
     if (config_.useGpu && cudaSimulator_->available()) {
         cudaSimulator_->uploadInitialState(
             population_.v,
@@ -143,6 +141,64 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             population_.threshold,
             population_.lastSpikeTime
         );
+#ifdef SPP_USE_CUDA
+        std::vector<float> extCurrentWithBackground(totalNeurons_);
+        std::vector<float> baseGNa = population_.gNa;
+        std::vector<float> baseGK = population_.gK;
+        std::vector<float> baseGCa = population_.gCa;
+        std::vector<float> noiseStd = population_.noiseStd;
+        std::vector<std::uint8_t> neuronType = population_.neuronType;
+        std::vector<float> drugParams(totalNeurons_ * 7U);
+
+        constexpr float kBackgroundCurrent = 0.18f;
+        for (std::size_t i = 0; i < totalNeurons_; ++i) {
+            float baseCurrent = population_.extCurrent[i];
+            if (!std::isfinite(baseCurrent)) {
+                baseCurrent = config_.baseExternalCurrent;
+            }
+            extCurrentWithBackground[i] = baseCurrent + kBackgroundCurrent;
+
+            const std::size_t block = i / neuronsPerBlock_;
+            const bool inhibitory = (population_.neuronType[i] == 0U);
+            const drug::ChannelDrugProfile& prof = inhibitory ? inhProfile_ : excProfile_;
+            const std::size_t offset = i * 7U;
+            drugParams[offset + 0] = prof.ic50Na;
+            drugParams[offset + 1] = prof.ic50K;
+            drugParams[offset + 2] = prof.ic50Ca;
+            drugParams[offset + 3] = prof.hillNa;
+            drugParams[offset + 4] = prof.hillK;
+            drugParams[offset + 5] = prof.hillCa;
+            drugParams[offset + 6] = blockDoses_[block];
+        }
+
+        cudaSimulator_->initializeBatchedSimulation(
+            delayBuffer_.delaySteps(),
+            matrix_.incomingOffsets(),
+            matrix_.incomingPre(),
+            matrix_.incomingDelay(),
+            matrix_.incomingWeight(),
+            matrix_.incomingSign(),
+            extCurrentWithBackground,
+            population_.threshold,
+            noiseStd,
+            baseGNa,
+            baseGK,
+            baseGCa,
+            neuronType,
+            drugParams,
+            population_.params,
+            config_.refractoryMs,
+            config_.dtMs,
+            config_.adaptationTauMs,
+            config_.adaptationIncrement,
+            config_.adaptationMaxCurrent,
+            config_.adaptationInhibitoryScale,
+            config_.maxTotalCurrent,
+            config_.drugOnsetTauMs,
+            config_.randomSeed,
+            50U
+        );
+#endif
     }
 }
 
@@ -181,6 +237,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
 
     std::vector<std::uint8_t> spikes(totalNeurons_, 0U);
     std::vector<std::uint32_t> blockSpikeCount(blockCount_, 0U);
+    std::vector<std::uint8_t> batchSpikeHistory;
 
     // Per-(block, type) Hill-equation block fractions, recomputed once per
     // timestep instead of once per neuron. Index = block * 2 + type
@@ -206,6 +263,69 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         }
         extCurrentWithBackground[i] = baseCurrent + kBackgroundCurrent;
     }
+
+#ifdef SPP_USE_CUDA
+    if (runOnGpu) {
+        constexpr std::size_t kGpuBatchSteps = 50U;
+        for (std::size_t batchStart = 0; batchStart < stepCount; batchStart += kGpuBatchSteps) {
+            const std::size_t stepsInBatch = std::min<std::size_t>(kGpuBatchSteps, stepCount - batchStart);
+
+            for (std::size_t localStep = 0; localStep < stepsInBatch; ++localStep) {
+                const std::size_t globalStep = batchStart + localStep;
+                const float timeMs = static_cast<float>(globalStep) * config_.dtMs;
+                const float doseScale = (drugOnsetTauMs > 1.0e-3f)
+                                            ? (1.0f - std::exp(-timeMs / drugOnsetTauMs))
+                                            : 1.0f;
+                cudaSimulator_->stepBatched(timeMs, doseScale, localStep);
+            }
+
+            cudaSimulator_->downloadBatchedSpikeHistory(batchSpikeHistory, stepsInBatch);
+
+            for (std::size_t localStep = 0; localStep < stepsInBatch; ++localStep) {
+                const std::size_t globalStep = batchStart + localStep;
+                const float timeMs = static_cast<float>(globalStep) * config_.dtMs;
+                const std::size_t rowOffset = localStep * totalNeurons_;
+
+                std::fill(blockSpikeCount.begin(), blockSpikeCount.end(), 0U);
+
+                for (std::size_t i = 0; i < totalNeurons_; ++i) {
+                    if (batchSpikeHistory[rowOffset + i] == 0U) {
+                        continue;
+                    }
+
+                    const std::size_t block = i / neuronsPerBlock_;
+                    const std::size_t local = i % neuronsPerBlock_;
+                    ++blockSpikeCount[block];
+                    results[block].spikeTimes[local].push_back(timeMs);
+                }
+
+                for (std::size_t b = 0; b < blockCount_; ++b) {
+                    results[b].populationSpikesPerStep[globalStep] = blockSpikeCount[b];
+                }
+            }
+        }
+
+        cudaSimulator_->downloadState(
+            population_.v,
+            population_.m,
+            population_.h,
+            population_.n,
+            population_.s,
+            population_.caCa,
+            population_.lastSpikeTime
+        );
+
+        for (std::size_t b = 0; b < blockCount_; ++b) {
+            const std::size_t offset = b * neuronsPerBlock_;
+            results[b].finalVoltages.assign(
+                population_.v.begin() + static_cast<std::ptrdiff_t>(offset),
+                population_.v.begin() + static_cast<std::ptrdiff_t>(offset + neuronsPerBlock_)
+            );
+        }
+
+        return results;
+    }
+#endif
 
     for (std::size_t step = 0; step < stepCount; ++step) {
         const float timeMs = static_cast<float>(step) * config_.dtMs;

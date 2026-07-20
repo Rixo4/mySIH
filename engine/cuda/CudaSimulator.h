@@ -60,6 +60,43 @@ public:
         std::vector<float>& lastSpikeTime
     );
 
+#ifdef SPP_USE_CUDA
+    void initializeBatchedSimulation(
+        std::size_t delaySteps,
+        const std::vector<std::uint32_t>& incomingOffsets,
+        const std::vector<std::uint32_t>& incomingPre,
+        const std::vector<std::uint32_t>& incomingDelay,
+        const std::vector<float>& incomingWeight,
+        const std::vector<std::int8_t>& incomingSign,
+        const std::vector<float>& extCurrentWithBackground,
+        const std::vector<float>& threshold,
+        const std::vector<float>& noiseStd,
+        const std::vector<float>& baseGNa,
+        const std::vector<float>& baseGK,
+        const std::vector<float>& baseGCa,
+        const std::vector<std::uint8_t>& neuronType,
+        const std::vector<float>& drugParams,
+        const neuron::HHParameters& params,
+        float refractoryMs,
+        float dtMs,
+        float adaptationTauMs,
+        float adaptationIncrement,
+        float adaptationMaxCurrent,
+        float adaptationInhibitoryScale,
+        float maxTotalCurrent,
+        float drugOnsetTauMs,
+        std::uint32_t rngSeed,
+        std::size_t batchWindowSteps
+    );
+
+    void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);
+
+    void downloadBatchedSpikeHistory(
+        std::vector<std::uint8_t>& spikeHistory,
+        std::size_t stepCountInBatch
+    ) const;
+#endif
+
 private:
     std::size_t neuronCount_;
     bool available_;

@@ -72,7 +72,7 @@ if(SPP_ENABLE_CUDA)
         CUDA_STANDARD 17
         CUDA_STANDARD_REQUIRED ON
     )
-    target_link_libraries(silicon_patient PRIVATE CUDA::cudart)
+    target_link_libraries(silicon_patient PRIVATE CUDA::cudart CUDA::curand)
 endif()
 
 if(MSVC)

@@ -48,6 +48,11 @@ public:
 
     [[nodiscard]] std::size_t neuronCount() const { return neuronCount_; }
     [[nodiscard]] std::size_t edgeCount() const { return incomingPre_.size(); }
+    [[nodiscard]] const std::vector<std::uint32_t>& incomingOffsets() const { return incomingOffsets_; }
+    [[nodiscard]] const std::vector<std::uint32_t>& incomingPre() const { return incomingPre_; }
+    [[nodiscard]] const std::vector<std::uint32_t>& incomingDelay() const { return incomingDelay_; }
+    [[nodiscard]] const std::vector<float>& incomingWeight() const { return incomingWeight_; }
+    [[nodiscard]] const std::vector<std::int8_t>& incomingSign() const { return incomingSign_; }
 
     void accumulateSynapticCurrents(
         const DelayBuffer& delayBuffer,
