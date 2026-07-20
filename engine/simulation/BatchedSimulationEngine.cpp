@@ -98,11 +98,17 @@ BatchedSimulationEngine::BatchedSimulationEngine(
     drugModel_.setGlobalProfile(drugProfile);
     drugModel_.enablePerNeuronProfiles(totalNeurons_);
     for (std::size_t b = 0; b < blockCount_; ++b) {
-        const std::size_t offset = b * neuronsPerBlock_;
-        for (std::size_t j = 0; j < neuronsPerBlock_; ++j) {
-            drugModel_.setNeuronDose(offset + j, blocks[b].dose);
-        }
+            const std::size_t offset = b * neuronsPerBlock_;
+            for (std::size_t j = 0; j < neuronsPerBlock_; ++j) {
+                const std::size_t idx = offset + j;
+                drug::ChannelDrugProfile p = drugProfile;
+                if (population_.neuronType[idx] == 0U) { // inhibitory
+                    p.ic50K *= 1.75f;
+                }
+                drugModel_.setNeuronProfile(idx, p);
+                drugModel_.setNeuronDose(idx, blocks[b].dose);
     }
+}
 
     // ---- Single CudaSimulator sized for the WHOLE batch. This is the crux
     // ---- of the fix: one set of H2D/kernel/D2H calls per timestep covers
@@ -226,16 +232,6 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             gCaEff[i] = (std::isfinite(geff.gCaEff) && geff.gCaEff >= 0.0f)
                             ? geff.gCaEff
                             : 0.02f * std::max(0.0f, population_.gCa[i]);
-
-            if (kBlock > 0.30f) {
-                effectiveExternalCurrent[i] += 2.0f * (kBlock - 0.30f);
-            }
-
-            if (iSyn[i] > 0.0f) {
-                iSyn[i] *= (1.0f + 1.5f * kBlock);
-            } else if (iSyn[i] < 0.0f) {
-                iSyn[i] *= std::clamp(1.0f - 0.35f * kBlock, 0.60f, 1.0f);
-            }
         }
 
         if (runOnGpu) {
@@ -271,6 +267,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 state.h = population_.h[i];
                 state.n = population_.n[i];
                 state.s = population_.s[i];
+                state.caCa = population_.caCa[i];  // FIX: carry Ca concentration across timesteps
 
                 float iTotal = effectiveExternalCurrent[i] + iSyn[i] + iNoise[i];
                 if (!std::isfinite(iTotal)) {
@@ -293,6 +290,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 population_.h[i] = state.h;
                 population_.n[i] = state.n;
                 population_.s[i] = state.s;
+                population_.caCa[i] = state.caCa;  // FIX: write Ca concentration back
 
                 spikes[i] = didSpike;
             }

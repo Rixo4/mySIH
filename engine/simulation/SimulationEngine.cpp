@@ -56,6 +56,26 @@ void SimulationEngine::initialize() {
     population_.params.gL = std::clamp(population_.params.gL * 1.02f, 0.22f, 0.40f);
 
     applyNetworkNeuronTypes();
+
+    // Differential K-channel sensitivity: real fast-spiking interneurons rely on
+    // Kv3-type channels, less sensitive to classic Kv1-targeting blockers (e.g. 4-AP)
+    // than pyramidal-cell K channels. Applying identical K-block to both cell types
+    // lets inhibitory neurons become disproportionately excitable and mask real
+    // network-level excitatory signal.
+    {
+        const drug::ChannelDrugProfile baseProfile = drugModel_.globalProfile();
+        const float baseDose = drugModel_.globalDose();
+        drugModel_.enablePerNeuronProfiles(neuronCount_);
+        for (std::size_t i = 0; i < neuronCount_; ++i) {
+            drug::ChannelDrugProfile p = baseProfile;
+            if (population_.neuronType[i] == 0U) { // inhibitory
+                p.ic50K *= 1.75f;
+            }
+            drugModel_.setNeuronProfile(i, p);
+            drugModel_.setNeuronDose(i, baseDose);
+        }
+    }
+
     delayBuffer_.clear();
 
     if (config_.useGpu && cudaSimulator_ && cudaSimulator_->available()) {

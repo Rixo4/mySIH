@@ -122,9 +122,9 @@ void Network::buildRandom() {
 
         const std::uint32_t delayMin = std::max<std::uint32_t>(1U, config_.minDelaySteps);
         const std::uint32_t delayMax = std::max(config_.minDelaySteps, config_.maxDelaySteps);
-        const std::uint32_t localDelayMax = excitatory
-                                                ? std::max<std::uint32_t>(delayMin, std::min<std::uint32_t>(delayMax, 12U))
-                                                : delayMax;
+                    const std::uint32_t localDelayMax = excitatory
+                                                            ? delayMax
+                                                            : std::max<std::uint32_t>(delayMin, std::min<std::uint32_t>(delayMax, 8U));
         std::uniform_int_distribution<std::uint32_t> delayDist(delayMin, localDelayMax);
 
         for (int e = 0; e < outDegree; ++e) {

@@ -1,10 +1,10 @@
 {
-    "drug_name": "Test-Ca-Blocker",
+    "drug_name": "nimodipine",
     "channels": {
         "Na": { "ic50": 1000.0, "hill": 3.2 },
         "K":  { "ic50": 1000.0, "hill": 3.2 },
-        "Ca": { "ic50": 1.0,    "hill": 3.2 }
+        "Ca": { "ic50": 0.06,    "hill": 3.2 }
     },
-    "dose_range": { "min": 0.0, "max": 20.0, "step": 2.0 },
+    "dose_range": { "min": 0.0, "max": 0.5, "step": 0.05 },
     "runs": 3
 }

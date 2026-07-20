@@ -274,7 +274,7 @@ NetworkConfig buildNetworkConfig(const SimulationConfig& cfg, std::uint32_t seed
     netCfg.excitatoryWeightMax   = 2.40f * excScale * neuronScale;
     netCfg.inhibitoryWeightMin   = 1.70f * inhScale * neuronScale;
     netCfg.inhibitoryWeightMax   = 5.80f * inhScale * neuronScale;
-    netCfg.recurrentExcitatoryBias = 0.58f;
+    netCfg.recurrentExcitatoryBias = 0.78f;
     netCfg.feedbackInhibitoryBias  = 0.82f;
     netCfg.maxSynapses = std::max<std::size_t>(500000,
         static_cast<std::size_t>(
