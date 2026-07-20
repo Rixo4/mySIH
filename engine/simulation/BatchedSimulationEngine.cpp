@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 
 namespace spp::simulation {
@@ -107,13 +108,19 @@ BatchedSimulationEngine::BatchedSimulationEngine(
                 }
                 drugModel_.setNeuronProfile(idx, p);
                 drugModel_.setNeuronDose(idx, blocks[b].dose);
+            }
     }
-}
 
     // ---- Single CudaSimulator sized for the WHOLE batch. This is the crux
     // ---- of the fix: one set of H2D/kernel/D2H calls per timestep covers
     // ---- every dose x repeat at once, instead of one set per run.
     cudaSimulator_ = std::make_unique<cuda::CudaSimulator>(totalNeurons_);
+    std::fprintf(stderr,
+        "[SPP-DIAG] totalNeurons=%zu config_.useGpu=%d cudaSimulator_available=%d -> runOnGpu=%d\n",
+        totalNeurons_,
+        static_cast<int>(config_.useGpu),
+        static_cast<int>(cudaSimulator_->available()),
+        static_cast<int>(config_.useGpu && cudaSimulator_->available()));
     if (config_.useGpu && cudaSimulator_->available()) {
         cudaSimulator_->uploadInitialState(
             population_.v,
@@ -121,6 +128,7 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             population_.h,
             population_.n,
             population_.s,
+            population_.caCa,
             population_.threshold,
             population_.lastSpikeTime
         );
@@ -222,7 +230,6 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 population_.gCa[i],
                 doseScale
             );
-            const float kBlock = std::clamp(std::isfinite(geff.blockK) ? geff.blockK : 0.0f, 0.0f, 1.0f);
             gNaEff[i] = (std::isfinite(geff.gNaEff) && geff.gNaEff >= 0.0f)
                             ? geff.gNaEff
                             : 0.05f * std::max(0.0f, population_.gNa[i]);
@@ -251,6 +258,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 population_.h,
                 population_.n,
                 population_.s,
+                population_.caCa,
                 population_.lastSpikeTime,
                 spikes
             );
@@ -326,6 +334,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             population_.h,
             population_.n,
             population_.s,
+            population_.caCa,
             population_.lastSpikeTime
         );
     }

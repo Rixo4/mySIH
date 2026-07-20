@@ -22,6 +22,7 @@ void CudaSimulator::uploadInitialState(
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
+    const std::vector<float>&,
     const std::vector<float>&
 ) {
     throw std::runtime_error("CUDA support is not enabled in this build.");
@@ -44,12 +45,14 @@ void CudaSimulator::step(
     std::vector<float>&,
     std::vector<float>&,
     std::vector<float>&,
+    std::vector<float>&,
     std::vector<std::uint8_t>&
 ) {
     throw std::runtime_error("CUDA support is not enabled in this build.");
 }
 
 void CudaSimulator::downloadState(
+    std::vector<float>&,
     std::vector<float>&,
     std::vector<float>&,
     std::vector<float>&,

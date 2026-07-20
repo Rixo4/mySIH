@@ -24,6 +24,7 @@ public:
         const std::vector<float>& h,
         const std::vector<float>& n,
         const std::vector<float>& s,
+        const std::vector<float>& caCa,
         const std::vector<float>& threshold,
         const std::vector<float>& lastSpikeTime
     );
@@ -44,6 +45,7 @@ public:
         std::vector<float>& h,
         std::vector<float>& n,
         std::vector<float>& s,
+        std::vector<float>& caCa,
         std::vector<float>& lastSpikeTime,
         std::vector<std::uint8_t>& spikes
     );
@@ -54,6 +56,7 @@ public:
         std::vector<float>& h,
         std::vector<float>& n,
         std::vector<float>& s,
+        std::vector<float>& caCa,
         std::vector<float>& lastSpikeTime
     );
 

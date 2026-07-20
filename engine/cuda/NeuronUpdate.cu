@@ -71,6 +71,7 @@ struct Deriv {
     float dh;
     float dn;
     float ds;
+    float dcaCa;
 };
 
 __device__ Deriv derivatives(
@@ -79,6 +80,7 @@ __device__ Deriv derivatives(
     float h,
     float n,
     float s,
+    float caCa,
     float iTotal,
     float gNa,
     float gK,
@@ -88,29 +90,36 @@ __device__ Deriv derivatives(
     float eK,
     float eCa,
     float gL,
-    float eL
+    float eL,
+    float gAHP,
+    float tauCa,
+    float kCa
 ) {
     Deriv d;
     const float iNa = gNa * m * m * m * h * (v - eNa);
     const float iK = gK * n * n * n * n * (v - eK);
     const float iCa = gCa * s * s * (v - eCa);
+    const float iAHP = gAHP * caCa * (v - eK);
     const float iLeak = gL * (v - eL);
+    const float caInflux = kCa * fmaxf(0.0f, -iCa);
 
-    d.dv = (iTotal - iNa - iK - iCa - iLeak) / cm;
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iLeak) / cm;
     d.dm = alphaM(v) * (1.0f - m) - betaM(v) * m;
     d.dh = alphaH(v) * (1.0f - h) - betaH(v) * h;
     d.dn = alphaN(v) * (1.0f - n) - betaN(v) * n;
     d.ds = (sInf(v) - s) / tauS(v);
+    d.dcaCa = caInflux - caCa / tauCa;
 
     return d;
 }
 
-__device__ void clampState(float& v, float& m, float& h, float& n, float& s) {
+__device__ void clampState(float& v, float& m, float& h, float& n, float& s, float& caCa) {
     v = fminf(80.0f, fmaxf(-120.0f, v));
     m = clamp01(m);
     h = clamp01(h);
     n = clamp01(n);
     s = clamp01(s);
+    caCa = clamp01(caCa);
 }
 
 __global__ void hhStepKernel(
@@ -123,6 +132,9 @@ __global__ void hhStepKernel(
     float eCa,
     float gL,
     float eL,
+    float gAHP,
+    float tauCa,
+    float kCa,
     float restV,
     float refractoryMs,
     const float* iSyn,
@@ -137,6 +149,7 @@ __global__ void hhStepKernel(
     float* h,
     float* n,
     float* s,
+    float* caCa,
     float* lastSpikeTime,
     std::uint8_t* spikes
 ) {
@@ -152,6 +165,7 @@ __global__ void hhStepKernel(
     float yh = h[i];
     float yn = n[i];
     float ys = s[i];
+    float yca = caCa[i];
 
     float iTotal = iSyn[i] + iExt[i] + iNoise[i];
     if (!isfinite(iTotal)) {
@@ -162,44 +176,48 @@ __global__ void hhStepKernel(
     const float safeGK = (isfinite(gKEff[i]) && gKEff[i] >= 0.0f) ? gKEff[i] : 0.0f;
     const float safeGCa = (isfinite(gCaEff[i]) && gCaEff[i] >= 0.0f) ? gCaEff[i] : 0.0f;
 
-    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL);
+    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
     float y2h = yh + 0.5f * dtMs * k1.dh;
     float y2n = yn + 0.5f * dtMs * k1.dn;
     float y2s = ys + 0.5f * dtMs * k1.ds;
-    clampState(y2v, y2m, y2h, y2n, y2s);
+    float y2ca = yca + 0.5f * dtMs * k1.dcaCa;
+    clampState(y2v, y2m, y2h, y2n, y2s, y2ca);
 
-    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL);
+    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
     float y3h = yh + 0.5f * dtMs * k2.dh;
     float y3n = yn + 0.5f * dtMs * k2.dn;
     float y3s = ys + 0.5f * dtMs * k2.ds;
-    clampState(y3v, y3m, y3h, y3n, y3s);
+    float y3ca = yca + 0.5f * dtMs * k2.dcaCa;
+    clampState(y3v, y3m, y3h, y3n, y3s, y3ca);
 
-    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL);
+    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
     float y4h = yh + dtMs * k3.dh;
     float y4n = yn + dtMs * k3.dn;
     float y4s = ys + dtMs * k3.ds;
-    clampState(y4v, y4m, y4h, y4n, y4s);
+    float y4ca = yca + dtMs * k3.dcaCa;
+    clampState(y4v, y4m, y4h, y4n, y4s, y4ca);
 
-    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL);
+    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
     yh += (dtMs / 6.0f) * (k1.dh + 2.0f * k2.dh + 2.0f * k3.dh + k4.dh);
     yn += (dtMs / 6.0f) * (k1.dn + 2.0f * k2.dn + 2.0f * k3.dn + k4.dn);
     ys += (dtMs / 6.0f) * (k1.ds + 2.0f * k2.ds + 2.0f * k3.ds + k4.ds);
+    yca += (dtMs / 6.0f) * (k1.dcaCa + 2.0f * k2.dcaCa + 2.0f * k3.dcaCa + k4.dcaCa);
 
-    clampState(yv, ym, yh, yn, ys);
+    clampState(yv, ym, yh, yn, ys, yca);
 
-    if (!isfinite(yv) || !isfinite(ym) || !isfinite(yh) || !isfinite(yn) || !isfinite(ys)) {
+    if (!isfinite(yv) || !isfinite(ym) || !isfinite(yh) || !isfinite(yn) || !isfinite(ys) || !isfinite(yca)) {
         yv = restV;
         const float am = alphaM(restV);
         const float bm = betaM(restV);
@@ -211,6 +229,7 @@ __global__ void hhStepKernel(
         yh = ah / (ah + bh + 1.0e-6f);
         yn = an / (an + bn + 1.0e-6f);
         ys = sInf(restV);
+        yca = 0.0f;
     }
 
     const bool refractory = (timeMs - lastSpikeTime[i]) < refractoryMs;
@@ -226,6 +245,7 @@ __global__ void hhStepKernel(
     h[i] = yh;
     n[i] = yn;
     s[i] = ys;
+    caCa[i] = yca;
     spikes[i] = didSpike;
 }
 
@@ -251,6 +271,7 @@ struct CudaSimulator::DeviceBuffers {
     float* h = nullptr;
     float* n = nullptr;
     float* s = nullptr;
+    float* caCa = nullptr;
 
     float* threshold = nullptr;
     float* lastSpikeTime = nullptr;
@@ -301,6 +322,7 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
         checkCuda(cudaMalloc(&buffers_->h, floatBytes), "cudaMalloc h");
         checkCuda(cudaMalloc(&buffers_->n, floatBytes), "cudaMalloc n");
         checkCuda(cudaMalloc(&buffers_->s, floatBytes), "cudaMalloc s");
+        checkCuda(cudaMalloc(&buffers_->caCa, floatBytes), "cudaMalloc caCa");
 
         checkCuda(cudaMalloc(&buffers_->threshold, floatBytes), "cudaMalloc threshold");
         checkCuda(cudaMalloc(&buffers_->lastSpikeTime, floatBytes), "cudaMalloc lastSpikeTime");
@@ -329,6 +351,7 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->h);
             cudaFree(buffers_->n);
             cudaFree(buffers_->s);
+            cudaFree(buffers_->caCa);
             cudaFree(buffers_->threshold);
             cudaFree(buffers_->lastSpikeTime);
             cudaFree(buffers_->inputBlock);
@@ -352,6 +375,7 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->h);
     cudaFree(buffers_->n);
     cudaFree(buffers_->s);
+    cudaFree(buffers_->caCa);
 
     cudaFree(buffers_->threshold);
     cudaFree(buffers_->lastSpikeTime);
@@ -379,6 +403,7 @@ void CudaSimulator::uploadInitialState(
     const std::vector<float>& h,
     const std::vector<float>& n,
     const std::vector<float>& s,
+    const std::vector<float>& caCa,
     const std::vector<float>& threshold,
     const std::vector<float>& lastSpikeTime
 ) {
@@ -386,8 +411,8 @@ void CudaSimulator::uploadInitialState(
         throw std::runtime_error("CUDA simulator is not available.");
     }
     if (v.size() != neuronCount_ || m.size() != neuronCount_ || h.size() != neuronCount_ ||
-        n.size() != neuronCount_ || s.size() != neuronCount_ || threshold.size() != neuronCount_ ||
-        lastSpikeTime.size() != neuronCount_) {
+        n.size() != neuronCount_ || s.size() != neuronCount_ || caCa.size() != neuronCount_ ||
+        threshold.size() != neuronCount_ || lastSpikeTime.size() != neuronCount_) {
         throw std::invalid_argument("CUDA upload vectors must all match neuron count.");
     }
 
@@ -398,6 +423,7 @@ void CudaSimulator::uploadInitialState(
     checkCuda(cudaMemcpy(buffers_->h, h.data(), bytes, cudaMemcpyHostToDevice), "copy h H2D");
     checkCuda(cudaMemcpy(buffers_->n, n.data(), bytes, cudaMemcpyHostToDevice), "copy n H2D");
     checkCuda(cudaMemcpy(buffers_->s, s.data(), bytes, cudaMemcpyHostToDevice), "copy s H2D");
+    checkCuda(cudaMemcpy(buffers_->caCa, caCa.data(), bytes, cudaMemcpyHostToDevice), "copy caCa H2D");
     checkCuda(cudaMemcpy(buffers_->threshold, threshold.data(), bytes, cudaMemcpyHostToDevice), "copy threshold H2D");
     checkCuda(cudaMemcpy(buffers_->lastSpikeTime, lastSpikeTime.data(), bytes, cudaMemcpyHostToDevice), "copy lastSpike H2D");
 }
@@ -418,6 +444,7 @@ void CudaSimulator::step(
     std::vector<float>& h,
     std::vector<float>& n,
     std::vector<float>& s,
+    std::vector<float>& caCa,
     std::vector<float>& lastSpikeTime,
     std::vector<std::uint8_t>& spikes
 ) {
@@ -428,8 +455,8 @@ void CudaSimulator::step(
     if (iSyn.size() != neuronCount_ || iExt.size() != neuronCount_ || iNoise.size() != neuronCount_ ||
         gNaEff.size() != neuronCount_ || gKEff.size() != neuronCount_ || gCaEff.size() != neuronCount_ ||
         v.size() != neuronCount_ || m.size() != neuronCount_ || h.size() != neuronCount_ ||
-        n.size() != neuronCount_ || s.size() != neuronCount_ || lastSpikeTime.size() != neuronCount_ ||
-        spikes.size() != neuronCount_) {
+        n.size() != neuronCount_ || s.size() != neuronCount_ || caCa.size() != neuronCount_ ||
+        lastSpikeTime.size() != neuronCount_ || spikes.size() != neuronCount_) {
         throw std::invalid_argument("CUDA step vectors must all match neuron count.");
     }
 
@@ -461,6 +488,9 @@ void CudaSimulator::step(
         params.eCa,
         params.gL,
         params.eL,
+        params.gAHP,
+        params.tauCa,
+        params.kCa,
         params.restingVoltage,
         refractoryMs,
         buffers_->iSyn,
@@ -475,6 +505,7 @@ void CudaSimulator::step(
         buffers_->h,
         buffers_->n,
         buffers_->s,
+        buffers_->caCa,
         buffers_->lastSpikeTime,
         buffers_->spikes
     );
@@ -492,6 +523,7 @@ void CudaSimulator::downloadState(
     std::vector<float>& h,
     std::vector<float>& n,
     std::vector<float>& s,
+    std::vector<float>& caCa,
     std::vector<float>& lastSpikeTime
 ) {
     if (!available_) {
@@ -499,7 +531,8 @@ void CudaSimulator::downloadState(
     }
 
     if (v.size() != neuronCount_ || m.size() != neuronCount_ || h.size() != neuronCount_ ||
-        n.size() != neuronCount_ || s.size() != neuronCount_ || lastSpikeTime.size() != neuronCount_) {
+        n.size() != neuronCount_ || s.size() != neuronCount_ || caCa.size() != neuronCount_ ||
+        lastSpikeTime.size() != neuronCount_) {
         throw std::invalid_argument("CUDA download vectors must all match neuron count.");
     }
 
@@ -510,6 +543,7 @@ void CudaSimulator::downloadState(
     checkCuda(cudaMemcpy(h.data(), buffers_->h, floatBytes, cudaMemcpyDeviceToHost), "copy h D2H");
     checkCuda(cudaMemcpy(n.data(), buffers_->n, floatBytes, cudaMemcpyDeviceToHost), "copy n D2H");
     checkCuda(cudaMemcpy(s.data(), buffers_->s, floatBytes, cudaMemcpyDeviceToHost), "copy s D2H");
+    checkCuda(cudaMemcpy(caCa.data(), buffers_->caCa, floatBytes, cudaMemcpyDeviceToHost), "copy caCa D2H");
     checkCuda(cudaMemcpy(lastSpikeTime.data(), buffers_->lastSpikeTime, floatBytes, cudaMemcpyDeviceToHost), "copy lastSpike D2H");
 }
 

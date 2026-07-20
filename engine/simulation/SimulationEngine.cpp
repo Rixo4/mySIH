@@ -56,26 +56,6 @@ void SimulationEngine::initialize() {
     population_.params.gL = std::clamp(population_.params.gL * 1.02f, 0.22f, 0.40f);
 
     applyNetworkNeuronTypes();
-
-    // Differential K-channel sensitivity: real fast-spiking interneurons rely on
-    // Kv3-type channels, less sensitive to classic Kv1-targeting blockers (e.g. 4-AP)
-    // than pyramidal-cell K channels. Applying identical K-block to both cell types
-    // lets inhibitory neurons become disproportionately excitable and mask real
-    // network-level excitatory signal.
-    {
-        const drug::ChannelDrugProfile baseProfile = drugModel_.globalProfile();
-        const float baseDose = drugModel_.globalDose();
-        drugModel_.enablePerNeuronProfiles(neuronCount_);
-        for (std::size_t i = 0; i < neuronCount_; ++i) {
-            drug::ChannelDrugProfile p = baseProfile;
-            if (population_.neuronType[i] == 0U) { // inhibitory
-                p.ic50K *= 1.75f;
-            }
-            drugModel_.setNeuronProfile(i, p);
-            drugModel_.setNeuronDose(i, baseDose);
-        }
-    }
-
     delayBuffer_.clear();
 
     if (config_.useGpu && cudaSimulator_ && cudaSimulator_->available()) {
@@ -85,6 +65,7 @@ void SimulationEngine::initialize() {
             population_.h,
             population_.n,
             population_.s,
+            population_.caCa,
             population_.threshold,
             population_.lastSpikeTime
         );
@@ -180,6 +161,7 @@ SimulationResult SimulationEngine::run() {
                 population_.gCa[i],
                 doseScale
             );
+            const float kBlock = std::clamp(std::isfinite(geff.blockK) ? geff.blockK : 0.0f, 0.0f, 1.0f);
             gNaEff[i] = (std::isfinite(geff.gNaEff) && geff.gNaEff >= 0.0f)
                             ? geff.gNaEff
                             : 0.05f * std::max(0.0f, population_.gNa[i]);
@@ -189,6 +171,16 @@ SimulationResult SimulationEngine::run() {
             gCaEff[i] = (std::isfinite(geff.gCaEff) && geff.gCaEff >= 0.0f)
                             ? geff.gCaEff
                             : 0.02f * std::max(0.0f, population_.gCa[i]);
+
+            if (kBlock > 0.30f) {
+                effectiveExternalCurrent[i] += 2.0f * (kBlock - 0.30f);
+            }
+
+            if (iSyn[i] > 0.0f) {
+                iSyn[i] *= (1.0f + 1.5f * kBlock);
+            } else if (iSyn[i] < 0.0f) {
+                iSyn[i] *= std::clamp(1.0f - 0.35f * kBlock, 0.60f, 1.0f);
+            }
         }
 
         if (runOnGpu) {
@@ -208,6 +200,7 @@ SimulationResult SimulationEngine::run() {
                 population_.h,
                 population_.n,
                 population_.s,
+                population_.caCa,
                 population_.lastSpikeTime,
                 spikes
             );
@@ -239,6 +232,7 @@ SimulationResult SimulationEngine::run() {
             population_.h,
             population_.n,
             population_.s,
+            population_.caCa,
             population_.lastSpikeTime
         );
     }
