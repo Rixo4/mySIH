@@ -76,64 +76,6 @@ struct HHParameters {
     // deliberately if a calcium-independent AHP floor is ever wanted.
     float gAHPFloor = 0.0f;      // calcium-independent baseline AHP component
     float restingVoltage = -65.0f;
-
-    // ─── Synaptic receptor currents ────────────────────────────────────────
-    // Reversal potentials: AMPA/NMDA share the mixed-cation reversal
-    // (~0 mV, see ReceptorModel.h). GABA-A gets its own value -- deliberately
-    // separate from eK/eL, since chloride reversal is not a fixed physical
-    // constant the way eNa/eK/eCa are (depends on the cell's Cl- gradient).
-    // GABA-B has no constant here: it IS a K+ conductance and reuses eK
-    // directly wherever its current is computed.
-    float eAMPA = 0.0f;
-    float eNMDA = 0.0f;
-    float eGABAa = -70.0f;
-
-    // Peak synaptic conductance scale (mS/cm² per unit synaptic weight).
-    // Unlike eNa/eK/eCa (fixed physical reversal potentials) or the
-    // rise/decay time constants in ReceptorModel.h (literature-sourced
-    // kinetics), these have no direct literature equivalent -- translating
-    // a dimensionless per-synapse "weight" into a membrane current is a
-    // property of this model's own units, not something a paper reports.
-    // These are STARTING values requiring empirical calibration against
-    // baseline network health, the same way gCa/gAHP needed calibration
-    // rather than being usable straight from a citation.
-    //
-    // Calibration iteration 1 (gMaxAMPA=0.015, gMaxNMDA=0.010,
-    // gMaxGABAa/b=0.25) measured on real hardware: 1.50 Hz, 42% silent
-    // neurons -- too weak. Near resting voltage NMDA contributes almost
-    // nothing (Mg2+ block leaves it ~94% shut at -65mV, by design -- see
-    // ReceptorModel.h), so AMPA alone has to do essentially all the work
-    // of pushing a neuron toward threshold; 0.015 wasn't enough of it.
-    // Iteration 2: raised gMaxAMPA ~3.3x and eased inhibition down,
-    // since weaker net excitation combined with unchanged inhibition
-    // would silence even more of the network than iteration 1 did.
-    // Measured: 2.50 Hz, 0% silent -- silencing fixed, but still
-    // under-driven relative to the ~9-12 Hz / ~0.10-0.11 irregularity
-    // healthy range validated for the intrinsic-current baseline.
-    // Irregularity sitting at exactly 0.00 suggests firing is sparse and
-    // too uniform rather than genuinely shaped by network interaction.
-    // Iteration 3: AMPA up further; NMDA up more than iteration 2 too --
-    // once a neuron starts depolarizing (Mg block easing), NMDA should
-    // help sustain/propagate activity and contribute to richer, less
-    // uniform network dynamics, which iteration 2 was still missing.
-    // GABA left unchanged this pass -- isolating the excitatory side
-    // before touching inhibition again.
-    float gMaxAMPA = 0.09f;
-    float gMaxNMDA = 0.035f;
-    float gMaxGABAa = 0.15f;
-    float gMaxGABAb = 0.15f;
-};
-
-// Per-neuron effective synaptic conductances for one timestep -- already
-// peak-scaled (gMax * raw 0..1 conductance from Synapse) by the caller,
-// mirroring how gNaEff/gKEff/gCaEff arrive already drug-modulated. Kept as
-// a small standalone struct (rather than including synapse/Synapse.h here)
-// to avoid a synapse -> neuron -> synapse include cycle.
-struct SynapticConductances {
-    float gAMPAEff = 0.0f;
-    float gNMDAEff = 0.0f;
-    float gGABAaEff = 0.0f;
-    float gGABAbEff = 0.0f;
 };
 
 struct HHState {
@@ -200,8 +142,7 @@ HHDerivatives computeDerivatives(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params,
-    const SynapticConductances& synaptic = {}
+    const HHParameters& params
 );
 
 void rk4Step(
@@ -211,8 +152,7 @@ void rk4Step(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params,
-    const SynapticConductances& synaptic = {}
+    const HHParameters& params
 );
 
 bool isFiniteState(const HHState& state);
