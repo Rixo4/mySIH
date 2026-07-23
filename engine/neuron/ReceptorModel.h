@@ -1,17 +1,19 @@
 #pragma once
 
-// Phase 2 receptor pharmacology -- shared math used by AMPA/NMDA/GABA-A/
-// GABA-B synaptic currents. See PHASE2_PLAN.md for why this lives here
-// (synapse-level, not intrinsic neuron state like Na/K/Ca) and for the
-// open decisions this file resolves.
+// Receptor pharmacology -- shared math used by AMPA/NMDA/GABA-A/GABA-B
+// synaptic currents. These currents are synaptic (triggered per incoming
+// spike, with their own rise/decay kinetics), not intrinsic membrane
+// conductances like Na/K/Ca, so they belong here at the synapse level
+// rather than as new NeuronModel state.
 //
 // All kinetic constants below are literature-sourced representative
 // cortical values, not invented numbers -- see the citation in each
 // constant's comment. Where real biology varies by cell type/subunit
 // (NMDA GluN2A vs GluN2B decay; GABA-A reversal potential depends on the
 // intracellular Cl- gradient), a single representative value is used,
-// the same simplification Phase 1 made by using one HH parameter set
-// rather than modeling per-neuron-subtype variation.
+// the same simplification already used for the core Hodgkin-Huxley
+// parameters -- one representative set rather than modeling
+// per-neuron-subtype variation.
 
 namespace spp::neuron {
 

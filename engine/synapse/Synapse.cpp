@@ -1,9 +1,22 @@
 #include "Synapse.h"
+#include "../neuron/ReceptorModel.h"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace spp::synapse {
+
+namespace {
+
+// exp(-dt/tau), guarding against tau <= 0 (shouldn't happen given the
+// literature-sourced constants in ReceptorKinetics, but cheap to guard).
+inline float decayFactor(float dtMs, float tauMs) {
+    if (tauMs <= 0.0f) return 0.0f;
+    return std::exp(-dtMs / tauMs);
+}
+
+} // namespace
 
 DelayBuffer::DelayBuffer() : neuronCount_(0), delaySteps_(1), head_(0), buffer_() {}
 
@@ -115,6 +128,84 @@ void SynapseMatrix::accumulateSynapticCurrents(
 
         excitatoryCurrent[post] = iExc;
         inhibitoryCurrent[post] = iInh;
+    }
+}
+
+void SynapseMatrix::accumulateReceptorConductances(
+    const DelayBuffer& delayBuffer,
+    std::vector<ReceptorConductanceState>& states,
+    float dtMs,
+    std::vector<ReceptorConductances>& outConductances
+) const {
+    if (delayBuffer.neuronCount() != neuronCount_) {
+        throw std::invalid_argument("Delay buffer size does not match synapse matrix neuron count.");
+    }
+    if (states.size() != neuronCount_) {
+        throw std::invalid_argument("Receptor conductance state size does not match neuron count.");
+    }
+
+    outConductances.assign(neuronCount_, ReceptorConductances{});
+
+    using namespace spp::neuron::ReceptorKinetics;
+
+    // Precomputed once per call (dt is fixed within a run) rather than per
+    // neuron -- these are the only transcendental-function calls needed.
+    const float ampaDecayF  = decayFactor(dtMs, kAmpaTauDecayMs);
+    const float ampaRiseF   = decayFactor(dtMs, kAmpaTauRiseMs);
+    const float nmdaDecayF  = decayFactor(dtMs, kNmdaTauDecayMs);
+    const float nmdaRiseF   = decayFactor(dtMs, kNmdaTauRiseMs);
+    const float gabaADecayF = decayFactor(dtMs, kGabaATauDecayMs);
+    const float gabaARiseF  = decayFactor(dtMs, kGabaATauRiseMs);
+    const float gabaBDecayF = decayFactor(dtMs, kGabaBTauDecayMs);
+    const float gabaBRiseF  = decayFactor(dtMs, kGabaBTauRiseMs);
+
+    static const spp::neuron::DualExpKernel ampaKernel{kAmpaTauRiseMs, kAmpaTauDecayMs, 0.0f};
+    static const spp::neuron::DualExpKernel nmdaKernel{kNmdaTauRiseMs, kNmdaTauDecayMs, 0.0f};
+    static const spp::neuron::DualExpKernel gabaAKernel{kGabaATauRiseMs, kGabaATauDecayMs, 0.0f};
+    static const spp::neuron::DualExpKernel gabaBKernel{kGabaBTauRiseMs, kGabaBTauDecayMs, 0.0f};
+    const float ampaNorm  = ampaKernel.normFactor();
+    const float nmdaNorm  = nmdaKernel.normFactor();
+    const float gabaANorm = gabaAKernel.normFactor();
+    const float gabaBNorm = gabaBKernel.normFactor();
+
+    for (std::size_t post = 0; post < neuronCount_; ++post) {
+        const std::uint32_t begin = incomingOffsets_[post];
+        const std::uint32_t end = incomingOffsets_[post + 1];
+
+        float excInput = 0.0f;
+        float inhInput = 0.0f;
+
+        for (std::uint32_t idx = begin; idx < end; ++idx) {
+            const std::uint8_t spike = delayBuffer.getDelayedSpike(incomingPre_[idx], incomingDelay_[idx]);
+            if (spike == 0U) {
+                continue;
+            }
+            if (incomingSign_[idx] > 0) {
+                excInput += incomingWeight_[idx];
+            } else {
+                inhInput += incomingWeight_[idx];
+            }
+        }
+
+        ReceptorConductanceState& s = states[post];
+
+        // Decay first, then add this timestep's input -- the standard
+        // "decay then impulse" discretization, exact for a pure exponential
+        // between input events.
+        s.ampaDecay  = s.ampaDecay  * ampaDecayF  + excInput;
+        s.ampaRise   = s.ampaRise   * ampaRiseF   + excInput;
+        s.nmdaDecay  = s.nmdaDecay  * nmdaDecayF  + excInput;
+        s.nmdaRise   = s.nmdaRise   * nmdaRiseF   + excInput;
+        s.gabaADecay = s.gabaADecay * gabaADecayF + inhInput;
+        s.gabaARise  = s.gabaARise  * gabaARiseF  + inhInput;
+        s.gabaBDecay = s.gabaBDecay * gabaBDecayF + inhInput;
+        s.gabaBRise  = s.gabaBRise  * gabaBRiseF  + inhInput;
+
+        ReceptorConductances& out = outConductances[post];
+        out.gAMPA  = std::max(0.0f, ampaNorm  * (s.ampaDecay  - s.ampaRise));
+        out.gNMDA  = std::max(0.0f, nmdaNorm  * (s.nmdaDecay  - s.nmdaRise));
+        out.gGABAa = std::max(0.0f, gabaANorm * (s.gabaADecay - s.gabaARise));
+        out.gGABAb = std::max(0.0f, gabaBNorm * (s.gabaBDecay - s.gabaBRise));
     }
 }
 
