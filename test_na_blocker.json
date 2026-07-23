@@ -1,10 +1,10 @@
 {
-    "drug_name": "Lidocaine",
-    "channels": {
-        "Na": { "ic50": 1000.0,    "hill": 1.0 },
-        "K":  { "ic50": 1000.0, "hill": 1.0 },
-        "Ca": { "ic50": 1000.0, "hill": 1.0 }
-    },
-    "dose_range": { "min": 0.0, "max": 0.0, "step": 0.0 },
-    "runs": 3
+  "drug_name": "Flecainide",
+  "channels": {
+    "Na": { "ic50": 300.0, "hill": 1.0, "kon": 0.0, "koff": 1.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "dose_range": { "min": 0.0, "max": 1500.0, "step": 150.0 },
+  "runs": 8
 }

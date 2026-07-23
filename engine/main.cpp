@@ -66,6 +66,16 @@ struct SimulationConfig {
     double hill         = 3.0;
     double connectivity = 0.10;
     double excitatory_ratio     = 0.8;
+    // NOTE: the "fires once then goes silent" bug was NOT a drive problem --
+    // it was calcium-driven depolarization block (see the gCa comment in
+    // neuron/NeuronModel.h). Attempts to fix it by raising this value could
+    // never have worked: at gCa=8 the cell stopped firing at EVERY drive
+    // level tested, 2.5 through 120 uA/cm^2. This value was 2.5 originally
+    // and 2.5 is where it has landed again -- it was never the problem.
+    // Measured in-network for --simulate's regime (connectivity 0.10):
+    //   I=2 -> 9.8 Hz, I=5 -> 23.0 Hz, both with ~0% collapsed neurons.
+    // 2.5 targets a ~12 Hz baseline, leaving headroom for drugs to move
+    // firing rate both up and down.
     double external_current     = 2.5;
     double noise_level          = 0.35;
     double excitatory_weight_scale = 1.0;
@@ -883,6 +893,10 @@ std::string buildDrugEvaluationReportText(
     aLine("Safety Observation",
           toxDet ? "Toxicity observed within tested range"
                  : "No toxicity within tested range");
+    if (report.hasSafetyMarginRatio) {
+        aLine("Safety Margin", formatRuntimeNumber(report.safetyMarginRatio, 1) + "x"
+              + (report.narrowSafetyMargin ? " (narrow therapeutic index)" : " (wide margin)"));
+    }
     out << "\n--------------------------------------------------\n\n";
 
     out << "[" << winTitle << "]\n";
@@ -1080,6 +1094,11 @@ void runDoseEvaluationMode(
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_IC50_CA");v&&*v>0) evalInput.config.ic50_ca=*v;
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL");   v&&*v>=1&&*v<=6) evalInput.config.hill=*v;
     }
+    // Diagnostic overrides for baseline-dynamics tuning -- unconditional
+    // (unlike the drug-parameter overrides above) since dt/external_current
+    // affect network dynamics regardless of which drug config is loaded.
+    if(auto v=tryEnvDouble("SPP_DOSE_EVAL_DT");                v&&*v>0) evalInput.config.dt = *v;
+    if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EXTERNAL_CURRENT");  v)       evalInput.config.external_current = *v;
 
     double minD  = jsonDoseMin.value_or(kDefaultMinDose);
     double maxD  = jsonDoseMax.value_or(kDefaultMaxDose);
@@ -1223,7 +1242,16 @@ int main(int argc, char** argv) {
             input.config.dt                     = 0.04;
             input.config.connectivity           = 0.05;
             input.config.excitatory_ratio       = 0.80;
-            input.config.external_current       = 1.05;
+            // --dose-eval has its own dt/connectivity/noise regime and is
+            // tuned separately from the SimulationConfig default above.
+            // Measured in-network (1320 neurons, 500 ms, connectivity 0.05):
+            //   I=1 -> 3.7 Hz (23% of neurons still sub-threshold)
+            //   I=2 -> 15.6 Hz, 0% collapsed   <-- operating point
+            //   I=4 -> 19.9 Hz,  I=12 -> 26.6 Hz
+            // Recurrent synaptic drive amplifies well above the single-neuron
+            // rate, which is why this is much smaller than it looks like it
+            // should be from single-cell characterisation alone.
+            input.config.external_current       = 2.0;
             input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;
             input.config.inhibitory_weight_scale = 1.00;

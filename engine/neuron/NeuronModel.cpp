@@ -145,7 +145,9 @@ HHDerivatives computeDerivatives(
     const float iNa = gNaEff * state.m * state.m * state.m * state.h * (state.v - params.eNa);
     const float iK = gKEff * state.n * state.n * state.n * state.n * (state.v - params.eK);
     const float iCa = gCaEff * state.s * state.s * (state.v - params.eCa);
-    const float iAHP = params.gAHP * state.caCa * (state.v - params.eK);
+    // gAHPFloor keeps a small calcium-independent brake active even when
+    // caCa is near zero -- see HHParameters comment in NeuronModel.h.
+    const float iAHP = (params.gAHP * state.caCa + params.gAHPFloor) * (state.v - params.eK);
     const float iL = params.gL * (state.v - params.eL);
     const float caInflux = params.kCa * std::max(0.0f, -iCa);
 

@@ -158,7 +158,8 @@ std::string computeConfidence(
 std::string buildNarrative(
     const AnalyzedDose& peakDose,
     MechanismSignature mechanism,
-    const std::string& responseMode)
+    const std::string& responseMode,
+    double maxEffectPct)
 {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1);
@@ -170,7 +171,15 @@ std::string buildNarrative(
             << std::max(0.0f, peakDose.irregularityDelta) << " units. ";
         if (peakDose.rateChangePct > 5.0f)
             oss << "Firing rate increased " << peakDose.rateChangePct << "% from baseline. ";
-        oss << "Network excitability exceeded safe stability limits.";
+        // Same magnitude gate as Step 9's `excitatory` bool below (maxEffectPct
+        // > 10.0) -- responseMode alone is categorical (see comment on
+        // `excitatory` in evaluate()). Without this, a 2% Nimodipine wobble
+        // printed "Network excitability exceeded safe stability limits"
+        // directly above a LOW RISK / LIMITED EFFICACY final decision.
+        if (maxEffectPct > 10.0)
+            oss << "Network excitability exceeded safe stability limits.";
+        else
+            oss << "Effect magnitude was minimal and did not represent a safety concern.";
 
     } else if (responseMode == "STABILIZING_RESPONSE") {
         oss << "Synchronization reduced by " << peakDose.syncReductionPct << "% from baseline. "
@@ -198,8 +207,28 @@ std::string buildSafetyText(
     NetworkState dominantState,
     bool toxicityBeforeTherapy,
     bool toxicityAfterTherapy,
-    bool lowStability)
+    bool lowStability,
+    bool excitatoryVerdict,
+    bool narrowMarginCarveOut,
+    double safetyMarginRatio)
 {
+    // Checked before the dominantState switch below: a real, if narrow,
+    // safety margin changes the honest description even when the worst
+    // per-dose state is severe (e.g. Neural Suppression at 1.5x the top of
+    // the therapeutic window). Without this, drugs like phenytoin printed
+    // "Complete suppression of neural activity is incompatible with
+    // therapeutic use" -- true of the toxic dose, false as a description of
+    // the drug's overall safety profile, which does have a usable window.
+    if (narrowMarginCarveOut) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1)
+            << "A real but narrow therapeutic window was identified. Dangerous "
+               "network states were observed only at roughly " << safetyMarginRatio
+            << "x the top of that window, not within it. This is not an immediate "
+               "safety failure at therapeutic doses, but the margin for dosing "
+               "error is small and careful titration is required.";
+        return oss.str();
+    }
     switch (dominantState) {
         case NetworkState::NeuralSuppression:
             return "Complete suppression of neural activity is incompatible with "
@@ -215,6 +244,19 @@ std::string buildSafetyText(
             return "Depolarization block pattern detected; network activity collapsed "
                    "following initial excitation.";
         default:
+            // FIX: this switch used to key ONLY on per-dose worst network
+            // state (dominantState) and toxic-threshold timing, completely
+            // independent of responseMode/the recommendation logic below.
+            // A drug can earn EXCITATORY_RESPONSE / NOT RECOMMENDED / HIGH
+            // RISK from cumulative evidence without any single dose ever
+            // reaching a severe per-dose state (stays "Stable" throughout) --
+            // e.g. 4-Aminopyridine. That fell through to a "therapeutic
+            // window" / "favorable" message that directly contradicted the
+            // verdict printed two lines below it. Checking the same
+            // excitatory signal the recommendation uses closes that gap.
+            if (excitatoryVerdict)
+                return "Observed increases in firing rate, burst activity, or irregularity "
+                       "represent an unacceptable safety risk.";
             if (toxicityBeforeTherapy)
                 return "Toxicity markers appeared before the therapeutic window; "
                        "dose-response ordering is unsafe.";
@@ -502,6 +544,28 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.hasToxicThreshold && therapeuticWindowExists &&
         report.toxicThresholdDoseEval > report.effectiveRangeMax;
 
+    // ─── Safety margin ─────────────────────────────────────────────────────
+    // Only meaningful when there IS a real continuous therapeutic window AND
+    // toxicity/danger appears strictly above it. Ratio = toxic dose / top of
+    // window -- e.g. Phenytoin: toxic threshold 60, window top 40 -> 1.5x.
+    // Thresholds follow the clinical "therapeutic index" convention: <2x is
+    // considered a narrow therapeutic index (phenytoin, carbamazepine,
+    // digoxin, lithium are the textbook examples and are still prescribed
+    // drugs); >=3x is comfortably wide. 1.2x floor below "narrow" guards
+    // against calling a razor-thin, essentially-zero gap a "real margin"
+    // just because the next tested dose happens to be toxic.
+    double safetyMarginRatio = 0.0;
+    bool hasQualifyingWindow = toxicityAfterTherapy && report.effectiveRangeMax > 1.0e-9;
+    if (hasQualifyingWindow)
+        safetyMarginRatio = report.toxicThresholdDoseEval / report.effectiveRangeMax;
+    const bool marginTooThin = !hasQualifyingWindow || safetyMarginRatio < 1.2;
+    const bool marginNarrow  = hasQualifyingWindow && safetyMarginRatio >= 1.2 && safetyMarginRatio < 3.0;
+    // >=3x is a comfortably wide margin -- don't blanket-fail these either;
+    // let them fall through to the existing therapeuticWindowExists &&
+    // toxicityAfterTherapy CAUTION/MODERATE branch further down, which is
+    // strictly more lenient than the narrow-margin tier above it.
+    const bool marginWide    = hasQualifyingWindow && safetyMarginRatio >= 3.0;
+
     // ─── Step 6: Peak dose for narrative ─────────────────────────────────────
     std::size_t peakIdx = 0;
     float peakScore = 0.0f;
@@ -527,11 +591,49 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.curveType = (report.sigmoidR2 >= 0.95)
                             ? "Sigmoidal Stabilization" : "Stabilizing Response";
 
+    // Computed here (rather than in Step 9 below) so Step 8's safety text
+    // and Step 9's recommendation are guaranteed to agree -- both are built
+    // from these same two booleans instead of being derived independently.
+    const bool dangerous =
+        dominantState == NetworkState::NeuralSuppression ||
+        dominantState == NetworkState::SeizureActive     ||
+        dominantState == NetworkState::DepolarizationBlock;
+    // responseMode=="EXCITATORY_RESPONSE" is a categorical label from Step 2 --
+    // it fires whenever cumulative excitation edges out suppression/
+    // stabilization, with no regard for size. That's correct for a real
+    // convulsant (4-Aminopyridine: large swings, dominantState never leaves
+    // Stable per-dose, still genuinely dangerous). It is WRONG for a drug
+    // whose peak effect is a few percent of baseline -- e.g. Nimodipine at
+    // gAHP=1.0 showed Max Effect 2%, Rate Change 4.1%, Burst Delta 0.00 Hz,
+    // Irregularity Delta -0.137 (down, not up), Stability Score HIGH -- yet
+    // was still escalated to "NOT RECOMMENDED / HIGH RISK / exceeded safe
+    // stability limits", a description contradicted by its own printed
+    // numbers. dominantState==Hyperexcitable is already a real per-dose
+    // severity check and needs no gate; only the categorical responseMode
+    // path needs a magnitude floor. 10% matches the threshold this file
+    // already uses elsewhere (computeConfidence) to distinguish a notable
+    // effect from noise.
+    const bool excitatory =
+        dominantState == NetworkState::Hyperexcitable ||
+        (report.responseMode == "EXCITATORY_RESPONSE" && maxEffectPct > 10.0);
+    const bool stabilizing = report.responseMode == "STABILIZING_RESPONSE";
+
+    // The narrow-margin carve-out only applies to the suppression/"dangerous"
+    // path, not to excitatory or before-therapy toxicity -- those never have
+    // a real window to measure a margin from (see hasQualifyingWindow above,
+    // which is already gated on toxicityAfterTherapy).
+    const bool narrowMarginCarveOut = dangerous && marginNarrow;
+
+    report.hasSafetyMarginRatio = hasQualifyingWindow;
+    report.safetyMarginRatio    = safetyMarginRatio;
+    report.narrowSafetyMargin   = narrowMarginCarveOut;
+
     // ─── Step 8: Narrative ────────────────────────────────────────────────────
     report.primaryChangeText = buildNarrative(
-        sorted[peakIdx], report.dominantMechanism, report.responseMode);
+        sorted[peakIdx], report.dominantMechanism, report.responseMode, maxEffectPct);
     report.safetyInterpretationText = buildSafetyText(
-        dominantState, toxicityBeforeTherapy, toxicityAfterTherapy, lowStability);
+        dominantState, toxicityBeforeTherapy, toxicityAfterTherapy, lowStability, excitatory,
+        narrowMarginCarveOut, safetyMarginRatio);
 
     // Metric reductions at final dose
     const AnalyzedDose& finalDose = sorted.back();
@@ -547,16 +649,33 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                                  report.stabilizationScore > 0.30f);
 
     // ─── Step 9: Recommendation ───────────────────────────────────────────────
-    const bool dangerous =
-        dominantState == NetworkState::NeuralSuppression ||
-        dominantState == NetworkState::SeizureActive     ||
-        dominantState == NetworkState::DepolarizationBlock;
-    const bool excitatory =
-        dominantState == NetworkState::Hyperexcitable ||
-        report.responseMode == "EXCITATORY_RESPONSE";
-    const bool stabilizing = report.responseMode == "STABILIZING_RESPONSE";
+    // dangerous/excitatory/stabilizing computed earlier, just above Step 8,
+    // so the safety narrative and this recommendation can't disagree.
+    //
+    // narrowMarginCarveOut is checked BEFORE the blanket dangerous/excitatory
+    // branch. Previously `dangerous` alone (any dose ever hitting Neural
+    // Suppression/Seizure/Depolarization Block) always won this if-chain,
+    // so a genuine narrow-therapeutic-index drug (phenytoin: toxic dose
+    // only 1.5x the top of its own continuous 20-40 therapeutic window)
+    // got the identical "NOT RECOMMENDED / exceeded safe stability limits"
+    // verdict as a drug with no usable window at all. Real narrow-TI drugs
+    // (phenytoin, carbamazepine, lithium, digoxin, warfarin) are still
+    // prescribed clinically -- collapsing "narrow but real" into "unusable"
+    // loses exactly the distinction a triage tool should be making.
+    if (narrowMarginCarveOut) {
+        report.recommendation = "CAUTION";
+        report.riskLevel      = "HIGH";
+        report.overallTier    = DrugRiskTier::HighRisk;
+        std::ostringstream r;
+        r << std::fixed << std::setprecision(1)
+          << "A real therapeutic window was identified, but the safety margin "
+             "to dangerous network states is narrow (approximately "
+          << safetyMarginRatio << "x). Careful dose titration and monitoring "
+             "are required; this is a narrow-therapeutic-index profile, not "
+             "an absence of therapeutic use.";
+        report.reason = r.str();
 
-    if (dangerous || excitatory || toxicityBeforeTherapy) {
+    } else if ((dangerous && !marginWide) || excitatory || toxicityBeforeTherapy) {
         report.recommendation = "NOT RECOMMENDED";
         report.riskLevel      = "HIGH";
         report.overallTier    = DrugRiskTier::Toxic;
@@ -565,7 +684,8 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                             "safe neural stability limits across the tested dose range.";
         else if (dangerous)
             report.reason = "Network activity collapsed or seizure-level instability "
-                            "was observed within the tested dose range.";
+                            "was observed within the tested dose range, with no "
+                            "meaningful safety margin from the therapeutic window.";
         else
             report.reason = "Instability markers appeared at doses below the therapeutic "
                             "window; the dose-response ordering is unsafe.";

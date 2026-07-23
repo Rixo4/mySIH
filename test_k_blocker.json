@@ -1,14 +1,10 @@
 {
-    "drug_name": "Test-K-Blocker",
-    "channels": {
-        "Na": { "ic50": 1000.0, "hill": 3.2 },
-        "K":  { "ic50": 200.0,    "hill": 3.2 },
-        "Ca": { "ic50": 1000.0, "hill": 3.2 }
-    },
-    "dose_range": {
-        "min": 0.0,
-        "max": 200.0,
-        "step": 20.0
-    },
-    "runs": 3
+  "drug_name": "Tetraethylammonium (TEA)",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 5800.0, "hill": 1.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "dose_range": { "min": 0.0, "max": 29000.0, "step": 2900.0 },
+  "runs": 8
 }

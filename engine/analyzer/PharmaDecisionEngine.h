@@ -77,6 +77,16 @@ struct PharmaDecisionReport {
     float therapeuticWindow    = 0.0f;
     std::string windowQuality  = "Not observed";
 
+    // Safety margin: ratio of toxic threshold dose to the top of the
+    // therapeutic window, when a real window exists and toxicity appears
+    // strictly above it (see buildNarrowMarginNote in .cpp for how this
+    // feeds the recommendation -- distinguishes "narrow but real margin"
+    // e.g. classic narrow-therapeutic-index drugs like phenytoin, from
+    // "no usable margin at all").
+    bool   hasSafetyMarginRatio = false;
+    double safetyMarginRatio    = 0.0;
+    bool   narrowSafetyMargin   = false;
+
     // Safe range
     bool  hasSafeRange  = false;
     float safeMinDose   = 0.0f;

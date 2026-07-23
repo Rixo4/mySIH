@@ -94,13 +94,14 @@ __device__ Deriv derivatives(
     float eL,
     float gAHP,
     float tauCa,
-    float kCa
+    float kCa,
+    float gAHPFloor
 ) {
     Deriv d;
     const float iNa = gNa * m * m * m * h * (v - eNa);
     const float iK = gK * n * n * n * n * (v - eK);
     const float iCa = gCa * s * s * (v - eCa);
-    const float iAHP = gAHP * caCa * (v - eK);
+    const float iAHP = (gAHP * caCa + gAHPFloor) * (v - eK);
     const float iLeak = gL * (v - eL);
     const float caInflux = kCa * fmaxf(0.0f, -iCa);
 
@@ -186,7 +187,7 @@ __device__ void integrateNeuronState(
 
     const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
@@ -198,7 +199,7 @@ __device__ void integrateNeuronState(
 
     const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
@@ -210,7 +211,7 @@ __device__ void integrateNeuronState(
 
     const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
@@ -222,7 +223,7 @@ __device__ void integrateNeuronState(
 
     const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
@@ -407,6 +408,7 @@ __global__ void hhStepKernel(
     float gAHP,
     float tauCa,
     float kCa,
+    float gAHPFloor,
     float restV,
     float refractoryMs,
     const float* iSyn,
@@ -448,7 +450,7 @@ __global__ void hhStepKernel(
     const float safeGK = (isfinite(gKEff[i]) && gKEff[i] >= 0.0f) ? gKEff[i] : 0.0f;
     const float safeGCa = (isfinite(gCaEff[i]) && gCaEff[i] >= 0.0f) ? gCaEff[i] : 0.0f;
 
-    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
+    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
@@ -458,7 +460,7 @@ __global__ void hhStepKernel(
     float y2ca = yca + 0.5f * dtMs * k1.dcaCa;
     clampState(y2v, y2m, y2h, y2n, y2s, y2ca);
 
-    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
+    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
@@ -468,7 +470,7 @@ __global__ void hhStepKernel(
     float y3ca = yca + 0.5f * dtMs * k2.dcaCa;
     clampState(y3v, y3m, y3h, y3n, y3s, y3ca);
 
-    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
+    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
@@ -478,7 +480,7 @@ __global__ void hhStepKernel(
     float y4ca = yca + dtMs * k3.dcaCa;
     clampState(y4v, y4m, y4h, y4n, y4s, y4ca);
 
-    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa);
+    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
@@ -857,6 +859,7 @@ void CudaSimulator::step(
         params.gAHP,
         params.tauCa,
         params.kCa,
+        params.gAHPFloor,
         params.restingVoltage,
         refractoryMs,
         buffers_->iSyn,
