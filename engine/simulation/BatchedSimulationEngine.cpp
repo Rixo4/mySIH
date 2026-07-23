@@ -1,4 +1,5 @@
 #include "BatchedSimulationEngine.h"
+#include "../neuron/ReceptorModel.h"
 
 #include <algorithm>
 #include <array>
@@ -228,6 +229,8 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<float> iInhPulse(totalNeurons_, 0.0f);
     std::vector<float> iExcState(totalNeurons_, 0.0f);
     std::vector<float> iInhState(totalNeurons_, 0.0f);
+    std::vector<float> iNmdaState(totalNeurons_, 0.0f);
+    std::vector<float> iGabaBState(totalNeurons_, 0.0f);
     std::vector<float> iSyn(totalNeurons_, 0.0f);
     std::vector<float> iNoise(totalNeurons_, 0.0f);
 
@@ -251,6 +254,15 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
     const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
+    const float nmdaDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauNmdaMs));
+    const float nmdaFraction = std::clamp(config_.nmdaFraction, 0.0f, 1.0f);
+    const float gabaAFraction = std::clamp(config_.gabaAFraction, 0.0f, 1.0f);
+    const float gabaADrivingForceAtRest = population_.params.restingVoltage - config_.eGABAa;
+    const float gabaASafeDenom = (std::fabs(gabaADrivingForceAtRest) > 1.0e-3f) ? gabaADrivingForceAtRest : 1.0f;
+    const float gabaBDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauGabaBMs));
+    const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
+    const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
+    const float gabaBSafeDenom = (std::fabs(gabaBDrivingForceAtRest) > 1.0e-3f) ? gabaBDrivingForceAtRest : 1.0f;
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -353,13 +365,39 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            const float excAccum = iExcState[i] * excDecay + iExcPulse[i];
-            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i];
+            // Same small NMDA addition as SimulationEngine::run(): a fraction
+            // of the excitatory pulse goes into a slower pool gated by the
+            // voltage-dependent Mg2+ block, ~94% shut at rest.
+            const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * (1.0f - nmdaFraction);
+            // Fast inhibitory pool gets (1 - gabaBFraction) of the pulse; the
+            // rest is diverted into the slow GABA-B pool below.
+            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i] * (1.0f - gabaBFraction);
+            const float nmdaAccum = iNmdaState[i] * nmdaDecay + iExcPulse[i] * nmdaFraction;
+            const float gabaBAccum = iGabaBState[i] * gabaBDecay + iInhPulse[i] * gabaBFraction;
 
             iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
             iInhState[i] = std::clamp(inhAccum, 0.0f, config_.maxSynCurrent);
+            iNmdaState[i] = std::clamp(nmdaAccum, 0.0f, config_.maxSynCurrent);
+            // Own tight ceiling, not the shared maxSynCurrent -- see the long
+            // comment on gabaBMaxCurrent in SimulationEngine.h.
+            iGabaBState[i] = std::clamp(gabaBAccum, 0.0f, config_.gabaBMaxCurrent);
 
-            const float synCurrent = iExcState[i] - iInhState[i];
+            const float mgUnblock = spp::neuron::nmdaMgBlockFraction(population_.v[i]);
+            const float iNmdaEff = iNmdaState[i] * mgUnblock;
+
+            // Same GABA-A reweighting as SimulationEngine::run() -- no new
+            // state, exactly 1.0x at resting voltage, grows with depolarization.
+            const float gabaADrivingForceNow = population_.v[i] - config_.eGABAa;
+            const float gabaARatio = std::clamp(gabaADrivingForceNow / gabaASafeDenom, 0.0f, 2.0f);
+            const float gabaAWeight = (1.0f - gabaAFraction) + gabaAFraction * gabaARatio;
+            const float iInhEffective = iInhState[i] * gabaAWeight;
+
+            // GABA-B: separate slow pool, own ratio anchored at 1.0x at rest.
+            const float gabaBDrivingForceNow = population_.v[i] - population_.params.eK;
+            const float gabaBRatio = std::clamp(gabaBDrivingForceNow / gabaBSafeDenom, 0.0f, 2.0f);
+            const float iGabaBEff = iGabaBState[i] * gabaBRatio;
+
+            const float synCurrent = (iExcState[i] + iNmdaEff) - iInhEffective - iGabaBEff;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {

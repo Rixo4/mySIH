@@ -1,4 +1,5 @@
 #include "SimulationEngine.h"
+#include "../neuron/ReceptorModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -90,6 +91,8 @@ SimulationResult SimulationEngine::run() {
     std::vector<float> iInhPulse(neuronCount_, 0.0f);
     std::vector<float> iExcState(neuronCount_, 0.0f);
     std::vector<float> iInhState(neuronCount_, 0.0f);
+    std::vector<float> iNmdaState(neuronCount_, 0.0f);
+    std::vector<float> iGabaBState(neuronCount_, 0.0f);
     std::vector<float> iSyn(neuronCount_, 0.0f);
     std::vector<float> iNoise(neuronCount_, 0.0f);
 
@@ -106,6 +109,15 @@ SimulationResult SimulationEngine::run() {
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
     const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
+    const float nmdaDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauNmdaMs));
+    const float nmdaFraction = std::clamp(config_.nmdaFraction, 0.0f, 1.0f);
+    const float gabaAFraction = std::clamp(config_.gabaAFraction, 0.0f, 1.0f);
+    const float gabaADrivingForceAtRest = population_.params.restingVoltage - config_.eGABAa;
+    const float gabaASafeDenom = (std::fabs(gabaADrivingForceAtRest) > 1.0e-3f) ? gabaADrivingForceAtRest : 1.0f;
+    const float gabaBDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauGabaBMs));
+    const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
+    const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
+    const float gabaBSafeDenom = (std::fabs(gabaBDrivingForceAtRest) > 1.0e-3f) ? gabaBDrivingForceAtRest : 1.0f;
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -133,13 +145,48 @@ SimulationResult SimulationEngine::run() {
         for (std::size_t i = 0; i < neuronCount_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            const float excAccum = iExcState[i] * excDecay + iExcPulse[i];
-            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i];
+            // Fast (AMPA-like) pool gets the majority share; the rest is
+            // diverted into the slow, Mg2+-block-gated NMDA-like pool below.
+            const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * (1.0f - nmdaFraction);
+            // Fast inhibitory pool now gets (1 - gabaBFraction) of the pulse;
+            // the rest is diverted into the slow GABA-B pool below.
+            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i] * (1.0f - gabaBFraction);
+            const float nmdaAccum = iNmdaState[i] * nmdaDecay + iExcPulse[i] * nmdaFraction;
+            const float gabaBAccum = iGabaBState[i] * gabaBDecay + iInhPulse[i] * gabaBFraction;
 
             iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
             iInhState[i] = std::clamp(inhAccum, 0.0f, config_.maxSynCurrent);
+            iNmdaState[i] = std::clamp(nmdaAccum, 0.0f, config_.maxSynCurrent);
+            // Own tight ceiling, not the shared maxSynCurrent -- see the long
+            // comment on gabaBMaxCurrent in SimulationEngine.h for why.
+            iGabaBState[i] = std::clamp(gabaBAccum, 0.0f, config_.gabaBMaxCurrent);
 
-            const float synCurrent = iExcState[i] - iInhState[i];
+            // Voltage-dependent Mg2+ block uses this step's starting voltage
+            // (same "old V" convention already used for spike-crossing
+            // detection below) -- at rest this is ~94% blocked, so the NMDA
+            // pool contributes almost nothing until the neuron actually
+            // depolarizes.
+            const float mgUnblock = spp::neuron::nmdaMgBlockFraction(population_.v[i]);
+            const float iNmdaEff = iNmdaState[i] * mgUnblock;
+
+            // GABA-A reweighting: no new state, just a driving-force ratio
+            // applied to the existing flat inhibitory current at output time.
+            // At resting voltage this ratio is exactly 1.0 (gabaAWeight ==
+            // 1.0), so behavior is identical to the validated baseline there;
+            // it only grows as the neuron depolarizes toward threshold.
+            const float gabaADrivingForceNow = population_.v[i] - config_.eGABAa;
+            const float gabaARatio = std::clamp(gabaADrivingForceNow / gabaASafeDenom, 0.0f, 2.0f);
+            const float gabaAWeight = (1.0f - gabaAFraction) + gabaAFraction * gabaARatio;
+            const float iInhEffective = iInhState[i] * gabaAWeight;
+
+            // GABA-B: separate slow pool, own driving force ratio anchored
+            // at 1.0x at resting voltage (reuses eK -- GABA-B is a K+
+            // conductance), same 2x ceiling as GABA-A for consistency.
+            const float gabaBDrivingForceNow = population_.v[i] - population_.params.eK;
+            const float gabaBRatio = std::clamp(gabaBDrivingForceNow / gabaBSafeDenom, 0.0f, 2.0f);
+            const float iGabaBEff = iGabaBState[i] * gabaBRatio;
+
+            const float synCurrent = (iExcState[i] + iNmdaEff) - iInhEffective - iGabaBEff;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {
