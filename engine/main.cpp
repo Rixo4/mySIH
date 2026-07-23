@@ -1099,6 +1099,9 @@ void runDoseEvaluationMode(
     // affect network dynamics regardless of which drug config is loaded.
     if(auto v=tryEnvDouble("SPP_DOSE_EVAL_DT");                v&&*v>0) evalInput.config.dt = *v;
     if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EXTERNAL_CURRENT");  v)       evalInput.config.external_current = *v;
+    // See SPP_FORCE_CPU comment under --simulate -- same reasoning applies
+    // here for --dose-eval.
+    if(auto t=readEnvVar("SPP_FORCE_CPU")){ if(trim(*t)=="1") evalInput.config.use_cuda=false; }
 
     double minD  = jsonDoseMin.value_or(kDefaultMinDose);
     double maxD  = jsonDoseMax.value_or(kDefaultMaxDose);
@@ -1224,6 +1227,12 @@ int main(int argc, char** argv) {
         if(mode == "--simulate") {
             RuntimeInput input;
             input.run_dose_sweep = false;
+            // SPP_FORCE_CPU=1 forces the CPU fallback path even on a
+            // machine with a working CUDA build -- needed to test the
+            // receptor-conductance synaptic model, which (as of this
+            // change) is only wired into the CPU path; the GPU kernels
+            // have not been updated to match yet.
+            if(auto t=readEnvVar("SPP_FORCE_CPU")){ if(trim(*t)=="1") input.config.use_cuda=false; }
             validateConfig(input.config);
             runSingleSimulationMode(input);
             return 0;
