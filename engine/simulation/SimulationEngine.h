@@ -83,7 +83,7 @@ private:
     void applyNetworkNeuronTypes();
     void cpuStep(
         float timeMs,
-        const std::vector<neuron::SynapticConductances>& synaptic,
+        const std::vector<float>& synapticCurrent,
         const std::vector<float>& externalCurrent,
         const std::vector<float>& noiseCurrent,
         const std::vector<float>& gNaEff,

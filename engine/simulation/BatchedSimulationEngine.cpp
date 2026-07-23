@@ -224,14 +224,12 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         r.durationMs = config_.durationMs;
     }
 
-    std::vector<synapse::ReceptorConductanceState> receptorStates(totalNeurons_);
-    std::vector<synapse::ReceptorConductances> receptorConductances(totalNeurons_);
-    std::vector<neuron::SynapticConductances> synapticEff(totalNeurons_);
+    std::vector<float> iExcPulse(totalNeurons_, 0.0f);
+    std::vector<float> iInhPulse(totalNeurons_, 0.0f);
+    std::vector<float> iExcState(totalNeurons_, 0.0f);
+    std::vector<float> iInhState(totalNeurons_, 0.0f);
+    std::vector<float> iSyn(totalNeurons_, 0.0f);
     std::vector<float> iNoise(totalNeurons_, 0.0f);
-    // GPU path (below, #ifdef SPP_USE_CUDA / cudaSimulator_->step) has not
-    // been updated to the receptor-conductance model yet -- it receives
-    // zero synaptic drive until that mirroring is done.
-    std::vector<float> iSynGpuPlaceholder(totalNeurons_, 0.0f);
 
     std::vector<float> gNaEff(totalNeurons_, 0.0f);
     std::vector<float> gKEff(totalNeurons_, 0.0f);
@@ -251,6 +249,8 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
 
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
+    const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
+    const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -336,7 +336,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                                     ? (1.0f - std::exp(-timeMs / drugOnsetTauMs))
                                     : 1.0f;
 
-        matrix_.accumulateReceptorConductances(delayBuffer_, receptorStates, config_.dtMs, receptorConductances);
+        matrix_.accumulateSynapticCurrents(delayBuffer_, iExcPulse, iInhPulse);
 
         for (std::size_t b = 0; b < blockCount_; ++b) {
             const float effDose = blockDoses_[b] * doseScale;
@@ -353,11 +353,18 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            const synapse::ReceptorConductances& rc = receptorConductances[i];
-            synapticEff[i].gAMPAEff  = population_.params.gMaxAMPA  * rc.gAMPA;
-            synapticEff[i].gNMDAEff  = population_.params.gMaxNMDA  * rc.gNMDA;
-            synapticEff[i].gGABAaEff = population_.params.gMaxGABAa * rc.gGABAa;
-            synapticEff[i].gGABAbEff = population_.params.gMaxGABAb * rc.gGABAb;
+            const float excAccum = iExcState[i] * excDecay + iExcPulse[i];
+            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i];
+
+            iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
+            iInhState[i] = std::clamp(inhAccum, 0.0f, config_.maxSynCurrent);
+
+            const float synCurrent = iExcState[i] - iInhState[i];
+            if (!std::isfinite(synCurrent)) {
+                iSyn[i] = 0.0f;
+            } else {
+                iSyn[i] = std::clamp(synCurrent, -config_.maxSynCurrent, config_.maxSynCurrent);
+            }
 
             iNoise[i] = unitNormal(rng_) * population_.noiseStd[i];
             if (!std::isfinite(iNoise[i])) {
@@ -393,7 +400,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 config_.dtMs,
                 population_.params,
                 config_.refractoryMs,
-                iSynGpuPlaceholder,
+                iSyn,
                 effectiveExternalCurrent,
                 iNoise,
                 gNaEff,
@@ -423,13 +430,13 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 state.s = population_.s[i];
                 state.caCa = population_.caCa[i];  // FIX: carry Ca concentration across timesteps
 
-                float iTotal = effectiveExternalCurrent[i] + iNoise[i];
+                float iTotal = effectiveExternalCurrent[i] + iSyn[i] + iNoise[i];
                 if (!std::isfinite(iTotal)) {
                     iTotal = 0.0f;
                 }
                 iTotal = std::clamp(iTotal, -config_.maxTotalCurrent, config_.maxTotalCurrent);
 
-                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params, synapticEff[i]);
+                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params);
 
                 const bool inRefractory = (timeMs - population_.lastSpikeTime[i]) < config_.refractoryMs;
                 const bool crossed = (oldV <= population_.threshold[i]) && (state.v > population_.threshold[i]);
