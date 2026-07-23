@@ -263,6 +263,9 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
     const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
     const float gabaBSafeDenom = (std::fabs(gabaBDrivingForceAtRest) > 1.0e-3f) ? gabaBDrivingForceAtRest : 1.0f;
+    const float ampaFraction = std::clamp(config_.ampaFraction, 0.0f, 1.0f);
+    const float ampaDrivingForceAtRest = population_.params.restingVoltage - config_.eAMPA;
+    const float ampaSafeDenom = (std::fabs(ampaDrivingForceAtRest) > 1.0e-3f) ? ampaDrivingForceAtRest : 1.0f;
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -397,7 +400,14 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float gabaBRatio = std::clamp(gabaBDrivingForceNow / gabaBSafeDenom, 0.0f, 2.0f);
             const float iGabaBEff = iGabaBState[i] * gabaBRatio;
 
-            const float synCurrent = (iExcState[i] + iNmdaEff) - iInhEffective - iGabaBEff;
+            // AMPA reweighting: narrow [0.7, 1.3] clamp -- see the long
+            // comment on ampaFraction in SimulationEngine.h.
+            const float ampaDrivingForceNow = population_.v[i] - config_.eAMPA;
+            const float ampaRatio = std::clamp(ampaDrivingForceNow / ampaSafeDenom, 0.7f, 1.3f);
+            const float ampaWeight = (1.0f - ampaFraction) + ampaFraction * ampaRatio;
+            const float iExcEffective = iExcState[i] * ampaWeight;
+
+            const float synCurrent = (iExcEffective + iNmdaEff) - iInhEffective - iGabaBEff;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {

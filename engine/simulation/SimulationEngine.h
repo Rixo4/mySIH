@@ -96,6 +96,31 @@ struct SimulationConfig {
     float gabaBFraction = 0.03f;
     float gabaBMaxCurrent = 1.0f;
 
+    // Fourth and final small addition: AMPA voltage-dependence -- the last
+    // untouched receptor. Same reweighting pattern as GABA-A (no new state,
+    // ratio anchored at exactly 1.0x at resting voltage), but with a MUCH
+    // tighter clamp range than the inhibitory receptors got.
+    //
+    // Reason: AMPA's reversal potential (~0mV, see ReceptorModel.h) sits
+    // almost exactly at this network's own spike threshold (~0mV). That
+    // means the natural driving force (V - eAMPA) SHRINKS toward zero
+    // exactly as a neuron approaches threshold -- the opposite of GABA-A/B,
+    // whose driving force grows in that direction (a stabilizing effect for
+    // inhibition, but a destabilizing one for excitation). This exact
+    // mechanism was the leading hypothesis for why the original full
+    // conductance-based Step 3 rewrite collapsed repeat firing. Clamping the
+    // ratio to a narrow [0.7, 1.3] band (vs [0, 2.0] for GABA-A/B) means
+    // AMPA can never lose more than 30% of its drive even very close to
+    // threshold -- enough to add genuine voltage-dependence without
+    // reproducing the choke-off failure.
+    //
+    // Sandbox-verified at 200ms only (28-29Hz baseline -> 18.49Hz, 0.20%
+    // silent, irregularity 0.36 -- gentle, no collapse); the sandbox could
+    // not complete a full 400ms run in the available time. Needs the same
+    // full-duration real-hardware check as GABA-B got.
+    float eAMPA = 0.0f;
+    float ampaFraction = 0.10f;
+
     float maxSynCurrent = 300.0f;
     float maxTotalCurrent = 400.0f;
 
