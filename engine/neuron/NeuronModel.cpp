@@ -1,4 +1,5 @@
 #include "NeuronModel.h"
+#include "ReceptorModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -140,7 +141,8 @@ HHDerivatives computeDerivatives(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic
 ) {
     const float iNa = gNaEff * state.m * state.m * state.m * state.h * (state.v - params.eNa);
     const float iK = gKEff * state.n * state.n * state.n * state.n * (state.v - params.eK);
@@ -151,8 +153,19 @@ HHDerivatives computeDerivatives(
     const float iL = params.gL * (state.v - params.eL);
     const float caInflux = params.kCa * std::max(0.0f, -iCa);
 
+    // Synaptic receptor currents -- computed here (not pre-summed by the
+    // caller as a flat scalar the way the old current-injection synapse
+    // model worked) specifically so NMDA's voltage-dependent Mg2+ block
+    // sees the correct voltage at each RK4 sub-stage, not just the voltage
+    // at the start of the full timestep.
+    const float iAMPA  = synaptic.gAMPAEff  * (state.v - params.eAMPA);
+    const float mgUnblock = spp::neuron::nmdaMgBlockFraction(state.v);
+    const float iNMDA  = synaptic.gNMDAEff  * mgUnblock * (state.v - params.eNMDA);
+    const float iGABAa = synaptic.gGABAaEff * (state.v - params.eGABAa);
+    const float iGABAb = synaptic.gGABAbEff * (state.v - params.eK); // GABA-B is a K+ conductance
+
     HHDerivatives d;
-    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL) / params.cm;
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL - iAMPA - iNMDA - iGABAa - iGABAb) / params.cm;
     d.dm = alphaM(state.v) * (1.0f - state.m) - betaM(state.v) * state.m;
     d.dh = alphaH(state.v) * (1.0f - state.h) - betaH(state.v) * state.h;
     d.dn = alphaN(state.v) * (1.0f - state.n) - betaN(state.v) * state.n;
@@ -169,9 +182,10 @@ void rk4Step(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic
 ) {
-    const HHDerivatives k1 = computeDerivatives(state, iTotal, gNaEff, gKEff, gCaEff, params);
+    const HHDerivatives k1 = computeDerivatives(state, iTotal, gNaEff, gKEff, gCaEff, params, synaptic);
 
     HHState y2 = state;
     y2.v += 0.5f * dtMs * k1.dv;
@@ -181,7 +195,7 @@ void rk4Step(
     y2.s += 0.5f * dtMs * k1.ds;
     y2.caCa += 0.5f * dtMs * k1.dcaCa;
     clampState(y2);
-    const HHDerivatives k2 = computeDerivatives(y2, iTotal, gNaEff, gKEff, gCaEff, params);
+    const HHDerivatives k2 = computeDerivatives(y2, iTotal, gNaEff, gKEff, gCaEff, params, synaptic);
 
     HHState y3 = state;
     y3.v += 0.5f * dtMs * k2.dv;
@@ -191,7 +205,7 @@ void rk4Step(
     y3.s += 0.5f * dtMs * k2.ds;
     y3.caCa += 0.5f * dtMs * k2.dcaCa;
     clampState(y3);
-    const HHDerivatives k3 = computeDerivatives(y3, iTotal, gNaEff, gKEff, gCaEff, params);
+    const HHDerivatives k3 = computeDerivatives(y3, iTotal, gNaEff, gKEff, gCaEff, params, synaptic);
 
     HHState y4 = state;
     y4.v += dtMs * k3.dv;
@@ -201,7 +215,7 @@ void rk4Step(
     y4.s += dtMs * k3.ds;
     y4.caCa += dtMs * k3.dcaCa;
     clampState(y4);
-    const HHDerivatives k4 = computeDerivatives(y4, iTotal, gNaEff, gKEff, gCaEff, params);
+    const HHDerivatives k4 = computeDerivatives(y4, iTotal, gNaEff, gKEff, gCaEff, params, synaptic);
 
     state.v += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     state.m += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
