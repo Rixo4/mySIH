@@ -345,6 +345,30 @@ engine/neuron/NeuronModel.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/neuron/NeuronModel.cpp.s
 .PHONY : engine/neuron/NeuronModel.cpp.s
 
+engine/neuron/ReceptorModel.o: engine/neuron/ReceptorModel.cpp.o
+.PHONY : engine/neuron/ReceptorModel.o
+
+# target to build an object file
+engine/neuron/ReceptorModel.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.o
+.PHONY : engine/neuron/ReceptorModel.cpp.o
+
+engine/neuron/ReceptorModel.i: engine/neuron/ReceptorModel.cpp.i
+.PHONY : engine/neuron/ReceptorModel.i
+
+# target to preprocess a source file
+engine/neuron/ReceptorModel.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.i
+.PHONY : engine/neuron/ReceptorModel.cpp.i
+
+engine/neuron/ReceptorModel.s: engine/neuron/ReceptorModel.cpp.s
+.PHONY : engine/neuron/ReceptorModel.s
+
+# target to generate assembly for a file
+engine/neuron/ReceptorModel.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.s
+.PHONY : engine/neuron/ReceptorModel.cpp.s
+
 engine/output/CsvWriter.o: engine/output/CsvWriter.cpp.o
 .PHONY : engine/output/CsvWriter.o
 
@@ -477,6 +501,9 @@ help:
 	@echo "... engine/neuron/NeuronModel.o"
 	@echo "... engine/neuron/NeuronModel.i"
 	@echo "... engine/neuron/NeuronModel.s"
+	@echo "... engine/neuron/ReceptorModel.o"
+	@echo "... engine/neuron/ReceptorModel.i"
+	@echo "... engine/neuron/ReceptorModel.s"
 	@echo "... engine/output/CsvWriter.o"
 	@echo "... engine/output/CsvWriter.i"
 	@echo "... engine/output/CsvWriter.s"

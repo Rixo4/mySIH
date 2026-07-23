@@ -14,6 +14,7 @@ endif()
 set(SPP_SOURCES
     engine/main.cpp
     engine/neuron/NeuronModel.cpp
+    engine/neuron/ReceptorModel.cpp
     engine/drug/DrugModel.cpp
     engine/synapse/Synapse.cpp
     engine/network/Network.cpp

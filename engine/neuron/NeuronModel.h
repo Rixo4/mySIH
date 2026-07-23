@@ -97,10 +97,31 @@ struct HHParameters {
     // These are STARTING values requiring empirical calibration against
     // baseline network health, the same way gCa/gAHP needed calibration
     // rather than being usable straight from a citation.
-    float gMaxAMPA = 0.015f;
-    float gMaxNMDA = 0.010f;
-    float gMaxGABAa = 0.25f;
-    float gMaxGABAb = 0.25f;
+    //
+    // Calibration iteration 1 (gMaxAMPA=0.015, gMaxNMDA=0.010,
+    // gMaxGABAa/b=0.25) measured on real hardware: 1.50 Hz, 42% silent
+    // neurons -- too weak. Near resting voltage NMDA contributes almost
+    // nothing (Mg2+ block leaves it ~94% shut at -65mV, by design -- see
+    // ReceptorModel.h), so AMPA alone has to do essentially all the work
+    // of pushing a neuron toward threshold; 0.015 wasn't enough of it.
+    // Iteration 2: raised gMaxAMPA ~3.3x and eased inhibition down,
+    // since weaker net excitation combined with unchanged inhibition
+    // would silence even more of the network than iteration 1 did.
+    // Measured: 2.50 Hz, 0% silent -- silencing fixed, but still
+    // under-driven relative to the ~9-12 Hz / ~0.10-0.11 irregularity
+    // healthy range validated for the intrinsic-current baseline.
+    // Irregularity sitting at exactly 0.00 suggests firing is sparse and
+    // too uniform rather than genuinely shaped by network interaction.
+    // Iteration 3: AMPA up further; NMDA up more than iteration 2 too --
+    // once a neuron starts depolarizing (Mg block easing), NMDA should
+    // help sustain/propagate activity and contribute to richer, less
+    // uniform network dynamics, which iteration 2 was still missing.
+    // GABA left unchanged this pass -- isolating the excitatory side
+    // before touching inhibition again.
+    float gMaxAMPA = 0.09f;
+    float gMaxNMDA = 0.035f;
+    float gMaxGABAa = 0.15f;
+    float gMaxGABAb = 0.15f;
 };
 
 // Per-neuron effective synaptic conductances for one timestep -- already

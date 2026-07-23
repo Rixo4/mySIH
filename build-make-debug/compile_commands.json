@@ -13,6 +13,12 @@
 },
 {
   "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/neuron/ReceptorModel.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/neuron/ReceptorModel.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
   "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/drug/DrugModel.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/drug/DrugModel.cpp",
   "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/drug/DrugModel.cpp",
   "output": "CMakeFiles/silicon_patient.dir/engine/drug/DrugModel.cpp.o"
