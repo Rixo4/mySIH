@@ -86,12 +86,16 @@ SimulationResult SimulationEngine::run() {
     result.dtMs = config_.dtMs;
     result.durationMs = config_.durationMs;
 
-    std::vector<float> iExcPulse(neuronCount_, 0.0f);
-    std::vector<float> iInhPulse(neuronCount_, 0.0f);
-    std::vector<float> iExcState(neuronCount_, 0.0f);
-    std::vector<float> iInhState(neuronCount_, 0.0f);
-    std::vector<float> iSyn(neuronCount_, 0.0f);
+    std::vector<synapse::ReceptorConductanceState> receptorStates(neuronCount_);
+    std::vector<synapse::ReceptorConductances> receptorConductances(neuronCount_);
+    std::vector<neuron::SynapticConductances> synapticEff(neuronCount_);
     std::vector<float> iNoise(neuronCount_, 0.0f);
+    // GPU path (CudaSimulator/NeuronUpdate.cu) still expects a flat synaptic
+    // current -- it has not been updated to the receptor-conductance model
+    // yet, so it receives zero synaptic drive until that mirroring is done.
+    // useGpu defaults to false for this engine; this only matters if
+    // something explicitly enables it before that CUDA work lands.
+    std::vector<float> iSynGpuPlaceholder(neuronCount_, 0.0f);
 
     std::vector<float> gNaEff(neuronCount_, 0.0f);
     std::vector<float> gKEff(neuronCount_, 0.0f);
@@ -104,8 +108,6 @@ SimulationResult SimulationEngine::run() {
 
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
-    const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
-    const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -128,23 +130,21 @@ SimulationResult SimulationEngine::run() {
                                     ? (1.0f - std::exp(-timeMs / drugOnsetTauMs))
                                     : 1.0f;
 
-        network_.matrix().accumulateSynapticCurrents(delayBuffer_, iExcPulse, iInhPulse);
+        network_.matrix().accumulateReceptorConductances(
+            delayBuffer_, receptorStates, config_.dtMs, receptorConductances);
 
         for (std::size_t i = 0; i < neuronCount_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            const float excAccum = iExcState[i] * excDecay + iExcPulse[i];
-            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i];
-
-            iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
-            iInhState[i] = std::clamp(inhAccum, 0.0f, config_.maxSynCurrent);
-
-            const float synCurrent = iExcState[i] - iInhState[i];
-            if (!std::isfinite(synCurrent)) {
-                iSyn[i] = 0.0f;
-            } else {
-                iSyn[i] = std::clamp(synCurrent, -config_.maxSynCurrent, config_.maxSynCurrent);
-            }
+            // Peak-scale this timestep's raw (0..~1) receptor conductances
+            // into effective conductances -- the (V-E) driving force and,
+            // for NMDA, the Mg2+ block are applied later, inside
+            // computeDerivatives, using the actual per-RK4-substage voltage.
+            const synapse::ReceptorConductances& rc = receptorConductances[i];
+            synapticEff[i].gAMPAEff  = population_.params.gMaxAMPA  * rc.gAMPA;
+            synapticEff[i].gNMDAEff  = population_.params.gMaxNMDA  * rc.gNMDA;
+            synapticEff[i].gGABAaEff = population_.params.gMaxGABAa * rc.gGABAa;
+            synapticEff[i].gGABAbEff = population_.params.gMaxGABAb * rc.gGABAb;
 
             iNoise[i] = unitNormal(rng_) * population_.noiseStd[i];
             if (!std::isfinite(iNoise[i])) {
@@ -175,12 +175,12 @@ SimulationResult SimulationEngine::run() {
             if (kBlock > 0.30f) {
                 effectiveExternalCurrent[i] += 2.0f * (kBlock - 0.30f);
             }
-
-            if (iSyn[i] > 0.0f) {
-                iSyn[i] *= (1.0f + 1.5f * kBlock);
-            } else if (iSyn[i] < 0.0f) {
-                iSyn[i] *= std::clamp(1.0f - 0.35f * kBlock, 0.60f, 1.0f);
-            }
+            // The old ad-hoc "K-block amplifies synaptic current" rule that
+            // used to live here modulated the flat current-injection iSyn
+            // model, which no longer exists -- synaptic drive is now
+            // conductance-based (see synapticEff above) and genuinely
+            // voltage-dependent, so it no longer needs (or has anywhere to
+            // attach) a hand-tuned multiplier like this.
         }
 
         if (runOnGpu) {
@@ -189,7 +189,7 @@ SimulationResult SimulationEngine::run() {
                 config_.dtMs,
                 population_.params,
                 config_.refractoryMs,
-                iSyn,
+                iSynGpuPlaceholder,
                 effectiveExternalCurrent,
                 iNoise,
                 gNaEff,
@@ -205,7 +205,7 @@ SimulationResult SimulationEngine::run() {
                 spikes
             );
         } else {
-            cpuStep(timeMs, iSyn, effectiveExternalCurrent, iNoise, gNaEff, gKEff, gCaEff, spikes);
+            cpuStep(timeMs, synapticEff, effectiveExternalCurrent, iNoise, gNaEff, gKEff, gCaEff, spikes);
         }
 
         std::uint32_t spikeCount = 0U;
@@ -260,7 +260,7 @@ void SimulationEngine::applyNetworkNeuronTypes() {
 
 void SimulationEngine::cpuStep(
     float timeMs,
-    const std::vector<float>& synapticCurrent,
+    const std::vector<neuron::SynapticConductances>& synaptic,
     const std::vector<float>& externalCurrent,
     const std::vector<float>& noiseCurrent,
     const std::vector<float>& gNaEff,
@@ -279,13 +279,18 @@ void SimulationEngine::cpuStep(
         state.s    = population_.s[i];
         state.caCa = population_.caCa[i];  // FIX: carry Ca concentration across timesteps
 
-        float iTotal = externalCurrent[i] + synapticCurrent[i] + noiseCurrent[i];
+        // Synaptic drive is no longer part of this flat sum -- it's
+        // conductance-based now and computed inside rk4Step/
+        // computeDerivatives, where the neuron's own (per-RK4-substage)
+        // voltage is available for the (V-E) driving force and NMDA's
+        // Mg2+ block.
+        float iTotal = externalCurrent[i] + noiseCurrent[i];
         if (!std::isfinite(iTotal)) {
             iTotal = 0.0f;
         }
         iTotal = std::clamp(iTotal, -config_.maxTotalCurrent, config_.maxTotalCurrent);
 
-        neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params);
+        neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params, synaptic[i]);
 
         const bool inRefractory = (timeMs - population_.lastSpikeTime[i]) < config_.refractoryMs;
         const bool crossed = (oldV <= population_.threshold[i]) && (state.v > population_.threshold[i]);
