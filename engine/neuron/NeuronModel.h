@@ -76,6 +76,43 @@ struct HHParameters {
     // deliberately if a calcium-independent AHP floor is ever wanted.
     float gAHPFloor = 0.0f;      // calcium-independent baseline AHP component
     float restingVoltage = -65.0f;
+
+    // ─── Synaptic receptor currents ────────────────────────────────────────
+    // Reversal potentials: AMPA/NMDA share the mixed-cation reversal
+    // (~0 mV, see ReceptorModel.h). GABA-A gets its own value -- deliberately
+    // separate from eK/eL, since chloride reversal is not a fixed physical
+    // constant the way eNa/eK/eCa are (depends on the cell's Cl- gradient).
+    // GABA-B has no constant here: it IS a K+ conductance and reuses eK
+    // directly wherever its current is computed.
+    float eAMPA = 0.0f;
+    float eNMDA = 0.0f;
+    float eGABAa = -70.0f;
+
+    // Peak synaptic conductance scale (mS/cm² per unit synaptic weight).
+    // Unlike eNa/eK/eCa (fixed physical reversal potentials) or the
+    // rise/decay time constants in ReceptorModel.h (literature-sourced
+    // kinetics), these have no direct literature equivalent -- translating
+    // a dimensionless per-synapse "weight" into a membrane current is a
+    // property of this model's own units, not something a paper reports.
+    // These are STARTING values requiring empirical calibration against
+    // baseline network health, the same way gCa/gAHP needed calibration
+    // rather than being usable straight from a citation.
+    float gMaxAMPA = 0.015f;
+    float gMaxNMDA = 0.010f;
+    float gMaxGABAa = 0.25f;
+    float gMaxGABAb = 0.25f;
+};
+
+// Per-neuron effective synaptic conductances for one timestep -- already
+// peak-scaled (gMax * raw 0..1 conductance from Synapse) by the caller,
+// mirroring how gNaEff/gKEff/gCaEff arrive already drug-modulated. Kept as
+// a small standalone struct (rather than including synapse/Synapse.h here)
+// to avoid a synapse -> neuron -> synapse include cycle.
+struct SynapticConductances {
+    float gAMPAEff = 0.0f;
+    float gNMDAEff = 0.0f;
+    float gGABAaEff = 0.0f;
+    float gGABAbEff = 0.0f;
 };
 
 struct HHState {
@@ -142,7 +179,8 @@ HHDerivatives computeDerivatives(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic = {}
 );
 
 void rk4Step(
@@ -152,7 +190,8 @@ void rk4Step(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic = {}
 );
 
 bool isFiniteState(const HHState& state);
