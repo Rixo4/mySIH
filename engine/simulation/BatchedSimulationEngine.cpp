@@ -228,13 +228,13 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<float> iExcPulse(totalNeurons_, 0.0f);
     std::vector<float> iInhPulse(totalNeurons_, 0.0f);
     std::vector<float> iExcState(totalNeurons_, 0.0f);
-    std::vector<float> iNmdaState(totalNeurons_, 0.0f);
     std::vector<float> iGabaBState(totalNeurons_, 0.0f);
     std::vector<float> iSyn(totalNeurons_, 0.0f);
     std::vector<float> iNoise(totalNeurons_, 0.0f);
 
-    // GABA-A's true conductance path -- same pattern as SimulationEngine::run(),
-    // see its comment for why all four fields exist but only gGABAaEff is used.
+    // GABA-A and NMDA's true conductance path -- same pattern as
+    // SimulationEngine::run(), see its comment for why all four fields
+    // exist but only gGABAaEff/gNMDAEff are used.
     std::vector<synapse::ReceptorConductanceState> receptorStates(totalNeurons_);
     std::vector<synapse::ReceptorConductances> receptorConductances(totalNeurons_);
     std::vector<neuron::SynapticConductances> synapticEff(totalNeurons_);
@@ -259,8 +259,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
     const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
-    const float nmdaDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauNmdaMs));
-    const float nmdaFraction = std::clamp(config_.nmdaFraction, 0.0f, 1.0f);
+    const float excFastPoolScale = std::clamp(config_.excFastPoolScale, 0.0f, 1.0f);
     const float gabaBDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauGabaBMs));
     const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
     const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
@@ -381,29 +380,26 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            // Same small NMDA addition as SimulationEngine::run(): a fraction
-            // of the excitatory pulse goes into a slower pool gated by the
-            // voltage-dependent Mg2+ block, ~94% shut at rest.
-            const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * (1.0f - nmdaFraction);
-            const float nmdaAccum = iNmdaState[i] * nmdaDecay + iExcPulse[i] * nmdaFraction;
+            // Fast pool scaled by excFastPoolScale -- same fix as
+            // SimulationEngine::run(), see its comment for why the
+            // undivided full pulse broke baseline health.
+            const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * excFastPoolScale;
             // GABA-A no longer diverts from the flat inhibitory pulse -- see
             // SimulationEngine::run()'s comment. GABA-B still draws its slow
             // pool directly from the raw inhibitory pulse.
             const float gabaBAccum = iGabaBState[i] * gabaBDecay + iInhPulse[i] * gabaBFraction;
 
             iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
-            iNmdaState[i] = std::clamp(nmdaAccum, 0.0f, config_.maxSynCurrent);
             // Own tight ceiling, not the shared maxSynCurrent -- see the long
             // comment on gabaBMaxCurrent in SimulationEngine.h.
             iGabaBState[i] = std::clamp(gabaBAccum, 0.0f, config_.gabaBMaxCurrent);
 
-            const float mgUnblock = spp::neuron::nmdaMgBlockFraction(population_.v[i]);
-            const float iNmdaEff = iNmdaState[i] * mgUnblock;
-
-            // GABA-A: real conductance current, same as SimulationEngine::run() --
-            // gMaxGABAa peak-scales the raw 0..1 conductance, applied inside
-            // NeuronModel's RK4 stages rather than here.
+            // GABA-A and NMDA: real conductance currents, same as
+            // SimulationEngine::run() -- gMaxGABAa/gMaxNMDA peak-scale the
+            // raw 0..1 conductance, applied inside NeuronModel's RK4 stages
+            // rather than here.
             synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
+            synapticEff[i].gNMDAEff = config_.gMaxNMDA * receptorConductances[i].gNMDA;
 
             // GABA-B: separate slow pool, own ratio anchored at 1.0x at rest.
             const float gabaBDrivingForceNow = population_.v[i] - population_.params.eK;
@@ -417,7 +413,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float ampaWeight = (1.0f - ampaFraction) + ampaFraction * ampaRatio;
             const float iExcEffective = iExcState[i] * ampaWeight;
 
-            const float synCurrent = (iExcEffective + iNmdaEff) - iGabaBEff;
+            const float synCurrent = iExcEffective - iGabaBEff;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {

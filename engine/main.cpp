@@ -76,7 +76,7 @@ struct SimulationConfig {
     //   I=2 -> 9.8 Hz, I=5 -> 23.0 Hz, both with ~0% collapsed neurons.
     // 2.5 targets a ~12 Hz baseline, leaving headroom for drugs to move
     // firing rate both up and down.
-    double external_current     = 2.5;
+    double external_current     = 6.6;
     double noise_level          = 0.35;
     double excitatory_weight_scale = 1.0;
     double inhibitory_weight_scale = 1.0;
@@ -1265,7 +1265,7 @@ int main(int argc, char** argv) {
             // Recurrent synaptic drive amplifies well above the single-neuron
             // rate, which is why this is much smaller than it looks like it
             // should be from single-cell characterisation alone.
-            input.config.external_current       = 2.0;
+            input.config.external_current       = 6.6;
             input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;
             input.config.inhibitory_weight_scale = 1.00;

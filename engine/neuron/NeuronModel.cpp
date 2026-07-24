@@ -1,4 +1,5 @@
 #include "NeuronModel.h"
+#include "ReceptorModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -152,14 +153,19 @@ HHDerivatives computeDerivatives(
     const float iL = params.gL * (state.v - params.eL);
     const float caInflux = params.kCa * std::max(0.0f, -iCa);
 
-    // GABA-A only for now (see SynapticConductances comment) -- computed
-    // here, not pre-summed into iTotal by the caller, specifically so it
-    // sees the correct per-RK4-substage voltage rather than just the
-    // voltage at the start of the full timestep.
+    // GABA-A and NMDA now real (see SynapticConductances comment) -- both
+    // computed here, not pre-summed into iTotal by the caller, specifically
+    // so they see the correct per-RK4-substage voltage rather than just the
+    // voltage at the start of the full timestep. This matters more for NMDA
+    // than GABA-A: the Mg2+-block fraction is itself voltage-dependent, so
+    // evaluating it at a stale voltage would make the block lag the actual
+    // membrane trajectory during a spike.
     const float iGABAa = synaptic.gGABAaEff * (state.v - params.eGABAa);
+    const float nmdaUnblock = nmdaMgBlockFraction(state.v);
+    const float iNMDA = synaptic.gNMDAEff * nmdaUnblock * (state.v - params.eNMDA);
 
     HHDerivatives d;
-    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL - iGABAa) / params.cm;
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL - iGABAa - iNMDA) / params.cm;
     d.dm = alphaM(state.v) * (1.0f - state.m) - betaM(state.v) * state.m;
     d.dh = alphaH(state.v) * (1.0f - state.h) - betaH(state.v) * state.h;
     d.dn = alphaN(state.v) * (1.0f - state.n) - betaN(state.v) * state.n;

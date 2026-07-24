@@ -27,21 +27,63 @@ struct SimulationConfig {
     float synTauExcMs = 5.0f;
     float synTauInhMs = 10.0f;
 
-    // Small, isolated addition on top of the validated flat-current model:
-    // a fraction of the excitatory pulse is routed into a slower pool with
-    // its own decay time constant (synTauNmdaMs, literature NMDA decay ~100ms
-    // -- see ReceptorModel.h) and multiplied every step by the voltage-
-    // dependent Mg2+ unblock fraction (nmdaMgBlockFraction, also from
-    // ReceptorModel.h, untouched since Step 1). At resting voltage NMDA is
-    // ~94% Mg-blocked, so this pool contributes almost nothing there --
-    // diverting nmdaFraction away from the existing fast pool means total
-    // excitatory drive at rest is slightly BELOW the previously-validated
-    // baseline, not above it (the safe direction to be wrong in). As a
-    // neuron depolarizes, the block eases and this pool adds drive back.
-    // Everything else (fast exc/inh pools, clamps, K-block rule) is
-    // unchanged from the validated baseline.
-    float synTauNmdaMs = 100.0f;
-    float nmdaFraction = 0.25f;
+    // NMDA moved OFF the lighter "divert a fraction of the flat excitatory
+    // pulse into a separate decaying pool" model onto the real conductance
+    // model, same pattern as GABA-A: gNMDAEff*mgUnblock(V)*(V-eNMDA),
+    // computed via Synapse.cpp's accumulateReceptorConductances +
+    // NeuronModel's SynapticConductances (see NeuronModel.h). eNMDA now
+    // lives in HHParameters. gMaxNMDA is the new peak-conductance scale and
+    // needs the same empirical-calibration treatment gMaxGABAa required.
+    //
+    // Per Synapse.cpp's comment, excitatory edges drive BOTH the AMPA and
+    // NMDA conductance accumulators from the same spike input (co-expressed
+    // at real glutamatergic synapses) -- biologically NMDA no longer
+    // "diverts" current away from the fast excitatory pool.
+    //
+    // First attempt let excAccum draw the full undivided iExcPulse. A
+    // sandbox check (700 neurons, external_current=6.6) then showed a
+    // burst/silence oscillation (20Hz / 0Hz repeating) even with gMaxNMDA=0
+    // -- initially read as a regression from dropping the old 25%
+    // diversion. Turned out to be a false alarm: re-testing the exact
+    // pre-NMDA-edit code at the same 700-neuron/6.6 operating point
+    // produces the identical oscillation. That calibration point was only
+    // ever verified against the real ~1500-neuron network (see main.cpp's
+    // external_current comment); the smaller sandbox network apparently
+    // sits in a different, more bursty dynamical regime at this drive
+    // level regardless of any receptor changes. So this was never a
+    // confirmed bug -- just an unreliable smaller-scale proxy.
+    //
+    // UPDATE (real-hardware test): the 0.75 value above was WRONG, and the
+    // real ~1500-neuron network is what proved it. Isolation test done
+    // properly this time: set gMaxNMDA=0.0 (NMDA current fully off) with
+    // excFastPoolScale still at 0.75, everything else identical to the
+    // already-verified 12.5Hz healthy baseline. Result: 5.0Hz flat (early
+    // 5.0 -> late 5.2, no decline, so not a synchronization/collapse
+    // pattern -- just a starved network). With NMDA's own current
+    // completely zeroed, the ONLY remaining difference from the verified
+    // baseline was this 25% cut to the fast excitatory pool, and that alone
+    // was enough to more than halve the rate. So this was never a harmless
+    // "just in case" precaution -- it was silently starving the network the
+    // whole time, which also explains why gMaxNMDA=0.001 collapsed into two
+    // synchronized volleys then silence: a starved network has much less
+    // margin and tips into synchronized/collapsing behavior far more easily
+    // than a healthily-driven one. Reverted to 1.0 (no scaling, full
+    // undivided pulse) -- the value that was actually verified healthy.
+    // Needs a fresh gMaxNMDA=0.0 real-hardware re-check to confirm this
+    // restores ~12.5Hz before any new gMaxNMDA value is tried.
+    float excFastPoolScale = 1.0f;
+
+    // Calibration risk: NMDA's driving force at rest (V-eNMDA = -65-0 =
+    // -65mV) is far larger in magnitude than GABA-A's (V-eGABAa = +5mV), so
+    // gMaxNMDA needs to be considerably smaller than gMaxGABAa for
+    // comparable-scale current -- partially offset by the Mg2+ block being
+    // ~94% closed at rest (nmdaMgBlockFraction(-65mV) ~= 0.06), which keeps
+    // NMDA's resting-state contribution small regardless of gMax. Starting
+    // value below is a first estimate, NOT yet verified against a real
+    // full-duration baseline run -- needs the same early/late-rate CSV
+    // sweep external_current and gMaxGABAa both required before trusting
+    // it. See main.cpp's external_current comment for that methodology.
+    float gMaxNMDA = 0.003f;
 
     // GABA-A moved OFF the lighter reweight model onto the real conductance
     // model (gGABAa*(V-eGABAa), computed via Synapse.cpp's
