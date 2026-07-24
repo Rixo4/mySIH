@@ -149,6 +149,15 @@ SimulationResult SimulationEngine::run() {
             delayBuffer_, receptorStates, config_.dtMs, receptorConductances
         );
 
+        // PHASE2_PLAN.md step 4: receptor drug mechanisms (block/potentiate/
+        // agonist). Computed once per step, not per neuron -- receptor drug
+        // profiles are global-only (see DrugModel.h comment on
+        // applyReceptors). doseScale is the same onset-ramp scale already
+        // used below for the channel-block drugModel_.applyWithDoseScale
+        // call, so channel and receptor pharmacology share one onset
+        // timeline.
+        const drug::ReceptorConductanceModifiers receptorMods = drugModel_.applyReceptors(doseScale);
+
         for (std::size_t i = 0; i < neuronCount_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
@@ -163,14 +172,28 @@ SimulationResult SimulationEngine::run() {
             // Ceiling prevents a synchronized-burst conductance spike from
             // causing depolarization block -- see the long comment on
             // ampaConductanceCeiling in SimulationEngine.h.
+            // Drug modifiers applied here, at the same point gMaxX peak-
+            // scales the raw 0..1 synaptic conductance. AMPA/NMDA: Block
+            // multiplies the raw conductance down (receptorMods.*Residual,
+            // 1.0 = no-op). GABA-A: Potentiate multiplies it up toward its
+            // ceiling (receptorMods.gabaAPotentiation, 1.0 = no-op). GABA-B:
+            // Agonist ADDS a dose-driven conductance on top of the synaptic
+            // pathway rather than multiplying it (receptorMods.
+            // gabaBAgonistActivation * gMaxGABAbAgonist) -- the whole point
+            // of direct agonism is that it doesn't need presynaptic GABA
+            // release to have an effect (see ReceptorDrugProfile.h).
             synapticEff[i].gAMPAEff = std::clamp(
-                config_.gMaxAMPA * receptorConductances[i].gAMPA,
+                config_.gMaxAMPA * receptorConductances[i].gAMPA * receptorMods.ampaResidual,
                 0.0f,
                 config_.ampaConductanceCeiling
             );
-            synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
-            synapticEff[i].gNMDAEff = config_.gMaxNMDA * receptorConductances[i].gNMDA;
-            synapticEff[i].gGABAbEff = config_.gMaxGABAb * receptorConductances[i].gGABAb;
+            synapticEff[i].gGABAaEff =
+                config_.gMaxGABAa * receptorConductances[i].gGABAa * receptorMods.gabaAPotentiation;
+            synapticEff[i].gNMDAEff =
+                config_.gMaxNMDA * receptorConductances[i].gNMDA * receptorMods.nmdaResidual;
+            synapticEff[i].gGABAbEff =
+                config_.gMaxGABAb * receptorConductances[i].gGABAb +
+                config_.gMaxGABAbAgonist * receptorMods.gabaBAgonistActivation;
 
             iNoise[i] = unitNormal(rng_) * population_.noiseStd[i];
             if (!std::isfinite(iNoise[i])) {

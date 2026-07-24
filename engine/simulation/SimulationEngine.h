@@ -227,6 +227,40 @@ struct SimulationConfig {
     // unclamped synchronized-burst spike could.
     float ampaConductanceCeiling = 1.0f;
 
+    // PHASE2_PLAN.md step 4: GABA-B direct agonism (baclofen). An agonist
+    // activates the receptor from dose alone, independent of whether any
+    // presynaptic GABA is being released -- architecturally distinct from
+    // Block/Potentiate, which only have an effect where the spike-triggered
+    // synaptic pathway is already active (see ReceptorDrugProfile.h). So
+    // this is a SEPARATE peak-conductance scale from gMaxGABAb: the agonist
+    // drive is ADDED on top of gMaxGABAb*receptorConductances[i].gGABAb,
+    // not a multiplier on it, and needs its own calibration since it can
+    // sustain a continuous (non-transient) conductance at saturating dose,
+    // unlike the pulsed synaptic pathway. Starting guess, NOT yet
+    // calibrated -- same as gMaxGABAb's own placeholder before its real-
+    // hardware sweep found 0.0001. Needs the same treatment before trusting
+    // baclofen validation results: sweep against real hardware, check
+    // early/late rate + irregularity + spike-count histogram, same
+    // methodology as every other gMax constant in this file.
+    // CALIBRATED via real hardware (SPP_FORCE_CPU=1 --dose-eval,
+    // Na/K/Ca channel block neutralized, EC50=5/Hill=2, 10 runs/dose):
+    //   0.0001 -> weak (+7.7% max effect), poorly-fit (R^2=0.83), WRONG SIGN
+    //             (excitatory) -- 3 runs, signal too small, noise dominated.
+    //   0.01   -> sign confirmed CORRECT (suppressive, -4.4%), excellent fit
+    //             (R^2=0.99) -- confirms the wiring/math is right, the
+    //             0.0001 reading was pure noise, not a bug. Still too weak
+    //             for a therapeutically meaningful baclofen signature.
+    //   0.1    -> strong, smooth, monotonic dose-response: 17.2 -> 17.2 ->
+    //             15.6 -> 14.0 -> 11.6 -> 10.4 Hz across dose 0-10 (~39%
+    //             suppression at peak). neuron_stats.csv confirmed healthy
+    //             at peak dose: spike counts tightly clustered ~5 (10Hz),
+    //             no zero-spike neurons, no fire-once/collapse signature,
+    //             normal ISI variance. This is the value in use -- may
+    //             still want finer tuning against a specific Hz target
+    //             later, same as gMaxGABAb/gMaxAMPA, but confirmed correct
+    //             and healthy as-is.
+    float gMaxGABAbAgonist = 0.1f;
+
     float maxSynCurrent = 300.0f;
     float maxTotalCurrent = 400.0f;
 

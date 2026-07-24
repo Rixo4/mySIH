@@ -32,7 +32,8 @@ public:
         const network::NetworkConfig& networkConfigTemplate,
         const SimulationConfig& simulationConfig,
         const drug::ChannelDrugProfile& drugProfile,
-        const std::vector<BatchBlockSpec>& blocks
+        const std::vector<BatchBlockSpec>& blocks,
+        const drug::ReceptorDrugProfile& receptorProfile = drug::ReceptorDrugProfile{}
     );
 
     // Runs every block simultaneously through the shared timestep loop and
@@ -56,6 +57,15 @@ private:
     std::vector<float> blockDoses_;
     drug::ChannelDrugProfile excProfile_;
     drug::ChannelDrugProfile inhProfile_;
+    // PHASE2_PLAN.md step 4: single shared receptor profile across the whole
+    // batch (the compound being tested), same as excProfile_/inhProfile_ are
+    // one shared channel profile per neuron type. No per-block variant --
+    // every block is the same drug at a different dose, not a different
+    // drug. Not split by excitatory/inhibitory neuron type either, unlike
+    // the channel profiles: receptor identity depends on the incoming
+    // synapse type (which receptor a spike drives), not which type the
+    // postsynaptic neuron is.
+    drug::ReceptorDrugProfile receptorProfile_;
 
     neuron::NeuronPopulation population_;
     synapse::DelayBuffer delayBuffer_;

@@ -42,6 +42,9 @@ using spp::analyzer::PharmaDecisionEngine;
 using spp::analyzer::PharmaDecisionReport;
 using spp::drug::ChannelDrugProfile;
 using spp::drug::DrugModel;
+using spp::drug::ReceptorAction;
+using spp::drug::ReceptorDrugProfile;
+using spp::drug::ReceptorMechanism;
 using spp::network::NetworkConfig;
 using spp::output::CsvWriter;
 using spp::output::DoseResponsePoint;
@@ -66,20 +69,60 @@ struct SimulationConfig {
     double hill         = 3.0;
     double connectivity = 0.10;
     double excitatory_ratio     = 0.8;
-    // NOTE: the "fires once then goes silent" bug was NOT a drive problem --
-    // it was calcium-driven depolarization block (see the gCa comment in
-    // neuron/NeuronModel.h). Attempts to fix it by raising this value could
-    // never have worked: at gCa=8 the cell stopped firing at EVERY drive
-    // level tested, 2.5 through 120 uA/cm^2. This value was 2.5 originally
-    // and 2.5 is where it has landed again -- it was never the problem.
-    // Measured in-network for --simulate's regime (connectivity 0.10):
-    //   I=2 -> 9.8 Hz, I=5 -> 23.0 Hz, both with ~0% collapsed neurons.
-    // 2.5 targets a ~12 Hz baseline, leaving headroom for drugs to move
-    // firing rate both up and down.
+    // NOTE (historical): the "fires once then goes silent" bug from an
+    // earlier session was NOT a drive problem -- it was calcium-driven
+    // depolarization block (see the gCa comment in neuron/NeuronModel.h),
+    // fixed by dropping gCa from 8 to 0.5. That fix is still correct and
+    // still in place.
+    //
+    // UPDATE (this session): a *different* collapse resurfaced at
+    // external_current=2.5 after the Phase 2 receptor work landed -- every
+    // neuron fired exactly once (from the shared initial-condition burst)
+    // then went permanently silent for the rest of the run (early_rate_hz
+    // 5.0, late_rate_hz 0.0 exactly, at neuron_count=1500/400ms). Bisected
+    // by individually zeroing every Phase 2 addition (gMaxGABAa,
+    // gabaBFraction, ampaFraction, nmdaFraction), the adaptation current,
+    // and even tripling recurrent excitatory weight strength -- none of it
+    // changed the outcome at all. Only external_current mattered:
+    //   2.5  -> dead (0 Hz after the first volley)
+    //   5.0  -> dead (still 0 Hz, no change at all)
+    //   6.6  -> 12.5 Hz, healthy (early 10.1 -> late 15.3, ramping up, no
+    //           collapse) -- lands right at the ~12 Hz this value always
+    //           targeted, so this is the new default.
+    //   7.0  -> 17.5 Hz, still healthy but past target
+    //   10.0 -> 41.3 Hz, overshooting
+    //   20.0 -> 87.8 Hz, badly overshooting
+    // Root cause not fully identified (why 2.5 stopped being enough is
+    // still open), but the fix is confirmed: 6.6 restores the documented
+    // ~9.8-12 Hz baseline with 0% silent and no collapse across the full
+    // 400ms run. If this needs re-tuning later, re-run this same sweep
+    // rather than assuming 2.5 (or any old value) still works.
     double external_current     = 6.6;
     double noise_level          = 0.35;
     double excitatory_weight_scale = 1.0;
     double inhibitory_weight_scale = 1.0;
+
+    // PHASE2_PLAN.md step 4: receptor pharmacology (block/potentiate/
+    // agonist), one config surface per receptor, same generic IC50/Hill-
+    // style pattern as ic50_na/k/ca above. Defaults are deliberately inert
+    // (huge ec50 / no-op ceiling), matching ReceptorDrugProfile.h's own
+    // stated default policy -- an unconfigured run has zero receptor drug
+    // effect, same as before this step existed. Mechanism per receptor is
+    // fixed by receptor identity (AMPA/NMDA always Block, GABA-A always
+    // Potentiate, GABA-B always Agonist) rather than user-selectable, since
+    // that's what the Phase 2 validation drug set (§5) actually needs --
+    // see ReceptorDrugProfile.h for why these three mechanism families
+    // exist and what a mismatched mechanism/receptor pairing would mean.
+    double ic50_ampa              = 1.0e9;
+    double hill_ampa              = 1.0;
+    double ic50_nmda              = 1.0e9;
+    double hill_nmda              = 1.0;
+    double ec50_gabaA             = 1.0e9;
+    double hill_gabaA             = 1.0;
+    double max_potentiation_gabaA = 1.0;
+    double ec50_gabaB             = 1.0e9;
+    double hill_gabaB             = 1.0;
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
@@ -317,6 +360,35 @@ spp::simulation::SimulationConfig buildEngineConfig(const SimulationConfig& cfg,
     return simCfg;
 }
 
+// PHASE2_PLAN.md step 4: builds the drug's receptor pharmacology profile
+// from the generic ic50_ampa/hill_ampa/... fields above. Mechanism per
+// receptor is fixed (see the SimulationConfig comment on those fields) --
+// AMPA/NMDA Block, GABA-A Potentiate, GABA-B Agonist. With the struct's
+// default (inert) values this produces a profile that is a no-op at any
+// dose, same as an unconfigured ReceptorDrugProfile{}.
+ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
+    ReceptorDrugProfile profile;
+
+    profile.ampa.mechanism = ReceptorMechanism::Block;
+    profile.ampa.ec50      = static_cast<float>(cfg.ic50_ampa);
+    profile.ampa.hill      = static_cast<float>(cfg.hill_ampa);
+
+    profile.nmda.mechanism = ReceptorMechanism::Block;
+    profile.nmda.ec50      = static_cast<float>(cfg.ic50_nmda);
+    profile.nmda.hill      = static_cast<float>(cfg.hill_nmda);
+
+    profile.gabaA.mechanism             = ReceptorMechanism::Potentiate;
+    profile.gabaA.ec50                  = static_cast<float>(cfg.ec50_gabaA);
+    profile.gabaA.hill                  = static_cast<float>(cfg.hill_gabaA);
+    profile.gabaA.maxPotentiationFactor = static_cast<float>(cfg.max_potentiation_gabaA);
+
+    profile.gabaB.mechanism = ReceptorMechanism::Agonist;
+    profile.gabaB.ec50      = static_cast<float>(cfg.ec50_gabaB);
+    profile.gabaB.hill      = static_cast<float>(cfg.hill_gabaB);
+
+    return profile;
+}
+
 // ─── Core simulation runner ───────────────────────────────────────────────────
 // Returns raw SimulationSummary — no classification, no decisions.
 // Classification happens later in NetworkAnalyzer after all doses are collected.
@@ -341,6 +413,7 @@ SimulationSummary runSingleSimulationInternal(
         static_cast<float>(input.config.hill),
         static_cast<float>(input.config.hill)
     });
+    drugModel.setGlobalReceptorProfile(buildReceptorProfile(input.config));
 
     engine.setDrugModel(drugModel);
     engine.initialize();
@@ -539,6 +612,7 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
         static_cast<float>(evalInput.config.hill),
         static_cast<float>(evalInput.config.hill)
     };
+    const ReceptorDrugProfile receptorProfile = buildReceptorProfile(evalInput.config);
 
     std::vector<BatchBlockSpec> blocks;
     blocks.reserve(doses.size() * static_cast<std::size_t>(runs));
@@ -559,7 +633,8 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
         networkCfgTemplate,
         engineCfg,
         profile,
-        blocks
+        blocks,
+        receptorProfile
     );
 
     std::vector<spp::simulation::SimulationResult> blockResults = batched.run();
@@ -746,6 +821,34 @@ static bool loadDrugConfigFromJsonFile(
             if(auto h=extractJsonNumber(c,"hill",caP);h) out.config.hill=*h;
         }
     }
+    // PHASE2_PLAN.md step 4: receptor pharmacology, same "block name, look
+    // for ec50/hill nearby" pattern as "channels" above. Mechanism per
+    // receptor is fixed by identity (see buildReceptorProfile), so the JSON
+    // only needs to supply the numbers, not the mechanism tag.
+    const auto rcPos=c.find("\"receptors\"");
+    if(rcPos!=c.npos){
+        const auto ampaP=c.find("\"AMPA\"",rcPos);
+        if(ampaP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",ampaP);n) out.config.ic50_ampa=*n;
+            if(auto h=extractJsonNumber(c,"hill",ampaP);h) out.config.hill_ampa=*h;
+        }
+        const auto nmdaP=c.find("\"NMDA\"",rcPos);
+        if(nmdaP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",nmdaP);n) out.config.ic50_nmda=*n;
+            if(auto h=extractJsonNumber(c,"hill",nmdaP);h) out.config.hill_nmda=*h;
+        }
+        const auto gabaAP=c.find("\"GABA_A\"",rcPos);
+        if(gabaAP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",gabaAP);n) out.config.ec50_gabaA=*n;
+            if(auto h=extractJsonNumber(c,"hill",gabaAP);h) out.config.hill_gabaA=*h;
+            if(auto m=extractJsonNumber(c,"max_potentiation",gabaAP);m) out.config.max_potentiation_gabaA=*m;
+        }
+        const auto gabaBP=c.find("\"GABA_B\"",rcPos);
+        if(gabaBP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",gabaBP);n) out.config.ec50_gabaB=*n;
+            if(auto h=extractJsonNumber(c,"hill",gabaBP);h) out.config.hill_gabaB=*h;
+        }
+    }
     const auto drP=c.find("\"dose_range\"");
     if(drP!=c.npos){
         if(auto v=extractJsonNumber(c,"min",drP);v)  { out.config.dose=*v; outDoseMin=*v; }
@@ -858,6 +961,28 @@ std::string buildDrugEvaluationReportText(
     aLine("K IC50",            formatRuntimeNumber(evalInput.config.ic50_k));
     aLine("Ca IC50",           formatRuntimeNumber(evalInput.config.ic50_ca));
     aLine("Hill",              formatRuntimeNumber(evalInput.config.hill));
+    // PHASE2_PLAN.md step 4: only print a receptor's line when it's actually
+    // configured (ec50 well below the inert 1e9 default) -- most drugs in
+    // this engine are still channel-only (Phase 1 style), so printing four
+    // "1.00e+09" no-op lines on every report would just be noise.
+    constexpr double kReceptorInertThreshold = 1.0e8;
+    if (evalInput.config.ic50_ampa < kReceptorInertThreshold) {
+        aLine("AMPA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_ampa));
+        aLine("AMPA Hill",          formatRuntimeNumber(evalInput.config.hill_ampa));
+    }
+    if (evalInput.config.ic50_nmda < kReceptorInertThreshold) {
+        aLine("NMDA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_nmda));
+        aLine("NMDA Hill",          formatRuntimeNumber(evalInput.config.hill_nmda));
+    }
+    if (evalInput.config.ec50_gabaA < kReceptorInertThreshold) {
+        aLine("GABA-A EC50 (Potentiate)", formatRuntimeNumber(evalInput.config.ec50_gabaA));
+        aLine("GABA-A Hill",              formatRuntimeNumber(evalInput.config.hill_gabaA));
+        aLine("GABA-A Max Potentiation",  formatRuntimeNumber(evalInput.config.max_potentiation_gabaA));
+    }
+    if (evalInput.config.ec50_gabaB < kReceptorInertThreshold) {
+        aLine("GABA-B EC50 (Agonist)", formatRuntimeNumber(evalInput.config.ec50_gabaB));
+        aLine("GABA-B Hill",           formatRuntimeNumber(evalInput.config.hill_gabaB));
+    }
     aLine("Runs",              std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
 
@@ -1093,6 +1218,20 @@ void runDoseEvaluationMode(
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_IC50_K"); v&&*v>0) evalInput.config.ic50_k=*v;
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_IC50_CA");v&&*v>0) evalInput.config.ic50_ca=*v;
         if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL");   v&&*v>=1&&*v<=6) evalInput.config.hill=*v;
+
+        // PHASE2_PLAN.md step 4: receptor pharmacology overrides, same
+        // real-hardware-smoke-test purpose as the channel IC50 overrides
+        // above -- lets a single drug's receptor action be tested via
+        // SPP_FORCE_CPU=1 --dose-eval without needing a JSON config file.
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EC50_AMPA");  v&&*v>0) evalInput.config.ic50_ampa=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL_AMPA");  v&&*v>=1&&*v<=6) evalInput.config.hill_ampa=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EC50_NMDA");  v&&*v>0) evalInput.config.ic50_nmda=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL_NMDA");  v&&*v>=1&&*v<=6) evalInput.config.hill_nmda=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EC50_GABAA"); v&&*v>0) evalInput.config.ec50_gabaA=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL_GABAA"); v&&*v>=1&&*v<=6) evalInput.config.hill_gabaA=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_MAX_POTENTIATION_GABAA"); v&&*v>=1.0) evalInput.config.max_potentiation_gabaA=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_EC50_GABAB"); v&&*v>0) evalInput.config.ec50_gabaB=*v;
+        if(auto v=tryEnvDouble("SPP_DOSE_EVAL_HILL_GABAB"); v&&*v>=1&&*v<=6) evalInput.config.hill_gabaB=*v;
     }
     // Diagnostic overrides for baseline-dynamics tuning -- unconditional
     // (unlike the drug-parameter overrides above) since dt/external_current
@@ -1258,13 +1397,33 @@ int main(int argc, char** argv) {
             input.config.excitatory_ratio       = 0.80;
             // --dose-eval has its own dt/connectivity/noise regime and is
             // tuned separately from the SimulationConfig default above.
-            // Measured in-network (1320 neurons, 500 ms, connectivity 0.05):
-            //   I=1 -> 3.7 Hz (23% of neurons still sub-threshold)
-            //   I=2 -> 15.6 Hz, 0% collapsed   <-- operating point
-            //   I=4 -> 19.9 Hz,  I=12 -> 26.6 Hz
-            // Recurrent synaptic drive amplifies well above the single-neuron
-            // rate, which is why this is much smaller than it looks like it
-            // should be from single-cell characterisation alone.
+            //
+            // STALE CALIBRATION FOUND AND FIXED (PHASE2_PLAN.md step 4
+            // validation): the I=2.0 operating point below was measured
+            // against the pre-Phase-2 flat synaptic model and never
+            // re-verified after GABA-A/NMDA/GABA-B/AMPA were converted to
+            // true conductances this session. Confirmed on real hardware
+            // (SPP_FORCE_CPU=1 --dose-eval, dose=0 no-drug control,
+            // neuron_stats.csv): at I=2.0 every single neuron fired exactly
+            // once (spike_count=1, isi_variance=0 for all 1320 neurons) and
+            // stayed silent for the rest of the run -- the same "fires once
+            // then permanently silent" collapse chased down earlier in
+            // NeuronModel.h/SimulationEngine.h, just in this engine's
+            // separate baseline. I=6.6 (the value already calibrated for
+            // --simulate's regime, see SimulationConfig::external_current
+            // above) fixes it here too: dose=0 control now gives a sustained
+            // 16 Hz with a smooth, non-degenerate dose-response curve above
+            // it, confirmed on real hardware. The I=1/2/4/12 measurements
+            // below are pre-Phase-2 history, kept only as a record of what
+            // used to be true -- do not treat them as current operating
+            // guidance. Recurrent synaptic drive amplifies well above the
+            // single-neuron rate, which is why this is much smaller than it
+            // looks like it should be from single-cell characterisation
+            // alone -- that part of the reasoning still holds, just not the
+            // specific I=2.0 number.
+            //   [pre-Phase-2] I=1 -> 3.7 Hz (23% of neurons still sub-threshold)
+            //   [pre-Phase-2] I=2 -> 15.6 Hz, 0% collapsed
+            //   [pre-Phase-2] I=4 -> 19.9 Hz,  I=12 -> 26.6 Hz
             input.config.external_current       = 6.6;
             input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;

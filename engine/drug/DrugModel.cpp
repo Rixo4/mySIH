@@ -21,6 +21,19 @@ float clamp01(float value) {
     return std::clamp(value, 0.0f, 1.0f);
 }
 
+// Shared by all three receptor-drug mechanisms below: only Block is a
+// fractional reduction of the raw conductance. Potentiate/Agonist ignore
+// this and are handled by their own DrugModel:: static methods. Returns a
+// multiplicative residual in [0,1] -- 1.0 (no-op) for any mechanism other
+// than Block, including None.
+float receptorResidualForBlock(const ReceptorAction& action, float dose) {
+    if (action.mechanism != ReceptorMechanism::Block) {
+        return 1.0f;
+    }
+    const float blockFraction = clamp01(DrugModel::hillBlock(dose, action.ec50, action.hill));
+    return std::max(0.0f, 1.0f - blockFraction);
+}
+
 float sanitizeConductance(float value) {
     if (!std::isfinite(value) || value <= 0.0f) {
         return 0.0f;
@@ -41,6 +54,10 @@ void DrugModel::setGlobalDose(float dose) {
 
 void DrugModel::setGlobalProfile(const ChannelDrugProfile& profile) {
     globalProfile_ = profile;
+}
+
+void DrugModel::setGlobalReceptorProfile(const ReceptorDrugProfile& profile) {
+    globalReceptorProfile_ = profile;
 }
 
 void DrugModel::enablePerNeuronProfiles(std::size_t neuronCount) {
@@ -131,6 +148,54 @@ float DrugModel::hillBlock(float dose, float ic50, float hill) {
     }
 
     return clamp01(dosePow / (dosePow + ic50Pow + kTiny));
+}
+
+float DrugModel::hillPotentiationFactor(float dose, float ec50, float hill, float maxPotentiationFactor) {
+    // Reuses hillBlock's sigmoid as the underlying occupancy fraction (0..1)
+    // -- the *shape* of dose-response is the same Hill equation regardless
+    // of whether the bound receptor blocks or potentiates; only what the
+    // occupancy fraction is then used for differs.
+    const float occupancy = hillBlock(dose, ec50, hill);
+    const float safeCeiling = std::isfinite(maxPotentiationFactor)
+                                   ? std::max(1.0f, maxPotentiationFactor)
+                                   : 1.0f;
+    return 1.0f + (safeCeiling - 1.0f) * occupancy;
+}
+
+float DrugModel::hillAgonistActivation(float dose, float ec50, float hill) {
+    return clamp01(hillBlock(dose, ec50, hill));
+}
+
+ReceptorConductanceModifiers DrugModel::computeReceptorModifiers(const ReceptorDrugProfile& profile, float dose) {
+    ReceptorConductanceModifiers mods;
+
+    mods.ampaResidual = receptorResidualForBlock(profile.ampa, dose);
+    mods.nmdaResidual = receptorResidualForBlock(profile.nmda, dose);
+
+    if (profile.gabaA.mechanism == ReceptorMechanism::Potentiate) {
+        mods.gabaAPotentiation = hillPotentiationFactor(
+            dose,
+            profile.gabaA.ec50,
+            profile.gabaA.hill,
+            profile.gabaA.maxPotentiationFactor
+        );
+    }
+
+    if (profile.gabaB.mechanism == ReceptorMechanism::Agonist) {
+        mods.gabaBAgonistActivation = hillAgonistActivation(
+            dose,
+            profile.gabaB.ec50,
+            profile.gabaB.hill
+        );
+    }
+
+    return mods;
+}
+
+ReceptorConductanceModifiers DrugModel::applyReceptors(float doseScale) const {
+    const float safeDoseScale = std::clamp(doseScale, 0.0f, 2.0f);
+    const float dose = globalDose_ * safeDoseScale;
+    return computeReceptorModifiers(globalReceptorProfile_, dose);
 }
 
 } // namespace spp::drug

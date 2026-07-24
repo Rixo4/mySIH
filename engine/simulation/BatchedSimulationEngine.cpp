@@ -14,7 +14,8 @@ BatchedSimulationEngine::BatchedSimulationEngine(
     const network::NetworkConfig& networkConfigTemplate,
     const SimulationConfig& simulationConfig,
     const drug::ChannelDrugProfile& drugProfile,
-    const std::vector<BatchBlockSpec>& blocks
+    const std::vector<BatchBlockSpec>& blocks,
+    const drug::ReceptorDrugProfile& receptorProfile
 ) : neuronsPerBlock_(neuronsPerBlock),
     blockCount_(blocks.size()),
     totalNeurons_(neuronsPerBlock * blocks.size()),
@@ -126,6 +127,7 @@ BatchedSimulationEngine::BatchedSimulationEngine(
     excProfile_ = drugProfile;
     inhProfile_ = drugProfile;
     inhProfile_.ic50K *= 1.75f;
+    receptorProfile_ = receptorProfile;
 
     // ---- Single CudaSimulator sized for the WHOLE batch. This is the crux
     // ---- of the fix: one set of H2D/kernel/D2H calls per timestep covers
@@ -255,6 +257,12 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     // (type: 0 = inhibitory, 1 = excitatory). {blockNa, blockK, blockCa}.
     std::vector<std::array<float, 3>> blockTypeBlockFrac(blockCount_ * 2);
 
+    // PHASE2_PLAN.md step 4: per-block receptor drug modifiers, recomputed
+    // once per timestep -- no per-type split needed (see receptorProfile_
+    // comment in the header), just per-block since each block has its own
+    // dose.
+    std::vector<drug::ReceptorConductanceModifiers> blockReceptorMods(blockCount_);
+
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
@@ -367,6 +375,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                     drug::DrugModel::hillBlock(effDose, prof.ic50Ca, prof.hillCa)
                 };
             }
+            blockReceptorMods[b] = drug::DrugModel::computeReceptorModifiers(receptorProfile_, effDose);
         }
 
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
@@ -379,14 +388,23 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             // Ceiling prevents a synchronized-burst conductance spike from
             // causing depolarization block -- see the long comment on
             // ampaConductanceCeiling in SimulationEngine.h.
+            // Drug modifiers (block/potentiate/agonist) looked up per-block
+            // from blockReceptorMods, same pattern as blockTypeBlockFrac
+            // above -- see the long comment in SimulationEngine::run() for
+            // what each field means.
+            const drug::ReceptorConductanceModifiers& rMods = blockReceptorMods[i / neuronsPerBlock_];
             synapticEff[i].gAMPAEff = std::clamp(
-                config_.gMaxAMPA * receptorConductances[i].gAMPA,
+                config_.gMaxAMPA * receptorConductances[i].gAMPA * rMods.ampaResidual,
                 0.0f,
                 config_.ampaConductanceCeiling
             );
-            synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
-            synapticEff[i].gNMDAEff = config_.gMaxNMDA * receptorConductances[i].gNMDA;
-            synapticEff[i].gGABAbEff = config_.gMaxGABAb * receptorConductances[i].gGABAb;
+            synapticEff[i].gGABAaEff =
+                config_.gMaxGABAa * receptorConductances[i].gGABAa * rMods.gabaAPotentiation;
+            synapticEff[i].gNMDAEff =
+                config_.gMaxNMDA * receptorConductances[i].gNMDA * rMods.nmdaResidual;
+            synapticEff[i].gGABAbEff =
+                config_.gMaxGABAb * receptorConductances[i].gGABAb +
+                config_.gMaxGABAbAgonist * rMods.gabaBAgonistActivation;
 
             iNoise[i] = unitNormal(rng_) * population_.noiseStd[i];
             if (!std::isfinite(iNoise[i])) {
