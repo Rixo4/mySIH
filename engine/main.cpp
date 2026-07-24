@@ -1224,6 +1224,13 @@ int main(int argc, char** argv) {
         if(mode == "--simulate") {
             RuntimeInput input;
             input.run_dose_sweep = false;
+            // GABA-A's true conductance term isn't visible to the CUDA
+            // kernel yet (see SimulationEngine.cpp comment at the GPU call
+            // site) -- SPP_FORCE_CPU=1 forces the CPU path so real-hardware
+            // verification actually exercises the new receptor code.
+            if (auto v = readEnvVar("SPP_FORCE_CPU")) {
+                if (trim(*v) == "1") input.config.use_cuda = false;
+            }
             validateConfig(input.config);
             runSingleSimulationMode(input);
             return 0;
@@ -1233,6 +1240,13 @@ int main(int argc, char** argv) {
             RuntimeInput input;
             input.run_dose_sweep       = false;
             input.config.output_folder = "output_pharma_decision";
+            // Same GABA-A/GPU gap as --simulate -- see comment there. This
+            // matters even more here: --dose-eval's GPU path is a separate
+            // fully GPU-resident kernel (stepBatched) that has never
+            // reflected ANY receptor addition, lighter or true-conductance.
+            if (auto v = readEnvVar("SPP_FORCE_CPU")) {
+                if (trim(*v) == "1") input.config.use_cuda = false;
+            }
 #ifdef SPP_USE_CUDA
             input.config.neuron_count = 1420;
 #else

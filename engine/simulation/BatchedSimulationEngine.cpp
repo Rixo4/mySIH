@@ -228,11 +228,16 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<float> iExcPulse(totalNeurons_, 0.0f);
     std::vector<float> iInhPulse(totalNeurons_, 0.0f);
     std::vector<float> iExcState(totalNeurons_, 0.0f);
-    std::vector<float> iInhState(totalNeurons_, 0.0f);
     std::vector<float> iNmdaState(totalNeurons_, 0.0f);
     std::vector<float> iGabaBState(totalNeurons_, 0.0f);
     std::vector<float> iSyn(totalNeurons_, 0.0f);
     std::vector<float> iNoise(totalNeurons_, 0.0f);
+
+    // GABA-A's true conductance path -- same pattern as SimulationEngine::run(),
+    // see its comment for why all four fields exist but only gGABAaEff is used.
+    std::vector<synapse::ReceptorConductanceState> receptorStates(totalNeurons_);
+    std::vector<synapse::ReceptorConductances> receptorConductances(totalNeurons_);
+    std::vector<neuron::SynapticConductances> synapticEff(totalNeurons_);
 
     std::vector<float> gNaEff(totalNeurons_, 0.0f);
     std::vector<float> gKEff(totalNeurons_, 0.0f);
@@ -256,9 +261,6 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
     const float nmdaDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauNmdaMs));
     const float nmdaFraction = std::clamp(config_.nmdaFraction, 0.0f, 1.0f);
-    const float gabaAFraction = std::clamp(config_.gabaAFraction, 0.0f, 1.0f);
-    const float gabaADrivingForceAtRest = population_.params.restingVoltage - config_.eGABAa;
-    const float gabaASafeDenom = (std::fabs(gabaADrivingForceAtRest) > 1.0e-3f) ? gabaADrivingForceAtRest : 1.0f;
     const float gabaBDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauGabaBMs));
     const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
     const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
@@ -283,6 +285,12 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     }
 
 #ifdef SPP_USE_CUDA
+    // NOTE: this GPU-resident batched path (stepBatched) bypasses the CPU
+    // per-neuron loop entirely, which means it does NOT reflect GABA-A's
+    // true conductance term (or any of the other lighter-model receptor
+    // additions) -- a pre-existing gap, not introduced by this rebuild.
+    // Use SPP_FORCE_CPU=1 for real-hardware --dose-eval verification of
+    // receptor changes until CUDA mirroring is done (PHASE2_PLAN.md step 6).
     if (runOnGpu) {
         constexpr std::size_t kGpuBatchSteps = 50U;
         for (std::size_t batchStart = 0; batchStart < stepCount; batchStart += kGpuBatchSteps) {
@@ -352,6 +360,11 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                                     : 1.0f;
 
         matrix_.accumulateSynapticCurrents(delayBuffer_, iExcPulse, iInhPulse);
+        // GABA-A's true conductance path -- CPU fallback only (see the
+        // #ifdef SPP_USE_CUDA early-return above for the GPU path, which
+        // does not yet reflect this receptor -- same gap noted in
+        // SimulationEngine::run()).
+        matrix_.accumulateReceptorConductances(delayBuffer_, receptorStates, config_.dtMs, receptorConductances);
 
         for (std::size_t b = 0; b < blockCount_; ++b) {
             const float effDose = blockDoses_[b] * doseScale;
@@ -372,14 +385,13 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             // of the excitatory pulse goes into a slower pool gated by the
             // voltage-dependent Mg2+ block, ~94% shut at rest.
             const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * (1.0f - nmdaFraction);
-            // Fast inhibitory pool gets (1 - gabaBFraction) of the pulse; the
-            // rest is diverted into the slow GABA-B pool below.
-            const float inhAccum = iInhState[i] * inhDecay + iInhPulse[i] * (1.0f - gabaBFraction);
             const float nmdaAccum = iNmdaState[i] * nmdaDecay + iExcPulse[i] * nmdaFraction;
+            // GABA-A no longer diverts from the flat inhibitory pulse -- see
+            // SimulationEngine::run()'s comment. GABA-B still draws its slow
+            // pool directly from the raw inhibitory pulse.
             const float gabaBAccum = iGabaBState[i] * gabaBDecay + iInhPulse[i] * gabaBFraction;
 
             iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
-            iInhState[i] = std::clamp(inhAccum, 0.0f, config_.maxSynCurrent);
             iNmdaState[i] = std::clamp(nmdaAccum, 0.0f, config_.maxSynCurrent);
             // Own tight ceiling, not the shared maxSynCurrent -- see the long
             // comment on gabaBMaxCurrent in SimulationEngine.h.
@@ -388,12 +400,10 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float mgUnblock = spp::neuron::nmdaMgBlockFraction(population_.v[i]);
             const float iNmdaEff = iNmdaState[i] * mgUnblock;
 
-            // Same GABA-A reweighting as SimulationEngine::run() -- no new
-            // state, exactly 1.0x at resting voltage, grows with depolarization.
-            const float gabaADrivingForceNow = population_.v[i] - config_.eGABAa;
-            const float gabaARatio = std::clamp(gabaADrivingForceNow / gabaASafeDenom, 0.0f, 2.0f);
-            const float gabaAWeight = (1.0f - gabaAFraction) + gabaAFraction * gabaARatio;
-            const float iInhEffective = iInhState[i] * gabaAWeight;
+            // GABA-A: real conductance current, same as SimulationEngine::run() --
+            // gMaxGABAa peak-scales the raw 0..1 conductance, applied inside
+            // NeuronModel's RK4 stages rather than here.
+            synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
 
             // GABA-B: separate slow pool, own ratio anchored at 1.0x at rest.
             const float gabaBDrivingForceNow = population_.v[i] - population_.params.eK;
@@ -407,7 +417,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float ampaWeight = (1.0f - ampaFraction) + ampaFraction * ampaRatio;
             const float iExcEffective = iExcState[i] * ampaWeight;
 
-            const float synCurrent = (iExcEffective + iNmdaEff) - iInhEffective - iGabaBEff;
+            const float synCurrent = (iExcEffective + iNmdaEff) - iGabaBEff;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {
@@ -484,7 +494,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 }
                 iTotal = std::clamp(iTotal, -config_.maxTotalCurrent, config_.maxTotalCurrent);
 
-                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params);
+                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params, synapticEff[i]);
 
                 const bool inRefractory = (timeMs - population_.lastSpikeTime[i]) < config_.refractoryMs;
                 const bool crossed = (oldV <= population_.threshold[i]) && (state.v > population_.threshold[i]);

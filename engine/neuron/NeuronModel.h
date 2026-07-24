@@ -76,6 +76,17 @@ struct HHParameters {
     // deliberately if a calcium-independent AHP floor is ever wanted.
     float gAHPFloor = 0.0f;      // calcium-independent baseline AHP component
     float restingVoltage = -65.0f;
+
+    // ─── Synaptic receptor currents -- rebuilt properly, one receptor at a
+    // time (GABA-A first). Unlike the earlier full-rewrite attempt that
+    // wired all four receptors simultaneously and collapsed the network in
+    // a way that took most of a session to diagnose, this time only
+    // eGABAa is real; eAMPA/eNMDA are added later in the same build order
+    // (GABA-A -> NMDA -> GABA-B -> AMPA) once GABA-A is verified healthy.
+    // Value matches ReceptorKinetics::kGabaAReversalMv in ReceptorModel.h,
+    // deliberately separate from eK/eL since chloride reversal depends on
+    // the cell's own Cl- gradient, not a fixed physical constant.
+    float eGABAa = -70.0f;
 };
 
 struct HHState {
@@ -136,13 +147,26 @@ float tauS(float vMv);
 
 HHState steadyStateAtVoltage(float vMv);
 
+// Per-neuron effective synaptic conductances for one timestep, already
+// peak-scaled (gMax * raw 0..1 conductance from Synapse) by the caller --
+// mirrors how gNaEff/gKEff/gCaEff arrive already drug-modulated. Only
+// gGABAaEff is wired to anything right now (see eGABAa comment above);
+// the other three default to 0 (no current) until their own build steps.
+struct SynapticConductances {
+    float gAMPAEff = 0.0f;
+    float gNMDAEff = 0.0f;
+    float gGABAaEff = 0.0f;
+    float gGABAbEff = 0.0f;
+};
+
 HHDerivatives computeDerivatives(
     const HHState& state,
     float iTotal,
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic = {}
 );
 
 void rk4Step(
@@ -152,7 +176,8 @@ void rk4Step(
     float gNaEff,
     float gKEff,
     float gCaEff,
-    const HHParameters& params
+    const HHParameters& params,
+    const SynapticConductances& synaptic = {}
 );
 
 bool isFiniteState(const HHState& state);

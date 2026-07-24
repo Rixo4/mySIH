@@ -43,24 +43,28 @@ struct SimulationConfig {
     float synTauNmdaMs = 100.0f;
     float nmdaFraction = 0.25f;
 
-    // Second small, isolated addition: a fraction of the EXISTING inhibitory
-    // current (no new accumulator/state needed) is reweighted by GABA-A's
-    // own voltage-dependent driving force (V - eGABAa), normalized so the
-    // reweighting is exactly 1.0 (i.e. identical to the current validated
-    // baseline) at resting voltage -- it only pulls away from baseline as a
-    // neuron actually depolarizes, growing inhibition as it approaches
-    // threshold (real shunting-inhibition behavior), never at rest. eGABAa
-    // matches ReceptorKinetics::kGabaAReversalMv from ReceptorModel.h.
-    float eGABAa = -70.0f;
-    // Started at 0.25 -- sandbox-tested before ever reaching real hardware
-    // and found too strong: with a x5 driving-force ratio ceiling it dropped
-    // firing rate from ~30Hz to ~8Hz and pushed silent neurons to ~25%.
-    // Reducing the ceiling to x2 (see the 2.0f clamp at the call site) and
-    // this fraction to 0.10 recovered a healthy result (29.06 Hz, 0.13%
-    // silent) nearly identical to the pre-GABA-A baseline (30.00 Hz, 0.33%
-    // silent). Confirms real shunting inhibition is a strong effect even in
-    // small doses here -- this fraction should stay conservative.
-    float gabaAFraction = 0.10f;
+    // GABA-A moved OFF the lighter reweight model onto the real conductance
+    // model (gGABAa*(V-eGABAa), computed via Synapse.cpp's
+    // accumulateReceptorConductances + NeuronModel's SynapticConductances --
+    // see NeuronModel.h). eGABAa now lives in HHParameters (single source of
+    // truth for the reversal potential). gMaxGABAa is the new peak-
+    // conductance scale requiring the same empirical-calibration treatment
+    // gCa/gAHP needed in Phase 1.
+    //
+    // First calibration attempt (0.05) looked fine on short sandbox runs
+    // (12.50 Hz at 80ms, no collapse) but real-hardware full-duration
+    // testing exposed a slow decline invisible in the short check: 12.50 Hz
+    // at 80ms -> 2.50 Hz at the full 400ms, 0% silent throughout (not a
+    // hard collapse, a genuine slow suppression). Same failure shape as
+    // GABA-B's lighter-model tuning: the receptor's own kinetics are fast
+    // (15ms decay) so this isn't the accumulator itself failing to decay --
+    // more likely the network's recurrent feedback amplifying real-time,
+    // depolarization-scaled inhibition into a slow population-level
+    // transient over hundreds of ms, the same amplification effect noted
+    // in gabaBMaxCurrent's comment below. Reduced 5x (0.05 -> 0.01) as the
+    // next attempt. Needs the same FULL 400ms real-hardware re-check --
+    // short sandbox/short real runs cannot see this failure mode.
+    float gMaxGABAa = 0.01f;
 
     // Third small addition: GABA-B, a genuinely slow, separate pool (real
     // metabotropic K+ conductance, decay ~1000ms per ReceptorModel.h's
@@ -178,6 +182,7 @@ private:
     void cpuStep(
         float timeMs,
         const std::vector<float>& synapticCurrent,
+        const std::vector<neuron::SynapticConductances>& synapticConductances,
         const std::vector<float>& externalCurrent,
         const std::vector<float>& noiseCurrent,
         const std::vector<float>& gNaEff,
