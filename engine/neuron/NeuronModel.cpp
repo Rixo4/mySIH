@@ -153,14 +153,13 @@ HHDerivatives computeDerivatives(
     const float iL = params.gL * (state.v - params.eL);
     const float caInflux = params.kCa * std::max(0.0f, -iCa);
 
-    // GABA-A, NMDA, and now GABA-B are real (see SynapticConductances
+    // All four receptor currents are real now (see SynapticConductances
     // comment) -- all computed here, not pre-summed into iTotal by the
     // caller, specifically so they see the correct per-RK4-substage voltage
     // rather than just the voltage at the start of the full timestep. This
-    // matters more for NMDA than the two GABA currents: the Mg2+-block
-    // fraction is itself voltage-dependent, so evaluating it at a stale
-    // voltage would make the block lag the actual membrane trajectory
-    // during a spike.
+    // matters more for NMDA than the others: the Mg2+-block fraction is
+    // itself voltage-dependent, so evaluating it at a stale voltage would
+    // make the block lag the actual membrane trajectory during a spike.
     const float iGABAa = synaptic.gGABAaEff * (state.v - params.eGABAa);
     const float nmdaUnblock = nmdaMgBlockFraction(state.v);
     const float iNMDA = synaptic.gNMDAEff * nmdaUnblock * (state.v - params.eNMDA);
@@ -168,9 +167,34 @@ HHDerivatives computeDerivatives(
     // block term like NMDA's, just a plain ohmic current the same shape as
     // GABA-A's.
     const float iGABAb = synaptic.gGABAbEff * (state.v - params.eK);
+    // AMPA: the flagged risk materialized on real hardware. Unrestricted
+    // (V-eAMPA) let the driving force collapse toward zero exactly as a
+    // neuron approached its own spike threshold (~0mV, same as eAMPA) --
+    // confirmed across gMaxAMPA = 0.005/0.02/0.5 (three orders of
+    // magnitude, all producing the identical signature: 1499/1500 neurons
+    // firing EXACTLY once, in the same initial synchronized volley, then
+    // permanently silent for the rest of a 400ms run -- a repeat-firing
+    // choke-off, not a magnitude/calibration problem, since the failure
+    // shape didn't change across that 100x sweep).
+    //
+    // Fix: floor the driving force MAGNITUDE so AMPA always contributes a
+    // real depolarizing kick even right at threshold, while leaving it
+    // completely unmodified everywhere else (away from threshold, this is
+    // a no-op -- the min/max only engages inside the +-15mV dead zone
+    // around eAMPA). Same protective spirit as the old reweighting model's
+    // [0.7,1.3] ratio clamp, reimplemented properly for the true-
+    // conductance model instead of reverting to that lighter model.
+    constexpr float kAmpaMinDrivingForceMv = 15.0f;
+    float ampaDrivingForce = state.v - params.eAMPA;
+    if (ampaDrivingForce < 0.0f) {
+        ampaDrivingForce = std::min(ampaDrivingForce, -kAmpaMinDrivingForceMv);
+    } else {
+        ampaDrivingForce = std::max(ampaDrivingForce, kAmpaMinDrivingForceMv);
+    }
+    const float iAMPA = synaptic.gAMPAEff * ampaDrivingForce;
 
     HHDerivatives d;
-    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL - iGABAa - iNMDA - iGABAb) / params.cm;
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iL - iGABAa - iNMDA - iGABAb - iAMPA) / params.cm;
     d.dm = alphaM(state.v) * (1.0f - state.m) - betaM(state.v) * state.m;
     d.dh = alphaH(state.v) * (1.0f - state.h) - betaH(state.v) * state.h;
     d.dn = alphaN(state.v) * (1.0f - state.n) - betaN(state.v) * state.n;

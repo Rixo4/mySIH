@@ -87,19 +87,22 @@ SimulationResult SimulationEngine::run() {
     result.dtMs = config_.dtMs;
     result.durationMs = config_.durationMs;
 
-    std::vector<float> iExcPulse(neuronCount_, 0.0f);
-    std::vector<float> iInhPulse(neuronCount_, 0.0f);
-    std::vector<float> iExcState(neuronCount_, 0.0f);
+    // iSyn is the old flat scalar synaptic current -- now permanently 0.0f
+    // for the entire run. All four receptors (GABA-A, NMDA, GABA-B, AMPA)
+    // have moved to the true-conductance path (synapticEff below) and are
+    // applied inside NeuronModel's RK4 stages instead. iSyn is kept only
+    // because the GPU path (cudaSimulator_->step, see its call below) still
+    // expects a flat synaptic scalar and has no knowledge of synapticEff at
+    // all -- see that call's comment for what this means for GPU runs.
     std::vector<float> iSyn(neuronCount_, 0.0f);
     std::vector<float> iNoise(neuronCount_, 0.0f);
 
-    // GABA-A, NMDA, and now GABA-B's true conductance path: per-neuron
-    // rise/decay accumulator state (owned here, persists across steps) and
-    // the per-step output conductances read from it, computed by
-    // Synapse.cpp's accumulateReceptorConductances -- previously-dead Step
-    // 2 code, now wired up for real. gGABAa, gNMDA, and gGABAb are all
-    // consumed below; only gAMPA still goes unused in synapticEff until
-    // AMPA's own true-conductance rebuild (last in the build order).
+    // All four receptors' true conductance path: per-neuron rise/decay
+    // accumulator state (owned here, persists across steps) and the
+    // per-step output conductances read from it, computed by Synapse.cpp's
+    // accumulateReceptorConductances. GABA-A -> NMDA -> GABA-B -> AMPA
+    // build order is complete; all four fields in synapticEff are consumed
+    // below.
     std::vector<synapse::ReceptorConductanceState> receptorStates(neuronCount_);
     std::vector<synapse::ReceptorConductances> receptorConductances(neuronCount_);
     std::vector<neuron::SynapticConductances> synapticEff(neuronCount_);
@@ -115,12 +118,6 @@ SimulationResult SimulationEngine::run() {
 
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
-    const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
-    const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
-    const float excFastPoolScale = std::clamp(config_.excFastPoolScale, 0.0f, 1.0f);
-    const float ampaFraction = std::clamp(config_.ampaFraction, 0.0f, 1.0f);
-    const float ampaDrivingForceAtRest = population_.params.restingVoltage - config_.eAMPA;
-    const float ampaSafeDenom = (std::fabs(ampaDrivingForceAtRest) > 1.0e-3f) ? ampaDrivingForceAtRest : 1.0f;
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
@@ -143,10 +140,11 @@ SimulationResult SimulationEngine::run() {
                                     ? (1.0f - std::exp(-timeMs / drugOnsetTauMs))
                                     : 1.0f;
 
-        network_.matrix().accumulateSynapticCurrents(delayBuffer_, iExcPulse, iInhPulse);
-        // GABA-A's true conductance path, fed by the same spike/delay
-        // pipeline as the flat currents above but through Synapse.cpp's
-        // per-receptor rise/decay kinetics -- see receptorStates comment.
+        // All four receptor conductances come from here now. The old flat
+        // accumulateSynapticCurrents path (iExcPulse/iInhPulse) has been
+        // fully retired -- AMPA (the last receptor still using it) has now
+        // moved to the true conductance model below, same as GABA-A/NMDA/
+        // GABA-B before it.
         network_.matrix().accumulateReceptorConductances(
             delayBuffer_, receptorStates, config_.dtMs, receptorConductances
         );
@@ -154,42 +152,25 @@ SimulationResult SimulationEngine::run() {
         for (std::size_t i = 0; i < neuronCount_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
-            // Fast (AMPA-like flat-current) pool -- scaled by excFastPoolScale
-            // to protect the external_current calibration from silently
-            // drifting now that NMDA draws its own independent conductance
-            // from the same spike input in parallel (see the long comment on
-            // excFastPoolScale in SimulationEngine.h for why the undivided
-            // full pulse broke baseline health).
-            const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * excFastPoolScale;
-            iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
-
-            // GABA-A, NMDA, and GABA-B: real conductance currents,
+            // All four receptors: real conductance currents, gAMPA*(V-eAMPA),
             // gGABAa*(V-eGABAa), gNMDA*mgUnblock(V)*(V-eNMDA), and
             // gGABAb*(V-eK), all applied inside NeuronModel's RK4 stages
             // (see computeDerivatives) so they see the correct per-substage
-            // voltage rather than a single value computed here. gMaxGABAa/
-            // gMaxNMDA/gMaxGABAb peak-scale the raw 0..1 conductance the
-            // same way drug-modulated gNaEff/gKEff/gCaEff are already
-            // peak-scaled before reaching the neuron model.
+            // voltage rather than a single value computed here. gMaxAMPA/
+            // gMaxGABAa/gMaxNMDA/gMaxGABAb peak-scale the raw 0..1
+            // conductance the same way drug-modulated gNaEff/gKEff/gCaEff
+            // are already peak-scaled before reaching the neuron model.
+            // Ceiling prevents a synchronized-burst conductance spike from
+            // causing depolarization block -- see the long comment on
+            // ampaConductanceCeiling in SimulationEngine.h.
+            synapticEff[i].gAMPAEff = std::clamp(
+                config_.gMaxAMPA * receptorConductances[i].gAMPA,
+                0.0f,
+                config_.ampaConductanceCeiling
+            );
             synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
             synapticEff[i].gNMDAEff = config_.gMaxNMDA * receptorConductances[i].gNMDA;
             synapticEff[i].gGABAbEff = config_.gMaxGABAb * receptorConductances[i].gGABAb;
-
-            // AMPA reweighting: narrow [0.7, 1.3] clamp (not [0, 2.0]) --
-            // see the long comment on ampaFraction in SimulationEngine.h for
-            // why AMPA needs a much tighter range than the inhibitory
-            // receptors got.
-            const float ampaDrivingForceNow = population_.v[i] - config_.eAMPA;
-            const float ampaRatio = std::clamp(ampaDrivingForceNow / ampaSafeDenom, 0.7f, 1.3f);
-            const float ampaWeight = (1.0f - ampaFraction) + ampaFraction * ampaRatio;
-            const float iExcEffective = iExcState[i] * ampaWeight;
-
-            const float synCurrent = iExcEffective;
-            if (!std::isfinite(synCurrent)) {
-                iSyn[i] = 0.0f;
-            } else {
-                iSyn[i] = std::clamp(synCurrent, -config_.maxSynCurrent, config_.maxSynCurrent);
-            }
 
             iNoise[i] = unitNormal(rng_) * population_.noiseStd[i];
             if (!std::isfinite(iNoise[i])) {
@@ -221,6 +202,24 @@ SimulationResult SimulationEngine::run() {
                 effectiveExternalCurrent[i] += 2.0f * (kBlock - 0.30f);
             }
 
+            // KNOWN DEAD CODE, left in place deliberately (per project
+            // decision, not an oversight): this used to amplify/dampen the
+            // flat iSyn synaptic current based on K-channel block fraction,
+            // a rough proxy for K-blockers increasing network excitability.
+            // iSyn is now permanently 0.0f (see its declaration comment
+            // above) -- every receptor moved to the true-conductance
+            // synapticEff path, so this branch never fires for ANY drug,
+            // including K-channel blockers. The inhibitory branch went dead
+            // when GABA-A/GABA-B moved off iSyn earlier in this build; the
+            // excitatory branch just went dead now that AMPA has too.
+            // Deliberately not fixed as part of AMPA's rebuild: redesigning
+            // this to act on synapticEff's gMax-scaled conductances instead
+            // of a flat scalar is a cross-receptor drug-model decision that
+            // belongs with the later PHASE2_PLAN.md step that wires
+            // ReceptorDrugProfile into DrugModel, not here. None of the
+            // Phase 2 validation drugs (perampanel/ketamine/memantine/
+            // diazepam/phenobarbital/baclofen) are K-channel blockers, so
+            // this gap doesn't affect current validation work.
             if (iSyn[i] > 0.0f) {
                 iSyn[i] *= (1.0f + 1.5f * kBlock);
             } else if (iSyn[i] < 0.0f) {
@@ -229,11 +228,18 @@ SimulationResult SimulationEngine::run() {
         }
 
         if (runOnGpu) {
-            // NOTE: GABA-A's true conductance term (synapticEff) is NOT yet
-            // reflected here -- the CUDA kernel only knows the flat iSyn
-            // scalar. GPU --simulate runs are missing GABA-A until the CUDA
-            // mirror is done (see PHASE2_PLAN.md step 6). Use SPP_FORCE_CPU=1
-            // for real-hardware verification of this receptor until then.
+            // NOTE: GPU path has ZERO synaptic transmission now, not just
+            // "missing GABA-A" -- iSyn (the only synaptic current the CUDA
+            // kernel knows about) is permanently 0.0f, now that all four
+            // receptors (GABA-A, NMDA, GABA-B, AMPA) have moved to the
+            // synapticEff/true-conductance path, which the GPU kernel has
+            // no knowledge of at all (see PHASE2_PLAN.md step 6, not yet
+            // started). Earlier in this build the GPU path at least still
+            // carried AMPA's flat-current proxy through iSyn; now it has
+            // nothing. Use SPP_FORCE_CPU=1 for ANY real-hardware
+            // verification until CUDA mirroring is done -- GPU --simulate
+            // runs currently simulate a network with NO synaptic
+            // connectivity at all, external drive + noise only.
             cudaSimulator_->step(
                 timeMs,
                 config_.dtMs,

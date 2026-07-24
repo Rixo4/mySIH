@@ -69,9 +69,16 @@ struct SimulationConfig {
     // margin and tips into synchronized/collapsing behavior far more easily
     // than a healthily-driven one. Reverted to 1.0 (no scaling, full
     // undivided pulse) -- the value that was actually verified healthy.
-    // Needs a fresh gMaxNMDA=0.0 real-hardware re-check to confirm this
-    // restores ~12.5Hz before any new gMaxNMDA value is tried.
-    float excFastPoolScale = 1.0f;
+    //
+    // RETIRED (AMPA build step): this field has been removed. It scaled the
+    // flat "fast pool" (iExcPulse/iExcState in SimulationEngine.cpp), which
+    // was standing in for AMPA's current before AMPA got its own
+    // true-conductance build step. That flat pool has now been fully
+    // removed from both SimulationEngine.cpp and BatchedSimulationEngine.cpp
+    // -- gMaxAMPA below is the only thing controlling AMPA's strength now.
+    // (Confirmed via repo-wide search before deleting: excFastPoolScale had
+    // no references anywhere outside this file and the two .cpp files being
+    // updated alongside it, so removing it outright is safe.)
 
     // Calibration risk: NMDA's driving force at rest (V-eNMDA = -65-0 =
     // -65mV) is far larger in magnitude than GABA-A's (V-eGABAa = +5mV), so
@@ -127,47 +134,98 @@ struct SimulationConfig {
     // its own decay properly (1000ms decay, same literature value), so this
     // rebuild should not need an artificial ceiling the way the old model did.
     //
-    // gMaxGABAb starting estimate below is NOT yet verified -- needs the
-    // same real-hardware full-duration CSV sweep methodology used for
-    // external_current, gMaxGABAa, and gMaxNMDA (see their comments/
-    // main.cpp). Rough first-guess reasoning: GABA-B's driving force at
-    // rest (V-eK = -65-(-77) = +12mV) is larger than GABA-A's (+5mV) but
-    // GABA-B has no compensating block mechanism like NMDA's Mg2+ block, so
-    // starting noticeably below gMaxGABAa (0.01) seems safer as a first
-    // data point -- but this is a guess, not a calibrated value, and the
-    // lesson from gMaxNMDA (verify the WHOLE config, not just the new
-    // field, against a known-healthy baseline) applies here too. One known
-    // gap carried over unchanged from before this rebuild: GABA-B's ~50ms
-    // onset delay (ReceptorKinetics::kGabaBOnsetDelayMs) is not applied by
-    // accumulateReceptorConductances' decay-accumulator math -- same as
-    // GABA-A/NMDA's 0ms delay needing no special handling, just noting
+    // CALIBRATED via real-hardware full-duration (400ms, 1500-neuron) CSV
+    // sweep: 0.004 -> decline over the run; 0.0005 -> still declining
+    // (12.5Hz, trending down); 0.0001 -> healthy flat 20Hz, low irregularity
+    // (~0.084), spike-count histogram confirming normal tonic firing
+    // (~8 spikes/neuron, no synchronized-volley signature). This value was
+    // verified BEFORE the AMPA conversion but the field default here was
+    // never updated to match -- every AMPA test this session ran with the
+    // stale 0.004 default, which alone silences the network after the
+    // initial volley regardless of AMPA's own settings (confirmed: even
+    // gMaxAMPA=0.0 showed the identical "fires once, then dead" pattern,
+    // which is only possible if something other than AMPA was responsible).
+    // One known gap, unchanged: GABA-B's ~50ms onset delay
+    // (ReceptorKinetics::kGabaBOnsetDelayMs) is not applied by
+    // accumulateReceptorConductances' decay-accumulator math -- noting
     // GABA-B's nonzero literature value isn't actually modeled yet.
     float gMaxGABAb = 0.0001f;
 
-    // Fourth and final small addition: AMPA voltage-dependence -- the last
-    // untouched receptor. Same reweighting pattern as GABA-A (no new state,
-    // ratio anchored at exactly 1.0x at resting voltage), but with a MUCH
-    // tighter clamp range than the inhibitory receptors got.
+    // Fourth and final receptor: AMPA, moved OFF the reweighting model
+    // (narrow [0.7,1.3]-clamped ratio applied to the old flat "fast pool")
+    // onto the real conductance model, same pattern as the other three:
+    // gAMPAEff*(V-eAMPA), computed via Synapse.cpp's
+    // accumulateReceptorConductances (out.gAMPA was already being computed
+    // every step -- see Synapse.cpp -- just not consumed until now) and
+    // added inside NeuronModel's computeDerivatives so it sees the correct
+    // per-RK4-substage voltage. eAMPA moved to HHParameters (see
+    // NeuronModel.h), matching how eGABAa/eNMDA already live there. The old
+    // flat "fast pool" (iExcPulse/iExcState/excDecay) that used to stand in
+    // for AMPA's current is fully retired now -- AMPA's current comes
+    // entirely from this true-conductance path.
     //
-    // Reason: AMPA's reversal potential (~0mV, see ReceptorModel.h) sits
-    // almost exactly at this network's own spike threshold (~0mV). That
-    // means the natural driving force (V - eAMPA) SHRINKS toward zero
-    // exactly as a neuron approaches threshold -- the opposite of GABA-A/B,
-    // whose driving force grows in that direction (a stabilizing effect for
-    // inhibition, but a destabilizing one for excitation). This exact
-    // mechanism was the leading hypothesis for why the original full
-    // conductance-based Step 3 rewrite collapsed repeat firing. Clamping the
-    // ratio to a narrow [0.7, 1.3] band (vs [0, 2.0] for GABA-A/B) means
-    // AMPA can never lose more than 30% of its drive even very close to
-    // threshold -- enough to add genuine voltage-dependence without
-    // reproducing the choke-off failure.
+    // KNOWN RISK, carried over from the reweighting-model comment history --
+    // CONFIRMED on real hardware, not just a hypothesis: AMPA's reversal
+    // potential (~0mV, see ReceptorModel.h) sits almost exactly at this
+    // network's own spike threshold (~0mV), so the driving force
+    // (V - eAMPA) SHRINKS toward zero exactly as a neuron approaches
+    // threshold -- the opposite of GABA-A/B, whose driving force grows in
+    // that direction (stabilizing for inhibition, destabilizing for
+    // excitation).
     //
-    // Sandbox-verified at 200ms only (28-29Hz baseline -> 18.49Hz, 0.20%
-    // silent, irregularity 0.36 -- gentle, no collapse); the sandbox could
-    // not complete a full 400ms run in the available time. Needs the same
-    // full-duration real-hardware check as GABA-B got.
-    float eAMPA = 0.0f;
-    float ampaFraction = 0.10f;
+    // Real-hardware sweep across gMaxAMPA = 0.005 / 0.02 / 0.5 (three
+    // orders of magnitude) produced the IDENTICAL failure signature every
+    // time: 1499/1500 neurons fire exactly once (the shared initial
+    // synchronized volley) then stay permanently silent for the rest of a
+    // 400ms run. Because the failure shape didn't change across a 100x
+    // sweep, this was diagnosed as a repeat-firing choke-off, not a
+    // magnitude/calibration problem -- confirmed via neuron_stats.csv
+    // spike-count histogram (uniform "1", not a spread).
+    //
+    // FIX ATTEMPT 1 (NeuronModel.cpp: floor the driving force magnitude at
+    // 15mV near threshold) did NOT fix this -- re-tested on real hardware
+    // at gMaxAMPA=0.02 with the floor in place, IDENTICAL failure, now even
+    // more absolute (1500/1500 neurons firing exactly once, vs 1499/1500
+    // before). Kept in place anyway since it's still a reasonable safety
+    // net, but it wasn't the real cause: the floor only engages within
+    // +-15mV of eAMPA, and the actual synchronized volley starts from rest
+    // (-65mV), far outside that zone, so the floor was never even active
+    // when the failure happens.
+    //
+    // REAL DIAGNOSIS: unlike every other current in this model, gAMPAEff
+    // had NO ceiling. The old flat model this replaced always clamped its
+    // accumulator to maxSynCurrent; the true-conductance path never got an
+    // equivalent. When the network's shared initial synchronized volley
+    // hits (external_current + noise, same every run), ~150 simultaneous
+    // presynaptic inputs (10% connectivity) sum into one uncapped
+    // conductance spike per neuron, at a full -65mV driving force -- almost
+    // certainly enough to blow every neuron through threshold in the same
+    // instant (explaining the perfect synchrony) and overshoot hard enough
+    // to drive the same kind of Na-inactivation depolarization block that
+    // caused the original gCa bug (see NeuronModel.h's gCa comment). AMPA
+    // is uniquely exposed among the four receptors: excitatory (large
+    // resting driving force, unlike GABA-A/B), no self-limiting gate
+    // (unlike NMDA's Mg-block), and never given a ceiling (unlike
+    // everything else in this file).
+    //
+    // FIX ATTEMPT 2: ampaConductanceCeiling below caps gAMPAEff directly
+    // (applied in SimulationEngine.cpp/BatchedSimulationEngine.cpp where
+    // it's assigned), the same protective role maxSynCurrent/
+    // gabaBMaxCurrent play for the other currents. Normal (non-synchronized)
+    // AMPA activity should sit well under this ceiling and be unaffected;
+    // it should only engage during pathological synchronized bursts. NOT
+    // yet verified -- needs the same real-hardware sweep as everything
+    // else, starting fresh since every prior AMPA result is now obsolete.
+    float gMaxAMPA = 0.02f;
+
+    // Dedicated ceiling on gAMPAEff itself (post gMaxAMPA-scaling), not
+    // shared with maxSynCurrent -- see the long comment above. Starting
+    // guess, not yet calibrated: chosen so a single neuron's peak AMPA
+    // current (ceiling * full -65mV resting driving force ~= 65) lands in
+    // the same rough scale as other individual currents in this model
+    // (e.g. iL, iAHP) rather than dominating them outright the way an
+    // unclamped synchronized-burst spike could.
+    float ampaConductanceCeiling = 1.0f;
 
     float maxSynCurrent = 300.0f;
     float maxTotalCurrent = 400.0f;
