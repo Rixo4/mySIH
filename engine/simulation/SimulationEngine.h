@@ -142,7 +142,7 @@ struct SimulationConfig {
     // accumulateReceptorConductances' decay-accumulator math -- same as
     // GABA-A/NMDA's 0ms delay needing no special handling, just noting
     // GABA-B's nonzero literature value isn't actually modeled yet.
-    float gMaxGABAb = 0.004f;
+    float gMaxGABAb = 0.0001f;
 
     // Fourth and final small addition: AMPA voltage-dependence -- the last
     // untouched receptor. Same reweighting pattern as GABA-A (no new state,
