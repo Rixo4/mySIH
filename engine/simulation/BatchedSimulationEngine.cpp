@@ -228,13 +228,12 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<float> iExcPulse(totalNeurons_, 0.0f);
     std::vector<float> iInhPulse(totalNeurons_, 0.0f);
     std::vector<float> iExcState(totalNeurons_, 0.0f);
-    std::vector<float> iGabaBState(totalNeurons_, 0.0f);
     std::vector<float> iSyn(totalNeurons_, 0.0f);
     std::vector<float> iNoise(totalNeurons_, 0.0f);
 
-    // GABA-A and NMDA's true conductance path -- same pattern as
-    // SimulationEngine::run(), see its comment for why all four fields
-    // exist but only gGABAaEff/gNMDAEff are used.
+    // GABA-A, NMDA, and GABA-B's true conductance path -- same pattern as
+    // SimulationEngine::run(), see its comment for why only gAMPA still
+    // goes unused in synapticEff.
     std::vector<synapse::ReceptorConductanceState> receptorStates(totalNeurons_);
     std::vector<synapse::ReceptorConductances> receptorConductances(totalNeurons_);
     std::vector<neuron::SynapticConductances> synapticEff(totalNeurons_);
@@ -260,10 +259,6 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const float excDecay = std::exp(-config_.dtMs / config_.synTauExcMs);
     const float inhDecay = std::exp(-config_.dtMs / config_.synTauInhMs);
     const float excFastPoolScale = std::clamp(config_.excFastPoolScale, 0.0f, 1.0f);
-    const float gabaBDecay = std::exp(-config_.dtMs / std::max(1.0f, config_.synTauGabaBMs));
-    const float gabaBFraction = std::clamp(config_.gabaBFraction, 0.0f, 1.0f);
-    const float gabaBDrivingForceAtRest = population_.params.restingVoltage - population_.params.eK;
-    const float gabaBSafeDenom = (std::fabs(gabaBDrivingForceAtRest) > 1.0e-3f) ? gabaBDrivingForceAtRest : 1.0f;
     const float ampaFraction = std::clamp(config_.ampaFraction, 0.0f, 1.0f);
     const float ampaDrivingForceAtRest = population_.params.restingVoltage - config_.eAMPA;
     const float ampaSafeDenom = (std::fabs(ampaDrivingForceAtRest) > 1.0e-3f) ? ampaDrivingForceAtRest : 1.0f;
@@ -384,27 +379,15 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             // SimulationEngine::run(), see its comment for why the
             // undivided full pulse broke baseline health.
             const float excAccum = iExcState[i] * excDecay + iExcPulse[i] * excFastPoolScale;
-            // GABA-A no longer diverts from the flat inhibitory pulse -- see
-            // SimulationEngine::run()'s comment. GABA-B still draws its slow
-            // pool directly from the raw inhibitory pulse.
-            const float gabaBAccum = iGabaBState[i] * gabaBDecay + iInhPulse[i] * gabaBFraction;
-
             iExcState[i] = std::clamp(excAccum, 0.0f, config_.maxSynCurrent);
-            // Own tight ceiling, not the shared maxSynCurrent -- see the long
-            // comment on gabaBMaxCurrent in SimulationEngine.h.
-            iGabaBState[i] = std::clamp(gabaBAccum, 0.0f, config_.gabaBMaxCurrent);
 
-            // GABA-A and NMDA: real conductance currents, same as
-            // SimulationEngine::run() -- gMaxGABAa/gMaxNMDA peak-scale the
-            // raw 0..1 conductance, applied inside NeuronModel's RK4 stages
-            // rather than here.
+            // GABA-A, NMDA, and GABA-B: real conductance currents, same as
+            // SimulationEngine::run() -- gMaxGABAa/gMaxNMDA/gMaxGABAb
+            // peak-scale the raw 0..1 conductance, applied inside
+            // NeuronModel's RK4 stages rather than here.
             synapticEff[i].gGABAaEff = config_.gMaxGABAa * receptorConductances[i].gGABAa;
             synapticEff[i].gNMDAEff = config_.gMaxNMDA * receptorConductances[i].gNMDA;
-
-            // GABA-B: separate slow pool, own ratio anchored at 1.0x at rest.
-            const float gabaBDrivingForceNow = population_.v[i] - population_.params.eK;
-            const float gabaBRatio = std::clamp(gabaBDrivingForceNow / gabaBSafeDenom, 0.0f, 2.0f);
-            const float iGabaBEff = iGabaBState[i] * gabaBRatio;
+            synapticEff[i].gGABAbEff = config_.gMaxGABAb * receptorConductances[i].gGABAb;
 
             // AMPA reweighting: narrow [0.7, 1.3] clamp -- see the long
             // comment on ampaFraction in SimulationEngine.h.
@@ -413,7 +396,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float ampaWeight = (1.0f - ampaFraction) + ampaFraction * ampaRatio;
             const float iExcEffective = iExcState[i] * ampaWeight;
 
-            const float synCurrent = iExcEffective - iGabaBEff;
+            const float synCurrent = iExcEffective;
             if (!std::isfinite(synCurrent)) {
                 iSyn[i] = 0.0f;
             } else {

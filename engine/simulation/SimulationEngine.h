@@ -108,39 +108,41 @@ struct SimulationConfig {
     // short sandbox/short real runs cannot see this failure mode.
     float gMaxGABAa = 0.01f;
 
-    // Third small addition: GABA-B, a genuinely slow, separate pool (real
-    // metabotropic K+ conductance, decay ~1000ms per ReceptorModel.h's
-    // literature value -- far slower than anything else in this model). A
-    // small fraction of the inhibitory pulse is diverted here (same "split"
-    // pattern as NMDA, not the "reweight" pattern used for GABA-A, since
-    // this pool's timescale is too different from the fast pool to share
-    // it). Reuses the existing eK reversal (GABA-B IS a K+ conductance, see
-    // ReceptorModel.h comments).
+    // Third small addition: GABA-B, moved OFF the earlier diverted-pool/
+    // reweight model onto the real conductance model, same pattern as
+    // GABA-A and NMDA: gGABAbEff*(V-eK), computed via Synapse.cpp's
+    // accumulateReceptorConductances (out.gGABAb was already being computed
+    // every step -- see Synapse.cpp -- just not consumed until now) and
+    // added inside NeuronModel's computeDerivatives so it sees the correct
+    // per-RK4-substage voltage. Reuses eK directly (GABA-B IS a K+
+    // conductance -- see ReceptorModel.h and NeuronModel.h comments), no
+    // separate reversal field needed.
     //
-    // This one fought back hard in sandbox testing: because the pool barely
-    // decays within any realistic run length (~18% decay over 200ms), it
-    // behaves like a near-lossless integrator rather than a normal decaying
-    // pool -- the same failure mode that derailed the original Step 3
-    // attempt. Even a conservative 5% fraction with the shared 300 ceiling
-    // collapsed the network (28->4.9Hz, 0->11.5% silent). A dedicated
-    // ceiling of 20, still far below the shared 300, made no difference --
-    // the pool was saturating almost immediately and sitting pinned there
-    // regardless. Only at ceiling=1.0 did healthy behavior return (20.70Hz,
-    // 0.27% silent, irregularity 0.21 -- higher than the ~0.02-0.03 baseline,
-    // plausibly a genuine signature of real GABA-B burst-pause modulation).
-    // There's a sharp nonlinear transition somewhere between ceiling 1 and 5
-    // -- this network's recurrent feedback clearly amplifies small
-    // per-neuron inhibitory changes into large population effects.
+    // The old diverted-pool version (synTauGabaBMs/gabaBFraction/
+    // gabaBMaxCurrent) fought hard in sandbox testing -- a near-lossless
+    // slow integrator that needed a very tight dedicated ceiling (1.0) to
+    // avoid collapsing the network -- but that whole family of problems was
+    // specific to the hand-rolled accumulator/ceiling approach, not GABA-B
+    // itself. The real per-receptor kernel in Synapse.cpp already handles
+    // its own decay properly (1000ms decay, same literature value), so this
+    // rebuild should not need an artificial ceiling the way the old model did.
     //
-    // IMPORTANT: only verified at 200ms in sandbox (the sandbox CPU is too
-    // slow to complete a 300-400ms run in the available time budget). GABA-B's
-    // whole risk profile is slow accumulation over a run, so this needs
-    // checking at the FULL 400ms duration (and --dose-eval's 500ms) on real
-    // hardware -- watch specifically for degradation in the back half that
-    // wasn't visible in this 200ms check.
-    float synTauGabaBMs = 1000.0f;
-    float gabaBFraction = 0.03f;
-    float gabaBMaxCurrent = 1.0f;
+    // gMaxGABAb starting estimate below is NOT yet verified -- needs the
+    // same real-hardware full-duration CSV sweep methodology used for
+    // external_current, gMaxGABAa, and gMaxNMDA (see their comments/
+    // main.cpp). Rough first-guess reasoning: GABA-B's driving force at
+    // rest (V-eK = -65-(-77) = +12mV) is larger than GABA-A's (+5mV) but
+    // GABA-B has no compensating block mechanism like NMDA's Mg2+ block, so
+    // starting noticeably below gMaxGABAa (0.01) seems safer as a first
+    // data point -- but this is a guess, not a calibrated value, and the
+    // lesson from gMaxNMDA (verify the WHOLE config, not just the new
+    // field, against a known-healthy baseline) applies here too. One known
+    // gap carried over unchanged from before this rebuild: GABA-B's ~50ms
+    // onset delay (ReceptorKinetics::kGabaBOnsetDelayMs) is not applied by
+    // accumulateReceptorConductances' decay-accumulator math -- same as
+    // GABA-A/NMDA's 0ms delay needing no special handling, just noting
+    // GABA-B's nonzero literature value isn't actually modeled yet.
+    float gMaxGABAb = 0.004f;
 
     // Fourth and final small addition: AMPA voltage-dependence -- the last
     // untouched receptor. Same reweighting pattern as GABA-A (no new state,

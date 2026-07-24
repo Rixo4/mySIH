@@ -78,7 +78,7 @@ struct HHParameters {
     float restingVoltage = -65.0f;
 
     // ─── Synaptic receptor currents -- rebuilt properly, one receptor at a
-    // time (GABA-A first, then NMDA). Unlike the earlier full-rewrite
+    // time (GABA-A, then NMDA, now GABA-B). Unlike the earlier full-rewrite
     // attempt that wired all four receptors simultaneously and collapsed
     // the network in a way that took most of a session to diagnose, this
     // build order is GABA-A -> NMDA -> GABA-B -> AMPA, each one verified
@@ -95,6 +95,13 @@ struct HHParameters {
     // eAMPA still lives in SimulationConfig (not here) since AMPA hasn't
     // moved to the true-conductance model yet -- see the build order above.
     float eNMDA = 0.0f;
+
+    // GABA-B has no reversal field of its own -- per ReceptorModel.h's
+    // comment, it's a real metabotropic-gated K+ conductance (G-protein ->
+    // GIRK channels), so it reuses eK (-77mV) directly rather than
+    // introducing a separate constant the way GABA-A's Cl- reversal needed
+    // its own eGABAa. gGABAbEff * (v - eK) is computed in computeDerivatives
+    // exactly like the other three receptor currents.
 };
 
 struct HHState {
@@ -157,9 +164,10 @@ HHState steadyStateAtVoltage(float vMv);
 
 // Per-neuron effective synaptic conductances for one timestep, already
 // peak-scaled (gMax * raw 0..1 conductance from Synapse) by the caller --
-// mirrors how gNaEff/gKEff/gCaEff arrive already drug-modulated. gGABAaEff
-// and gNMDAEff are wired to real currents now (see eGABAa/eNMDA comments
-// above); gAMPAEff/gGABAbEff still default to 0 until their own build steps.
+// mirrors how gNaEff/gKEff/gCaEff arrive already drug-modulated. gGABAaEff,
+// gNMDAEff, and gGABAbEff are wired to real currents now (see eGABAa/eNMDA/
+// GABA-B comments above); gAMPAEff still defaults to 0 until AMPA's own
+// build step (last in the GABA-A -> NMDA -> GABA-B -> AMPA order).
 struct SynapticConductances {
     float gAMPAEff = 0.0f;
     float gNMDAEff = 0.0f;
