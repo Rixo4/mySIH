@@ -925,7 +925,28 @@ std::string buildDrugEvaluationReportText(
                 break;
             case NetworkState::MildInstability:
             case NetworkState::Stable:
-                if (dose.suppressionScore > 0.20f || dose.stabilizationScore > 0.20f)
+                // BUG FIX (diazepam validation, Phase 2 receptor drugs):
+                // this was suppressionScore>0.20f || stabilizationScore>0.20f
+                // -- a SEPARATE, independently-hardcoded copy of the same
+                // "is this dose therapeutically effective" threshold
+                // PharmaDecisionEngine.cpp already computes (isEffective,
+                // used for report.hasTherapeuticWindow/windowQuality/the
+                // FINAL DECISION verdict), which uses suppressionScore>0.15f
+                // || stabilizationScore>0.10f. The two thresholds had
+                // silently drifted apart, so a dose landing between 0.15 and
+                // 0.20 suppressionScore (diazepam's real peak, ~0.18, given
+                // its literature EC50/ceiling) got counted as "therapeutic"
+                // by PharmaDecisionEngine (Window Quality: Continuous,
+                // Recommendation: PROMISING) but "ineffective" by this local
+                // duplicate (Effective Range / Therapeutic Zone: Not
+                // observed) -- the exact contradiction seen in the report.
+                // Fixed by matching PharmaDecisionEngine.cpp's thresholds
+                // exactly rather than keeping two independent copies that
+                // can drift again; ideally this loop would read an
+                // isEffective flag PharmaDecisionEngine already computed per
+                // dose instead of re-deriving it, but that's a larger
+                // refactor than this fix warrants.
+                if (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f)
                     therapeuticDoses.push_back(static_cast<double>(dose.dose));
                 else
                     ineffDoses.push_back(static_cast<double>(dose.dose));

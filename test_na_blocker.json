@@ -1,10 +1,13 @@
 {
-  "drug_name": "Flecainide",
+  "drug_name": "Arbaclofen",
   "channels": {
-    "Na": { "ic50": 300.0, "hill": 1.0, "kon": 0.0, "koff": 1.0 },
+    "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "dose_range": { "min": 0.0, "max": 1500.0, "step": 150.0 },
+  "receptors": {
+    "GABA_B": { "ec50": 0.1, "hill": 1.0 }
+  },
+  "dose_range": { "min": 0.0, "max": 0.5, "step": 0.05 },
   "runs": 8
 }

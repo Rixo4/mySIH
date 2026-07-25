@@ -68,8 +68,41 @@ double computeBestSigmoidR2(
     for (double y : effect01) { double dy = y - meanY; sst += dy*dy; }
     if (sst <= 1.0e-12) return 1.0;
     double bestSse = std::numeric_limits<double>::infinity();
-    const double dStep = std::max(0.25, (dMax - dMin) / 120.0);
-    for (double k = 0.02; k <= 2.51; k += 0.02) {
+    // BUG FIX (Phase 2 receptor-drug validation): this used to be
+    // std::max(0.25, (dMax-dMin)/120.0) -- an absolute floor of 0.25 dose
+    // units on the d50 grid-search step. That was fine for Phase 1's
+    // channel drugs, whose dose ranges run tens to hundreds of units wide,
+    // but Phase 2's real-pharmacology receptor drugs (e.g. perampanel,
+    // IC50=0.063uM, dose range 0-0.3) have dose ranges *narrower* than the
+    // 0.25 floor itself. That collapsed the d50 search to just 1-2
+    // candidate midpoints across the ENTIRE dose range instead of the
+    // intended ~120, producing a near-worthless sigmoid fit (R^2 ~0.3) on
+    // data that dose_response.csv showed was actually a smooth, clearly
+    // graded 52% suppression curve. Fix: scale purely off the dose range
+    // (still ~120 candidate midpoints regardless of unit scale), with only
+    // a degenerate-range guard (dMax==dMin) instead of an absolute floor.
+    const double doseRange = dMax - dMin;
+    const double dStep = (doseRange > 1.0e-9) ? (doseRange / 120.0) : 1.0;
+    // SECOND INSTANCE OF THE SAME BUG CLASS: k (sigmoid steepness) used to
+    // sweep 0.02 to 2.51 in ABSOLUTE 1/dose units, same hardcoded-for-
+    // Phase-1-ranges assumption as the old dStep floor. A logistic
+    // transitions from ~10% to ~90% over a width of ~4.39/k dose units, so
+    // fixed absolute k bounds only span a sensible range of *relative*
+    // steepness (k*doseRange) for dose ranges in roughly the same
+    // tens-to-hundreds-of-units ballpark Phase 1 always used. Confirmed
+    // broken for felbamate (dose range 0-3500uM): even at k's old minimum
+    // (0.02), the transition width is only ~220 units -- 6% of the range,
+    // forcing an artificially steep/narrow fit onto a response that's
+    // genuinely spread smoothly across the whole range (same relative
+    // dose:IC50 shape as ketamine/memantine, which fit at R^2 0.94-0.95;
+    // felbamate got R^2 0.78 on an equivalent curve purely from this).
+    // Fix: sweep k in RELATIVE terms (k*doseRange, dimensionless) instead
+    // of absolute units, so "how sharp is the transition relative to the
+    // tested dose range" is what's searched, independent of whether that
+    // range is 0.3uM or 3500uM.
+    const double safeDoseRange = (doseRange > 1.0e-9) ? doseRange : 1.0;
+    for (double kRel = 0.05; kRel <= 12.0; kRel += 0.05) {
+        const double k = kRel / safeDoseRange;
         for (double d50 = dMin; d50 <= dMax + 1.0e-9; d50 += dStep) {
             double numer = 0.0, denom = 0.0;
             for (std::size_t i = 0; i < dose.size(); ++i) {
