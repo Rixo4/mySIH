@@ -2,6 +2,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace spp::analyzer {
 
@@ -44,6 +45,10 @@ std::vector<AnalyzedDose> NetworkAnalyzer::analyze(
         analyzed.blockNa = obs.blockNa;
         analyzed.blockK  = obs.blockK;
         analyzed.blockCa = obs.blockCa;
+        analyzed.blockAmpa       = obs.blockAmpa;
+        analyzed.blockNmda       = obs.blockNmda;
+        analyzed.potentiateGabaA = obs.potentiateGabaA;
+        analyzed.activateGabaB   = obs.activateGabaB;
         analyzed.metrics = obs.metrics;
 
         // Compute deltas vs baseline
@@ -227,22 +232,43 @@ float NetworkAnalyzer::computeSeizureProbability(
 // ─── Mechanism Detection ─────────────────────────────────────────────────────
 
 MechanismSignature NetworkAnalyzer::detectMechanism(const AnalyzedDose& dose) {
-    constexpr float kMinBlock = 0.05f;  // 5% block floor before attributing a channel
+    constexpr float kMinBlock = 0.05f;  // 5% activity floor before attributing a mechanism
 
-    const float na = dose.blockNa, k = dose.blockK, ca = dose.blockCa;
-    const float maxBlock = std::max({na, k, ca});
-    if (maxBlock < kMinBlock) return MechanismSignature::Unknown;
+    // PHASE2_PLAN.md step 5: seven candidate mechanisms on one flat list,
+    // all normalized to the same 0..1 Hill-occupancy scale (see
+    // AnalyzedDose.h). Generalizes the original Na/K/Ca-only "which one
+    // dominates, flag Mixed if two are comparably strong" logic to include
+    // the four receptor mechanisms -- a real drug in the Phase 2 validation
+    // set (§5) only ever targets one of these seven, so treating them as
+    // one flat candidate set (rather than two separate channel/receptor
+    // hierarchies) is enough; a genuine channel+receptor combination drug
+    // isn't part of that set and would just show up as Mixed here, which
+    // is the correct fallback.
+    const std::array<std::pair<MechanismSignature, float>, 7> candidates{{
+        {MechanismSignature::NaBlock,         dose.blockNa},
+        {MechanismSignature::KBlock,          dose.blockK},
+        {MechanismSignature::CaBlock,         dose.blockCa},
+        {MechanismSignature::AmpaBlock,       dose.blockAmpa},
+        {MechanismSignature::NmdaBlock,       dose.blockNmda},
+        {MechanismSignature::GabaAPotentiate, dose.potentiateGabaA},
+        {MechanismSignature::GabaBAgonist,    dose.activateGabaB}
+    }};
 
-    const int meaningful = (na > kMinBlock) + (k > kMinBlock) + (ca > kMinBlock);
-    if (meaningful >= 2) {
-        std::array<float,3> vals{na, k, ca};
-        std::sort(vals.begin(), vals.end(), std::greater<float>());
-        if (vals[1] > vals[0] * 0.6f) return MechanismSignature::Mixed;  // genuinely comparable
+    auto sorted = candidates;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    const float maxVal = sorted[0].second;
+    if (maxVal < kMinBlock) return MechanismSignature::Unknown;
+
+    const int meaningful = static_cast<int>(std::count_if(
+        candidates.begin(), candidates.end(),
+        [kMinBlock](const auto& c) { return c.second > kMinBlock; }));
+    if (meaningful >= 2 && sorted[1].second > maxVal * 0.6f) {
+        return MechanismSignature::Mixed;  // genuinely comparable
     }
 
-    if (maxBlock == na) return MechanismSignature::NaBlock;
-    if (maxBlock == k)  return MechanismSignature::KBlock;
-    return MechanismSignature::CaBlock;
+    return sorted[0].first;
 }
 
 // ─── Network State Classification ────────────────────────────────────────────

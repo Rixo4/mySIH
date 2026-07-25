@@ -19,7 +19,18 @@ enum class MechanismSignature {
     NaBlock,
     KBlock,
     CaBlock,
-    Mixed
+    Mixed,
+    // PHASE2_PLAN.md step 5: receptor mechanism signatures. Kept as their
+    // own distinct enum values rather than folded into the existing
+    // Na/K/Ca/Mixed set, since a "mixed channel + receptor" combination
+    // isn't part of the Phase 2 validation drug set (§5) -- every
+    // validation drug targets exactly one receptor and none of the three
+    // intrinsic channels, so detectMechanism() below treats all seven as
+    // one flat set of candidates rather than two separate hierarchies.
+    AmpaBlock,
+    NmdaBlock,
+    GabaAPotentiate,
+    GabaBAgonist
 };
 
 struct AnalyzedDose {
@@ -27,6 +38,17 @@ struct AnalyzedDose {
     float blockNa = 0.0f;
     float blockK  = 0.0f;
     float blockCa = 0.0f;
+
+    // PHASE2_PLAN.md step 5: receptor drug "strength" fractions, all
+    // normalized to the same 0..1 Hill-occupancy scale as blockNa/K/Ca
+    // above (see DrugModel::hillBlock) so detectMechanism() can compare
+    // all seven candidates on equal footing. For GABA-A this is the
+    // underlying occupancy fraction driving the potentiation factor, not
+    // the multiplier itself (see main.cpp's buildDoseObservation).
+    float blockAmpa      = 0.0f;
+    float blockNmda       = 0.0f;
+    float potentiateGabaA = 0.0f;
+    float activateGabaB   = 0.0f;
 
     RawMetrics metrics;
 

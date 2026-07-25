@@ -2,6 +2,7 @@
 #include "NetworkAnalyzer.h"
 #include "AnalyzedDose.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -454,22 +455,31 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     }
 
     // ─── Step 3: Dominant mechanism ───────────────────────────────────────────
-    int naCount=0, kCount=0, caCount=0, mixedCount=0;
+    // PHASE2_PLAN.md step 5: extended from the original 4-way (Na/K/Ca/
+    // Mixed) tally to all 9 MechanismSignature values (Unknown + 8 real
+    // mechanisms), same "count occurrences across doses, pick the max"
+    // logic -- just over a bigger set now that
+    // NetworkAnalyzer::detectMechanism can return any of the four receptor
+    // signatures too.
+    std::array<int, 9> counts{};
+    auto indexOf = [](MechanismSignature s) -> std::size_t {
+        return static_cast<std::size_t>(s);
+    };
     for (const auto& dose : sorted) {
-        switch (dose.mechanismSignature) {
-            case MechanismSignature::NaBlock: ++naCount;    break;
-            case MechanismSignature::KBlock:  ++kCount;     break;
-            case MechanismSignature::CaBlock: ++caCount;    break;
-            case MechanismSignature::Mixed:   ++mixedCount; break;
-            default: break;
-        }
+        ++counts[indexOf(dose.mechanismSignature)];
     }
-    const int maxCount = std::max({naCount, kCount, caCount, mixedCount});
-    if      (maxCount == 0)         report.dominantMechanism = MechanismSignature::Unknown;
-    else if (naCount == maxCount)   report.dominantMechanism = MechanismSignature::NaBlock;
-    else if (kCount  == maxCount)   report.dominantMechanism = MechanismSignature::KBlock;
-    else if (caCount == maxCount)   report.dominantMechanism = MechanismSignature::CaBlock;
-    else                            report.dominantMechanism = MechanismSignature::Mixed;
+    // Index 0 is Unknown -- excluded from the "which mechanism dominates"
+    // comparison so a handful of real detections outvote a majority of
+    // Unknown doses (e.g. sub-threshold early doses correctly reading
+    // Unknown shouldn't hide a clear mechanism seen at higher doses).
+    std::size_t bestIdx = 0;
+    int bestCount = 0;
+    for (std::size_t i = 1; i < counts.size(); ++i) {
+        if (counts[i] > bestCount) { bestCount = counts[i]; bestIdx = i; }
+    }
+    report.dominantMechanism = (bestCount == 0)
+        ? MechanismSignature::Unknown
+        : static_cast<MechanismSignature>(bestIdx);
     report.mechanismText = toString(report.dominantMechanism);
 
     // ─── Step 4: Dominant network state (worst state seen across doses) ───────
@@ -776,11 +786,16 @@ std::string PharmaDecisionEngine::toString(NetworkState state) {
 
 std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
     switch (sig) {
-        case MechanismSignature::NaBlock:  return "Na-Channel Block";
-        case MechanismSignature::KBlock:   return "K-Channel Block";
-        case MechanismSignature::CaBlock:  return "Ca-Channel Block";
-        case MechanismSignature::Mixed:    return "Mixed Channel Block";
-        default:                           return "Unknown";
+        case MechanismSignature::NaBlock:         return "Na-Channel Block";
+        case MechanismSignature::KBlock:          return "K-Channel Block";
+        case MechanismSignature::CaBlock:         return "Ca-Channel Block";
+        case MechanismSignature::Mixed:           return "Mixed Channel Block";
+        // PHASE2_PLAN.md step 5
+        case MechanismSignature::AmpaBlock:       return "AMPA Receptor Block";
+        case MechanismSignature::NmdaBlock:       return "NMDA Receptor Block";
+        case MechanismSignature::GabaAPotentiate: return "GABA-A Potentiation";
+        case MechanismSignature::GabaBAgonist:    return "GABA-B Agonism";
+        default:                                  return "Unknown";
     }
 }
 

@@ -696,6 +696,21 @@ DoseObservation buildDoseObservation(
         dF, static_cast<float>(input.config.ic50_k),  static_cast<float>(input.config.hill)));
     o.blockCa = static_cast<float>(spp::drug::DrugModel::hillBlock(
         dF, static_cast<float>(input.config.ic50_ca), static_cast<float>(input.config.hill)));
+    // PHASE2_PLAN.md step 5: receptor "strength" fractions for
+    // NetworkAnalyzer::detectMechanism, all on the same 0..1 Hill-occupancy
+    // scale as blockNa/K/Ca above -- reuses the plain hillBlock sigmoid for
+    // all four, including GABA-A, where this is the underlying occupancy
+    // driving the potentiation factor (see DrugModel::hillPotentiationFactor)
+    // rather than the multiplier itself, so it stays comparable to the
+    // other three fractions instead of living on a >=1.0 scale.
+    o.blockAmpa = static_cast<float>(spp::drug::DrugModel::hillBlock(
+        dF, static_cast<float>(input.config.ic50_ampa), static_cast<float>(input.config.hill_ampa)));
+    o.blockNmda = static_cast<float>(spp::drug::DrugModel::hillBlock(
+        dF, static_cast<float>(input.config.ic50_nmda), static_cast<float>(input.config.hill_nmda)));
+    o.potentiateGabaA = static_cast<float>(spp::drug::DrugModel::hillBlock(
+        dF, static_cast<float>(input.config.ec50_gabaA), static_cast<float>(input.config.hill_gabaA)));
+    o.activateGabaB = static_cast<float>(spp::drug::DrugModel::hillBlock(
+        dF, static_cast<float>(input.config.ec50_gabaB), static_cast<float>(input.config.hill_gabaB)));
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;
     o.metrics.peakSynchronizationIndex = metrics.peakSynchronizationIndex;
