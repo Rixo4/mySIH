@@ -36,6 +36,38 @@ struct BatchedStepLaunchInfo {
     float adaptationMaxCurrent = 0.0f;
     float adaptationInhibitoryScale = 0.0f;
     neuron::HHParameters params;
+
+    // PHASE2_PLAN.md step 6: CUDA mirror of the four receptor conductances
+    // (SimulationConfig::gMax* in SimulationEngine.h). Peak-conductance
+    // scales for AMPA/NMDA/GABA-A/GABA-B's true-conductance currents, same
+    // values the CPU path already uses -- see BatchedSimulationEngine.cpp's
+    // CPU fallback loop for the reference math this mirrors exactly.
+    float gMaxAMPA = 0.0f;
+    float gMaxNMDA = 0.0f;
+    float gMaxGABAa = 0.0f;
+    float gMaxGABAb = 0.0f;
+    float gMaxGABAbAgonist = 0.0f;
+    float ampaConductanceCeiling = 1.0f;
+
+    // Flattened ReceptorDrugProfile (ReceptorDrugProfile.h) -- one shared
+    // profile for the whole batch (single compound under test), same as
+    // BatchedSimulationEngine's receptorProfile_ member. Mechanism ints
+    // match spp::drug::ReceptorMechanism's numeric values exactly
+    // (0=None, 1=Block, 2=Potentiate, 3=Agonist), so the host side can just
+    // static_cast the enum when populating these.
+    int ampaMechanism = 0;
+    float ampaEc50 = 1.0e9f;
+    float ampaHill = 1.0f;
+    int nmdaMechanism = 0;
+    float nmdaEc50 = 1.0e9f;
+    float nmdaHill = 1.0f;
+    int gabaAMechanism = 0;
+    float gabaAEc50 = 1.0e9f;
+    float gabaAHill = 1.0f;
+    float gabaAMaxPotentiation = 1.0f;
+    int gabaBMechanism = 0;
+    float gabaBEc50 = 1.0e9f;
+    float gabaBHill = 1.0f;
 };
 
 struct BatchedStepDevicePointers {
@@ -57,6 +89,22 @@ struct BatchedStepDevicePointers {
     const float* baseGK = nullptr;
     const float* baseGCa = nullptr;
     const float* drugParams = nullptr;
+
+    // PHASE2_PLAN.md step 6: persistent per-neuron receptor conductance
+    // state (decay/rise accumulator pair per receptor), mirrors
+    // synapse::ReceptorConductanceState exactly -- see Synapse.h's comment
+    // for why this decay-accumulator form is used instead of replaying
+    // spike history. Packed into one device allocation on the host side
+    // (CudaSimulator::DeviceBuffers::batchedReceptorState), these are the
+    // eight sub-pointers into it.
+    float* receptorAmpaDecay = nullptr;
+    float* receptorAmpaRise = nullptr;
+    float* receptorNmdaDecay = nullptr;
+    float* receptorNmdaRise = nullptr;
+    float* receptorGabaADecay = nullptr;
+    float* receptorGabaARise = nullptr;
+    float* receptorGabaBDecay = nullptr;
+    float* receptorGabaBRise = nullptr;
 
     float* v = nullptr;
     float* m = nullptr;

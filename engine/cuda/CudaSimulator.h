@@ -89,7 +89,31 @@ public:
         float maxSynCurrent,
         float drugOnsetTauMs,
         std::uint32_t rngSeed,
-        std::size_t batchWindowSteps
+        std::size_t batchWindowSteps,
+        // PHASE2_PLAN.md step 6: receptor peak-conductance scales and
+        // flattened ReceptorDrugProfile -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment for the mechanism int encoding
+        // (0=None, 1=Block, 2=Potentiate, 3=Agonist, matching
+        // spp::drug::ReceptorMechanism exactly).
+        float gMaxAMPA,
+        float gMaxNMDA,
+        float gMaxGABAa,
+        float gMaxGABAb,
+        float gMaxGABAbAgonist,
+        float ampaConductanceCeiling,
+        int ampaMechanism,
+        float ampaEc50,
+        float ampaHill,
+        int nmdaMechanism,
+        float nmdaEc50,
+        float nmdaHill,
+        int gabaAMechanism,
+        float gabaAEc50,
+        float gabaAHill,
+        float gabaAMaxPotentiation,
+        int gabaBMechanism,
+        float gabaBEc50,
+        float gabaBHill
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

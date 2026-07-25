@@ -1,5 +1,6 @@
 #include "CudaSimulator.h"
 #include "NeuronUpdate.h"
+#include "../neuron/ReceptorModel.h"
 
 #ifdef SPP_USE_CUDA
 
@@ -24,6 +25,45 @@ void checkCuda(cudaError_t status, const char* message) {
 
 __device__ float clamp01(float x) {
     return fminf(1.0f, fmaxf(0.0f, x));
+}
+
+// PHASE2_PLAN.md step 6: device mirrors of ReceptorModel.cpp's
+// nmdaMgBlockFraction and DualExpKernel::normFactor -- identical formulas,
+// just using the CUDA math intrinsics (expf/logf/isfinite) instead of
+// std::exp/std::log so they compile in device code. Kept as free functions
+// rather than __host__ __device__ shared with ReceptorModel.cpp since that
+// file's versions use std::clamp/std::exp, which aren't device-callable.
+// Defined up here (before derivatives(), which calls the first one) since
+// CUDA/C++ requires a function to be declared before its call site within
+// a translation unit.
+__device__ float nmdaMgBlockFractionDevice(float voltageMv, float extracellularMgMm = 1.0f) {
+    const float mg = fmaxf(0.0f, extracellularMgMm);
+    const float z = fminf(60.0f, fmaxf(-60.0f, -voltageMv / 16.13f));
+    const float denom = 1.0f + (mg / 3.57f) * expf(z);
+    if (!isfinite(denom) || denom <= 0.0f) {
+        return 0.0f;
+    }
+    return clamp01(1.0f / denom);
+}
+
+__device__ float dualExpNormFactorDevice(float tauRiseMs, float tauDecayMs) {
+    float tauRise = tauRiseMs;
+    float tauDecay = tauDecayMs;
+    if (fabsf(tauDecay - tauRise) < 1.0e-4f) {
+        tauRise -= 1.0e-3f;
+    }
+    if (tauRise <= 0.0f || tauDecay <= 0.0f) {
+        return 1.0f;
+    }
+    const float tPeak = (tauRise * tauDecay) / (tauDecay - tauRise) * logf(tauDecay / tauRise);
+    if (!isfinite(tPeak) || tPeak < 0.0f) {
+        return 1.0f;
+    }
+    const float peakValue = expf(-tPeak / tauDecay) - expf(-tPeak / tauRise);
+    if (!isfinite(peakValue) || fabsf(peakValue) < 1.0e-9f) {
+        return 1.0f;
+    }
+    return 1.0f / peakValue;
 }
 
 __device__ float alphaM(float v) {
@@ -95,7 +135,21 @@ __device__ Deriv derivatives(
     float gAHP,
     float tauCa,
     float kCa,
-    float gAHPFloor
+    float gAHPFloor,
+    // PHASE2_PLAN.md step 6: the four receptor currents, mirroring
+    // NeuronModel.cpp's computeDerivatives exactly -- same reasoning for
+    // computing them here (not pre-summed into iTotal by the caller) so
+    // they see the correct per-RK4-substage voltage, which matters most for
+    // NMDA's voltage-dependent Mg2+ block. gXEff are already peak-scaled
+    // (gMaxX * raw 0..1 conductance * drug modifier) by the caller, exactly
+    // like gNa/gK/gCa above.
+    float gAMPAEff,
+    float gNMDAEff,
+    float gGABAaEff,
+    float gGABAbEff,
+    float eGABAa,
+    float eNMDA,
+    float eAMPA
 ) {
     Deriv d;
     const float iNa = gNa * m * m * m * h * (v - eNa);
@@ -105,7 +159,25 @@ __device__ Deriv derivatives(
     const float iLeak = gL * (v - eL);
     const float caInflux = kCa * fmaxf(0.0f, -iCa);
 
-    d.dv = (iTotal - iNa - iK - iCa - iAHP - iLeak) / cm;
+    const float iGABAa = gGABAaEff * (v - eGABAa);
+    const float nmdaUnblock = nmdaMgBlockFractionDevice(v);
+    const float iNMDA = gNMDAEff * nmdaUnblock * (v - eNMDA);
+    // GABA-B: real metabotropic K+ conductance, reuses eK, same as CPU.
+    const float iGABAb = gGABAbEff * (v - eK);
+
+    // AMPA: same near-threshold driving-force floor as NeuronModel.cpp --
+    // see that file's long comment for why this is needed (AMPA's ~0mV
+    // reversal sits almost exactly at this network's spike threshold).
+    constexpr float kAmpaMinDrivingForceMv = 15.0f;
+    float ampaDrivingForce = v - eAMPA;
+    if (ampaDrivingForce < 0.0f) {
+        ampaDrivingForce = fminf(ampaDrivingForce, -kAmpaMinDrivingForceMv);
+    } else {
+        ampaDrivingForce = fmaxf(ampaDrivingForce, kAmpaMinDrivingForceMv);
+    }
+    const float iAMPA = gAMPAEff * ampaDrivingForce;
+
+    d.dv = (iTotal - iNa - iK - iCa - iAHP - iLeak - iGABAa - iNMDA - iGABAb - iAMPA) / cm;
     d.dm = alphaM(v) * (1.0f - m) - betaM(v) * m;
     d.dh = alphaH(v) * (1.0f - h) - betaH(v) * h;
     d.dn = alphaN(v) * (1.0f - n) - betaN(v) * n;
@@ -157,6 +229,15 @@ __device__ void integrateNeuronState(
     float gNaEff,
     float gKEff,
     float gCaEff,
+    // PHASE2_PLAN.md step 6: receptor "eff" conductances, already peak-
+    // scaled and drug-modified by the caller (fusedBatchedStepKernel),
+    // constant across this timestep's four RK4 substages -- same treatment
+    // as gNaEff/gKEff/gCaEff above. Default to 0.0f (no-op) so the
+    // non-receptor-aware hhStepKernel's call sites don't need to change.
+    float gAMPAEff,
+    float gNMDAEff,
+    float gGABAaEff,
+    float gGABAbEff,
     float* v,
     float* m,
     float* h,
@@ -187,7 +268,9 @@ __device__ void integrateNeuronState(
 
     const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
+                                 gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
+                                 params.eGABAa, params.eNMDA, params.eAMPA);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
@@ -199,7 +282,9 @@ __device__ void integrateNeuronState(
 
     const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
+                                 gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
+                                 params.eGABAa, params.eNMDA, params.eAMPA);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
@@ -211,7 +296,9 @@ __device__ void integrateNeuronState(
 
     const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
+                                 gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
+                                 params.eGABAa, params.eNMDA, params.eAMPA);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
@@ -223,7 +310,9 @@ __device__ void integrateNeuronState(
 
     const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa,
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
-                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor);
+                                 params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
+                                 gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
+                                 params.eGABAa, params.eNMDA, params.eAMPA);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
@@ -354,6 +443,88 @@ __global__ void fusedBatchedStepKernel(
     const float gKEff = fmaxf(0.05f * safeGK, safeGK * (1.0f - blockK));
     const float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
 
+    // PHASE2_PLAN.md step 6: per-receptor conductance accumulation, mirrors
+    // Synapse.cpp::accumulateReceptorConductances exactly -- same "decay
+    // then impulse" discretization and peak-normalized dual-exp kernel,
+    // driven by the same excInput/inhInput (here iExcPulse/iInhPulse) this
+    // thread already computed above for the now-retired flat iSyn path.
+    // Tau constants come directly from ReceptorKinetics (constexpr, usable
+    // in device code as-is -- no host/device duplication needed).
+    using namespace spp::neuron::ReceptorKinetics;
+
+    const float ampaDecayF  = expf(-launchInfo.dtMs / kAmpaTauDecayMs);
+    const float ampaRiseF   = expf(-launchInfo.dtMs / kAmpaTauRiseMs);
+    const float nmdaDecayF  = expf(-launchInfo.dtMs / kNmdaTauDecayMs);
+    const float nmdaRiseF   = expf(-launchInfo.dtMs / kNmdaTauRiseMs);
+    const float gabaADecayF = expf(-launchInfo.dtMs / kGabaATauDecayMs);
+    const float gabaARiseF  = expf(-launchInfo.dtMs / kGabaATauRiseMs);
+    const float gabaBDecayF = expf(-launchInfo.dtMs / kGabaBTauDecayMs);
+    const float gabaBRiseF  = expf(-launchInfo.dtMs / kGabaBTauRiseMs);
+
+    const float ampaNorm  = dualExpNormFactorDevice(kAmpaTauRiseMs, kAmpaTauDecayMs);
+    const float nmdaNorm  = dualExpNormFactorDevice(kNmdaTauRiseMs, kNmdaTauDecayMs);
+    const float gabaANorm = dualExpNormFactorDevice(kGabaATauRiseMs, kGabaATauDecayMs);
+    const float gabaBNorm = dualExpNormFactorDevice(kGabaBTauRiseMs, kGabaBTauDecayMs);
+
+    const float ampaDecayAcc  = devicePointers.receptorAmpaDecay[i]  * ampaDecayF  + iExcPulse;
+    const float ampaRiseAcc   = devicePointers.receptorAmpaRise[i]   * ampaRiseF   + iExcPulse;
+    const float nmdaDecayAcc  = devicePointers.receptorNmdaDecay[i]  * nmdaDecayF  + iExcPulse;
+    const float nmdaRiseAcc   = devicePointers.receptorNmdaRise[i]   * nmdaRiseF   + iExcPulse;
+    const float gabaADecayAcc = devicePointers.receptorGabaADecay[i] * gabaADecayF + iInhPulse;
+    const float gabaARiseAcc  = devicePointers.receptorGabaARise[i]  * gabaARiseF  + iInhPulse;
+    const float gabaBDecayAcc = devicePointers.receptorGabaBDecay[i] * gabaBDecayF + iInhPulse;
+    const float gabaBRiseAcc  = devicePointers.receptorGabaBRise[i]  * gabaBRiseF  + iInhPulse;
+
+    devicePointers.receptorAmpaDecay[i]  = ampaDecayAcc;
+    devicePointers.receptorAmpaRise[i]   = ampaRiseAcc;
+    devicePointers.receptorNmdaDecay[i]  = nmdaDecayAcc;
+    devicePointers.receptorNmdaRise[i]   = nmdaRiseAcc;
+    devicePointers.receptorGabaADecay[i] = gabaADecayAcc;
+    devicePointers.receptorGabaARise[i]  = gabaARiseAcc;
+    devicePointers.receptorGabaBDecay[i] = gabaBDecayAcc;
+    devicePointers.receptorGabaBRise[i]  = gabaBRiseAcc;
+
+    const float gAMPARaw  = fmaxf(0.0f, ampaNorm  * (ampaDecayAcc  - ampaRiseAcc));
+    const float gNMDARaw  = fmaxf(0.0f, nmdaNorm  * (nmdaDecayAcc  - nmdaRiseAcc));
+    const float gGABAaRaw = fmaxf(0.0f, gabaANorm * (gabaADecayAcc - gabaARiseAcc));
+    const float gGABAbRaw = fmaxf(0.0f, gabaBNorm * (gabaBDecayAcc - gabaBRiseAcc));
+
+    // Receptor drug profile (block/potentiate/agonist) -- mirrors
+    // DrugModel::computeReceptorModifiers exactly. Single shared profile
+    // for the whole batch, same `dose` already computed above for channel
+    // block (both share the same doseScale onset timeline).
+    float ampaResidual = 1.0f;
+    if (launchInfo.ampaMechanism == 1) { // Block
+        ampaResidual = fmaxf(0.0f, 1.0f - hillBlockDevice(dose, launchInfo.ampaEc50, launchInfo.ampaHill));
+    }
+    float nmdaResidual = 1.0f;
+    if (launchInfo.nmdaMechanism == 1) { // Block
+        nmdaResidual = fmaxf(0.0f, 1.0f - hillBlockDevice(dose, launchInfo.nmdaEc50, launchInfo.nmdaHill));
+    }
+    float gabaAPotentiation = 1.0f;
+    if (launchInfo.gabaAMechanism == 2) { // Potentiate
+        const float occupancy = hillBlockDevice(dose, launchInfo.gabaAEc50, launchInfo.gabaAHill);
+        const float ceiling = isfinite(launchInfo.gabaAMaxPotentiation)
+                                   ? fmaxf(1.0f, launchInfo.gabaAMaxPotentiation)
+                                   : 1.0f;
+        gabaAPotentiation = 1.0f + (ceiling - 1.0f) * occupancy;
+    }
+    float gabaBAgonistActivation = 0.0f;
+    if (launchInfo.gabaBMechanism == 3) { // Agonist
+        gabaBAgonistActivation = clamp01(hillBlockDevice(dose, launchInfo.gabaBEc50, launchInfo.gabaBHill));
+    }
+
+    // Peak-scale + drug-modify, same formulas as BatchedSimulationEngine.cpp's
+    // CPU fallback loop (synapticEff[i].gXEff assignments).
+    const float gAMPAEff = fminf(
+        launchInfo.ampaConductanceCeiling,
+        fmaxf(0.0f, launchInfo.gMaxAMPA * gAMPARaw * ampaResidual)
+    );
+    const float gNMDAEff = launchInfo.gMaxNMDA * gNMDARaw * nmdaResidual;
+    const float gGABAaEff = launchInfo.gMaxGABAa * gGABAaRaw * gabaAPotentiation;
+    const float gGABAbEff = launchInfo.gMaxGABAb * gGABAbRaw +
+                             launchInfo.gMaxGABAbAgonist * gabaBAgonistActivation;
+
     std::uint8_t spike = 0U;
     integrateNeuronState(
         i,
@@ -363,12 +534,22 @@ __global__ void fusedBatchedStepKernel(
         launchInfo.maxTotalCurrent,
         launchInfo.params,
         devicePointers.threshold,
-        iSyn,
+        // CPU parity: iSyn is always 0.0f now that every synaptic current
+        // flows through the true-conductance receptor path above -- see
+        // BatchedSimulationEngine.cpp's CPU loop, where the `iSyn` vector
+        // is likewise fixed at 0.0f for the same reason. excState/inhState
+        // above are still decayed/stored (harmless, avoids restructuring
+        // buffer allocation) but are no longer read into the current sum.
+        0.0f,
         iExt,
         iNoise,
         gNaEff,
         gKEff,
         gCaEff,
+        gAMPAEff,
+        gNMDAEff,
+        gGABAaEff,
+        gGABAbEff,
         devicePointers.v,
         devicePointers.m,
         devicePointers.h,
@@ -450,7 +631,15 @@ __global__ void hhStepKernel(
     const float safeGK = (isfinite(gKEff[i]) && gKEff[i] >= 0.0f) ? gKEff[i] : 0.0f;
     const float safeGCa = (isfinite(gCaEff[i]) && gCaEff[i] >= 0.0f) ? gCaEff[i] : 0.0f;
 
-    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
+    // NOTE: hhStepKernel (the non-batched single-run GPU step, used only by
+    // SimulationEngine's plain --simulate GPU mode, not by --dose-eval)
+    // is intentionally left without receptor support as part of the
+    // PHASE2_PLAN.md step 6 scope decision -- see NeuronUpdate.cu's top
+    // comment / the CudaSimulator.h step() doc. Passing 0.0f for all four
+    // gXEff keeps this compiling against derivatives()'s new signature
+    // with receptor currents evaluating to exactly zero, i.e. unchanged
+    // pre-Phase-2 behavior for this path.
+    const Deriv k1 = derivatives(yv, ym, yh, yn, ys, yca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
@@ -460,7 +649,7 @@ __global__ void hhStepKernel(
     float y2ca = yca + 0.5f * dtMs * k1.dcaCa;
     clampState(y2v, y2m, y2h, y2n, y2s, y2ca);
 
-    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
+    const Deriv k2 = derivatives(y2v, y2m, y2h, y2n, y2s, y2ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
@@ -470,7 +659,7 @@ __global__ void hhStepKernel(
     float y3ca = yca + 0.5f * dtMs * k2.dcaCa;
     clampState(y3v, y3m, y3h, y3n, y3s, y3ca);
 
-    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
+    const Deriv k3 = derivatives(y3v, y3m, y3h, y3n, y3s, y3ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
@@ -480,7 +669,7 @@ __global__ void hhStepKernel(
     float y4ca = yca + dtMs * k3.dcaCa;
     clampState(y4v, y4m, y4h, y4n, y4s, y4ca);
 
-    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor);
+    const Deriv k4 = derivatives(y4v, y4m, y4h, y4n, y4s, y4ca, iTotal, safeGNa, safeGK, safeGCa, cm, eNa, eK, eCa, gL, eL, gAHP, tauCa, kCa, gAHPFloor, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
@@ -606,6 +795,44 @@ struct CudaSimulator::DeviceBuffers {
     curandState* batchedRngStates = nullptr;
     std::uint8_t* batchedSpikeHistory = nullptr;
 
+    // PHASE2_PLAN.md step 6: persistent per-neuron receptor conductance
+    // state, one contiguous 8*neuronCount_ allocation (same packing style
+    // as inputBlock above) with eight sub-pointers into it, mirroring
+    // synapse::ReceptorConductanceState's eight fields exactly.
+    float* batchedReceptorState = nullptr;
+    float* batchedReceptorAmpaDecay = nullptr;
+    float* batchedReceptorAmpaRise = nullptr;
+    float* batchedReceptorNmdaDecay = nullptr;
+    float* batchedReceptorNmdaRise = nullptr;
+    float* batchedReceptorGabaADecay = nullptr;
+    float* batchedReceptorGabaARise = nullptr;
+    float* batchedReceptorGabaBDecay = nullptr;
+    float* batchedReceptorGabaBRise = nullptr;
+
+    // Receptor peak-conductance scales + flattened drug profile, stored
+    // here (same pattern as batchedRefractoryMs etc. below) so stepBatched
+    // can populate BatchedStepLaunchInfo's new fields each call without
+    // needing them threaded through its own parameter list.
+    float batchedGMaxAMPA = 0.0f;
+    float batchedGMaxNMDA = 0.0f;
+    float batchedGMaxGABAa = 0.0f;
+    float batchedGMaxGABAb = 0.0f;
+    float batchedGMaxGABAbAgonist = 0.0f;
+    float batchedAmpaConductanceCeiling = 1.0f;
+    int batchedAmpaMechanism = 0;
+    float batchedAmpaEc50 = 1.0e9f;
+    float batchedAmpaHill = 1.0f;
+    int batchedNmdaMechanism = 0;
+    float batchedNmdaEc50 = 1.0e9f;
+    float batchedNmdaHill = 1.0f;
+    int batchedGabaAMechanism = 0;
+    float batchedGabaAEc50 = 1.0e9f;
+    float batchedGabaAHill = 1.0f;
+    float batchedGabaAMaxPotentiation = 1.0f;
+    int batchedGabaBMechanism = 0;
+    float batchedGabaBEc50 = 1.0e9f;
+    float batchedGabaBHill = 1.0f;
+
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
     std::size_t batchedBatchWindowSteps = 0;
@@ -706,6 +933,7 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->batchedDrugParams);
             cudaFree(buffers_->batchedRngStates);
             cudaFree(buffers_->batchedSpikeHistory);
+            cudaFree(buffers_->batchedReceptorState);
             if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
             if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
             delete buffers_;
@@ -753,6 +981,7 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->batchedDrugParams);
     cudaFree(buffers_->batchedRngStates);
     cudaFree(buffers_->batchedSpikeHistory);
+    cudaFree(buffers_->batchedReceptorState);
 
     if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
     if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
@@ -944,7 +1173,30 @@ void CudaSimulator::initializeBatchedSimulation(
     float maxSynCurrent,
     float /*drugOnsetTauMs*/,
     std::uint32_t rngSeed,
-    std::size_t batchWindowSteps
+    std::size_t batchWindowSteps,
+    // PHASE2_PLAN.md step 6: receptor peak-conductance scales
+    // (SimulationConfig::gMax*) and flattened ReceptorDrugProfile -- see
+    // BatchedStepLaunchInfo's comment in NeuronUpdate.h for the mechanism
+    // int encoding.
+    float gMaxAMPA,
+    float gMaxNMDA,
+    float gMaxGABAa,
+    float gMaxGABAb,
+    float gMaxGABAbAgonist,
+    float ampaConductanceCeiling,
+    int ampaMechanism,
+    float ampaEc50,
+    float ampaHill,
+    int nmdaMechanism,
+    float nmdaEc50,
+    float nmdaHill,
+    int gabaAMechanism,
+    float gabaAEc50,
+    float gabaAHill,
+    float gabaAMaxPotentiation,
+    int gabaBMechanism,
+    float gabaBEc50,
+    float gabaBHill
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -984,6 +1236,7 @@ void CudaSimulator::initializeBatchedSimulation(
     cudaFree(buffers_->batchedDrugParams);
     cudaFree(buffers_->batchedRngStates);
     cudaFree(buffers_->batchedSpikeHistory);
+    cudaFree(buffers_->batchedReceptorState);
 
     checkCuda(cudaMalloc(&buffers_->incomingOffsets, offsetBytes), "cudaMalloc incomingOffsets");
     checkCuda(cudaMalloc(&buffers_->incomingPre, edgeBytes), "cudaMalloc incomingPre");
@@ -1006,6 +1259,26 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedAdaptationInhibitoryScale = adaptationInhibitoryScale;
     buffers_->batchedParams = params;
 
+    buffers_->batchedGMaxAMPA = gMaxAMPA;
+    buffers_->batchedGMaxNMDA = gMaxNMDA;
+    buffers_->batchedGMaxGABAa = gMaxGABAa;
+    buffers_->batchedGMaxGABAb = gMaxGABAb;
+    buffers_->batchedGMaxGABAbAgonist = gMaxGABAbAgonist;
+    buffers_->batchedAmpaConductanceCeiling = ampaConductanceCeiling;
+    buffers_->batchedAmpaMechanism = ampaMechanism;
+    buffers_->batchedAmpaEc50 = ampaEc50;
+    buffers_->batchedAmpaHill = ampaHill;
+    buffers_->batchedNmdaMechanism = nmdaMechanism;
+    buffers_->batchedNmdaEc50 = nmdaEc50;
+    buffers_->batchedNmdaHill = nmdaHill;
+    buffers_->batchedGabaAMechanism = gabaAMechanism;
+    buffers_->batchedGabaAEc50 = gabaAEc50;
+    buffers_->batchedGabaAHill = gabaAHill;
+    buffers_->batchedGabaAMaxPotentiation = gabaAMaxPotentiation;
+    buffers_->batchedGabaBMechanism = gabaBMechanism;
+    buffers_->batchedGabaBEc50 = gabaBEc50;
+    buffers_->batchedGabaBHill = gabaBHill;
+
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
     checkCuda(cudaMalloc(&buffers_->batchedIInhState, floatBytes), "cudaMalloc batchedIInhState");
@@ -1020,11 +1293,26 @@ void CudaSimulator::initializeBatchedSimulation(
     checkCuda(cudaMalloc(&buffers_->batchedRngStates, neuronCount_ * sizeof(curandState)), "cudaMalloc batchedRngStates");
     checkCuda(cudaMalloc(&buffers_->batchedSpikeHistory, buffers_->batchedBatchWindowSteps * neuronCount_ * sizeof(std::uint8_t)), "cudaMalloc batchedSpikeHistory");
 
+    // PHASE2_PLAN.md step 6: one packed 8*neuronCount_ allocation for the
+    // receptor conductance state, same sub-pointer-into-one-block pattern
+    // as inputBlock in the constructor above.
+    const std::size_t receptorStateBytes = floatBytes * 8U;
+    checkCuda(cudaMalloc(&buffers_->batchedReceptorState, receptorStateBytes), "cudaMalloc batchedReceptorState");
+    buffers_->batchedReceptorAmpaDecay  = buffers_->batchedReceptorState + 0 * neuronCount_;
+    buffers_->batchedReceptorAmpaRise   = buffers_->batchedReceptorState + 1 * neuronCount_;
+    buffers_->batchedReceptorNmdaDecay  = buffers_->batchedReceptorState + 2 * neuronCount_;
+    buffers_->batchedReceptorNmdaRise   = buffers_->batchedReceptorState + 3 * neuronCount_;
+    buffers_->batchedReceptorGabaADecay = buffers_->batchedReceptorState + 4 * neuronCount_;
+    buffers_->batchedReceptorGabaARise  = buffers_->batchedReceptorState + 5 * neuronCount_;
+    buffers_->batchedReceptorGabaBDecay = buffers_->batchedReceptorState + 6 * neuronCount_;
+    buffers_->batchedReceptorGabaBRise  = buffers_->batchedReceptorState + 7 * neuronCount_;
+
     checkCuda(cudaMemset(buffers_->batchedDelayBuffer, 0, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "memset batchedDelayBuffer");
     checkCuda(cudaMemset(buffers_->batchedIExcState, 0, floatBytes), "memset batchedIExcState");
     checkCuda(cudaMemset(buffers_->batchedIInhState, 0, floatBytes), "memset batchedIInhState");
     checkCuda(cudaMemset(buffers_->batchedAdaptationCurrent, 0, floatBytes), "memset batchedAdaptationCurrent");
     checkCuda(cudaMemset(buffers_->batchedSpikeHistory, 0, buffers_->batchedBatchWindowSteps * neuronCount_ * sizeof(std::uint8_t)), "memset batchedSpikeHistory");
+    checkCuda(cudaMemset(buffers_->batchedReceptorState, 0, receptorStateBytes), "memset batchedReceptorState");
 
     checkCuda(cudaMemcpy(buffers_->incomingOffsets, incomingOffsets.data(), offsetBytes, cudaMemcpyHostToDevice), "copy incomingOffsets H2D");
     checkCuda(cudaMemcpy(buffers_->incomingPre, incomingPre.data(), edgeBytes, cudaMemcpyHostToDevice), "copy incomingPre H2D");
@@ -1071,6 +1359,26 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.adaptationInhibitoryScale = buffers_->batchedAdaptationInhibitoryScale;
     launchInfo.params = buffers_->batchedParams;
 
+    launchInfo.gMaxAMPA = buffers_->batchedGMaxAMPA;
+    launchInfo.gMaxNMDA = buffers_->batchedGMaxNMDA;
+    launchInfo.gMaxGABAa = buffers_->batchedGMaxGABAa;
+    launchInfo.gMaxGABAb = buffers_->batchedGMaxGABAb;
+    launchInfo.gMaxGABAbAgonist = buffers_->batchedGMaxGABAbAgonist;
+    launchInfo.ampaConductanceCeiling = buffers_->batchedAmpaConductanceCeiling;
+    launchInfo.ampaMechanism = buffers_->batchedAmpaMechanism;
+    launchInfo.ampaEc50 = buffers_->batchedAmpaEc50;
+    launchInfo.ampaHill = buffers_->batchedAmpaHill;
+    launchInfo.nmdaMechanism = buffers_->batchedNmdaMechanism;
+    launchInfo.nmdaEc50 = buffers_->batchedNmdaEc50;
+    launchInfo.nmdaHill = buffers_->batchedNmdaHill;
+    launchInfo.gabaAMechanism = buffers_->batchedGabaAMechanism;
+    launchInfo.gabaAEc50 = buffers_->batchedGabaAEc50;
+    launchInfo.gabaAHill = buffers_->batchedGabaAHill;
+    launchInfo.gabaAMaxPotentiation = buffers_->batchedGabaAMaxPotentiation;
+    launchInfo.gabaBMechanism = buffers_->batchedGabaBMechanism;
+    launchInfo.gabaBEc50 = buffers_->batchedGabaBEc50;
+    launchInfo.gabaBHill = buffers_->batchedGabaBHill;
+
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;
     devicePointers.incomingPre = buffers_->incomingPre;
@@ -1098,6 +1406,15 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     devicePointers.lastSpikeTime = buffers_->lastSpikeTime;
     devicePointers.rngStates = buffers_->batchedRngStates;
     devicePointers.spikeHistory = buffers_->batchedSpikeHistory;
+
+    devicePointers.receptorAmpaDecay = buffers_->batchedReceptorAmpaDecay;
+    devicePointers.receptorAmpaRise = buffers_->batchedReceptorAmpaRise;
+    devicePointers.receptorNmdaDecay = buffers_->batchedReceptorNmdaDecay;
+    devicePointers.receptorNmdaRise = buffers_->batchedReceptorNmdaRise;
+    devicePointers.receptorGabaADecay = buffers_->batchedReceptorGabaADecay;
+    devicePointers.receptorGabaARise = buffers_->batchedReceptorGabaARise;
+    devicePointers.receptorGabaBDecay = buffers_->batchedReceptorGabaBDecay;
+    devicePointers.receptorGabaBRise = buffers_->batchedReceptorGabaBRise;
 
     launchBatchedStepKernel(launchInfo, devicePointers);
     checkCuda(cudaGetLastError(), "batched step kernel launch");

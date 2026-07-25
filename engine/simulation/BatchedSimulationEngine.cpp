@@ -202,7 +202,33 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             config_.maxSynCurrent,
             config_.drugOnsetTauMs,
             config_.randomSeed,
-            50U
+            50U,
+            // PHASE2_PLAN.md step 6: receptor peak-conductance scales +
+            // flattened receptorProfile_, same values the CPU fallback
+            // loop below reads from config_/receptorProfile_ directly.
+            // static_cast<int> on the mechanism enums works because
+            // ReceptorMechanism's numeric values (None=0/Block=1/
+            // Potentiate=2/Agonist=3) are exactly what the CUDA kernel's
+            // launchInfo.*Mechanism ints expect -- see NeuronUpdate.h.
+            config_.gMaxAMPA,
+            config_.gMaxNMDA,
+            config_.gMaxGABAa,
+            config_.gMaxGABAb,
+            config_.gMaxGABAbAgonist,
+            config_.ampaConductanceCeiling,
+            static_cast<int>(receptorProfile_.ampa.mechanism),
+            receptorProfile_.ampa.ec50,
+            receptorProfile_.ampa.hill,
+            static_cast<int>(receptorProfile_.nmda.mechanism),
+            receptorProfile_.nmda.ec50,
+            receptorProfile_.nmda.hill,
+            static_cast<int>(receptorProfile_.gabaA.mechanism),
+            receptorProfile_.gabaA.ec50,
+            receptorProfile_.gabaA.hill,
+            receptorProfile_.gabaA.maxPotentiationFactor,
+            static_cast<int>(receptorProfile_.gabaB.mechanism),
+            receptorProfile_.gabaB.ec50,
+            receptorProfile_.gabaB.hill
         );
 #endif
     }
@@ -282,13 +308,16 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     }
 
 #ifdef SPP_USE_CUDA
-    // NOTE: this GPU-resident batched path (stepBatched) bypasses the CPU
-    // per-neuron loop entirely, which means it does NOT reflect ANY of the
-    // four receptors' true conductance terms -- a pre-existing gap, not
-    // introduced by this rebuild, but now complete (GABA-A, NMDA, GABA-B,
-    // and AMPA are all CPU-only as of this build order finishing).
-    // Use SPP_FORCE_CPU=1 for real-hardware --dose-eval verification of
-    // receptor changes until CUDA mirroring is done (PHASE2_PLAN.md step 6).
+    // PHASE2_PLAN.md step 6 (done): this GPU-resident batched path
+    // (stepBatched -> fusedBatchedStepKernel in NeuronUpdate.cu) now
+    // mirrors all four receptor conductances and the block/potentiate/
+    // agonist drug math, same formulas as the CPU loop below. NOT yet
+    // verified on real GPU hardware by this session (SPP_FORCE_CPU=1 was
+    // used throughout) -- treat as implemented-but-unverified until a real
+    // CUDA run confirms it matches the CPU path's dose-response curves.
+    // The non-batched single-run GPU step() path (used only by plain
+    // --simulate GPU mode, not --dose-eval) is intentionally NOT mirrored
+    // -- see NeuronUpdate.cu's hhStepKernel comment.
     if (runOnGpu) {
         constexpr std::size_t kGpuBatchSteps = 50U;
         for (std::size_t batchStart = 0; batchStart < stepCount; batchStart += kGpuBatchSteps) {
