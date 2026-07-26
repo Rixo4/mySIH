@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "ReceptorDrugProfile.h"
+#include "../neuron/ReceptorModel.h"
 
 namespace spp::drug {
 
@@ -34,6 +35,28 @@ struct ReceptorConductanceModifiers {
     // constant), not multiplied into it -- see ReceptorDrugProfile.h's
     // Agonist description for why.
     float gabaBAgonistActivation = 0.0f;
+};
+
+// Phase 3a output: effective decay time constants (ms) for the four
+// receptors after applying any transporter-block mechanisms, plus report-
+// only occupancy/effective-tau numbers for the three transmitters with no
+// receptor current in this engine yet. Defaults are exactly the compile-time
+// ReceptorKinetics baseline constants, so a profile with no transporter
+// action produces bit-identical kinetics to pre-Phase-3a behavior.
+struct ReceptorKineticsModifiers {
+    float ampaTauDecayMs  = spp::neuron::ReceptorKinetics::kAmpaTauDecayMs;
+    float nmdaTauDecayMs  = spp::neuron::ReceptorKinetics::kNmdaTauDecayMs;
+    float gabaATauDecayMs = spp::neuron::ReceptorKinetics::kGabaATauDecayMs;
+    float gabaBTauDecayMs = spp::neuron::ReceptorKinetics::kGabaBTauDecayMs;
+
+    // Report-only (no receptor to feed yet -- see TransporterAction comment
+    // in ReceptorDrugProfile.h).
+    float sertOccupancy = 0.0f;
+    float sertEffectiveTauFoldChange = 1.0f;
+    float datOccupancy = 0.0f;
+    float datEffectiveTauFoldChange = 1.0f;
+    float netOccupancy = 0.0f;
+    float netEffectiveTauFoldChange = 1.0f;
 };
 
 struct ChannelDrugProfile {
@@ -90,6 +113,11 @@ public:
     // instance (see its ChannelDrugProfile handling for the same pattern).
     // applyReceptors(doseScale) is implemented in terms of this.
     static ReceptorConductanceModifiers computeReceptorModifiers(const ReceptorDrugProfile& profile, float dose);
+
+    // Phase 3a: effective receptor decay time constants after transporter
+    // block, plus report-only SERT/DAT/NET numbers. Stateless, same pattern
+    // as computeReceptorModifiers -- see ReceptorKineticsModifiers comment.
+    static ReceptorKineticsModifiers computeReceptorKineticsModifiers(const ReceptorDrugProfile& profile, float dose);
 
     void enablePerNeuronProfiles(std::size_t neuronCount);
     [[nodiscard]] bool hasPerNeuronProfiles() const { return perNeuronEnabled_; }
