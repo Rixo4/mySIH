@@ -123,6 +123,19 @@ struct SimulationConfig {
     double ec50_gabaB             = 1.0e9;
     double hill_gabaB             = 1.0;
 
+    // Phase 3a, step 1 of the drug set (GAT1/tiagabine only -- see
+    // ReuptakeTransporter.h design note): a transporter-blocking drug
+    // extends a receptor's decay time constant instead of touching its
+    // gMax/occupancy. GAT1 block is fixed Competitive by transporter
+    // identity (tiagabine's real mechanism), same "mechanism fixed by
+    // identity, JSON only supplies numbers" pattern as buildReceptorProfile
+    // above. Defaults are inert (huge Ki, no extension ceiling), so an
+    // unconfigured run is a bit-identical no-op, same policy as every other
+    // receptor field here.
+    double ki_gat1            = 1.0e9;
+    double hill_gat1          = 1.0;
+    double max_extension_gat1 = 1.0;
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
@@ -385,6 +398,23 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.gabaB.mechanism = ReceptorMechanism::Agonist;
     profile.gabaB.ec50      = static_cast<float>(cfg.ec50_gabaB);
     profile.gabaB.hill      = static_cast<float>(cfg.hill_gabaB);
+
+    // Phase 3a: GAT1 reuptake block (tiagabine) -- extends GABA-A's and
+    // GABA-B's decay time constant, see DrugModel::computeReceptorKineticsModifiers.
+    // Unlike ampa/nmda/gabaA/gabaB above, mechanism stays None unless the
+    // JSON actually configured a real Ki -- BatchedSimulationEngine gates
+    // its (otherwise zero-cost) kinetics-override machinery on
+    // mechanism != None, and that gate is only a meaningful safety
+    // guarantee (guaranteed bit-identical nullptr passthrough for all
+    // already-validated drugs) if an unconfigured drug genuinely leaves it
+    // at None rather than "None in practice via a huge Ki".
+    constexpr double kTransporterInertThreshold = 1.0e8;
+    if (cfg.ki_gat1 < kTransporterInertThreshold) {
+        profile.gat1.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+        profile.gat1.kiUm             = static_cast<float>(cfg.ki_gat1);
+        profile.gat1.hill             = static_cast<float>(cfg.hill_gat1);
+        profile.gat1.maxExtensionFold = static_cast<float>(cfg.max_extension_gat1);
+    }
 
     return profile;
 }
@@ -864,6 +894,21 @@ static bool loadDrugConfigFromJsonFile(
             if(auto h=extractJsonNumber(c,"hill",gabaBP);h) out.config.hill_gabaB=*h;
         }
     }
+    // Phase 3a, step 1 (GAT1/tiagabine only -- see ReuptakeTransporter.h):
+    // top-level "transporters" section, same "block name, look for numbers
+    // nearby" pattern as "receptors" above. "ki" (not "ec50") since this is
+    // a transporter inhibition constant, not a receptor EC50 -- deliberately
+    // different key name so a drug config can't accidentally mix the two
+    // concepts up.
+    const auto trPos=c.find("\"transporters\"");
+    if(trPos!=c.npos){
+        const auto gat1P=c.find("\"GAT1\"",trPos);
+        if(gat1P!=c.npos){
+            if(auto n=extractJsonNumber(c,"ki",gat1P);n) out.config.ki_gat1=*n;
+            if(auto h=extractJsonNumber(c,"hill",gat1P);h) out.config.hill_gat1=*h;
+            if(auto m=extractJsonNumber(c,"max_extension",gat1P);m) out.config.max_extension_gat1=*m;
+        }
+    }
     const auto drP=c.find("\"dose_range\"");
     if(drP!=c.npos){
         if(auto v=extractJsonNumber(c,"min",drP);v)  { out.config.dose=*v; outDoseMin=*v; }
@@ -1018,6 +1063,14 @@ std::string buildDrugEvaluationReportText(
     if (evalInput.config.ec50_gabaB < kReceptorInertThreshold) {
         aLine("GABA-B EC50 (Agonist)", formatRuntimeNumber(evalInput.config.ec50_gabaB));
         aLine("GABA-B Hill",           formatRuntimeNumber(evalInput.config.hill_gabaB));
+    }
+    // Phase 3a: GAT1 reuptake block -- extends GABA-A/GABA-B decay tau
+    // instead of touching their conductance/occupancy, so it's reported
+    // separately from the receptor lines above rather than folded in.
+    if (evalInput.config.ki_gat1 < kReceptorInertThreshold) {
+        aLine("GAT1 Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_gat1));
+        aLine("GAT1 Hill",                formatRuntimeNumber(evalInput.config.hill_gat1));
+        aLine("GAT1 Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_gat1) + "x");
     }
     aLine("Runs",              std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
@@ -1464,10 +1517,10 @@ int main(int argc, char** argv) {
             input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;
             input.config.inhibitory_weight_scale = 1.00;
-            input.config.ic50_na = 1000.0;
+            input.config.ic50_na = 200.0;
             input.config.ic50_k  = 8.0;
             input.config.ic50_ca = 1000.0;
-            input.config.hill    = 1.0;
+            input.config.hill    = 3.2;
 
             std::string engineMode = "Default Internal Engine Config";
             std::optional<int> userRuns;
