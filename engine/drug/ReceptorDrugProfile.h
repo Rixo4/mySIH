@@ -39,6 +39,8 @@
 
 #include <cstdint>
 
+#include "../synapse/ReuptakeTransporter.h"
+
 namespace spp::drug {
 
 // Per-receptor mechanism tag. A single drug's ReceptorDrugProfile carries one
@@ -79,6 +81,28 @@ struct ReceptorAction {
     float maxPotentiationFactor = 1.0f;
 };
 
+// ─── Phase 3a: reuptake transporter block ──────────────────────────────────
+// A DIFFERENT axis from ReceptorAction above -- transporter block doesn't
+// touch a receptor's peak conductance (gMax) or occupancy, it extends the
+// receptor's own dual-exponential DECAY time constant (see
+// engine/synapse/ReuptakeTransporter.h for the full design rationale: this
+// is a bounded, literature-supported extension of an existing kinetic
+// constant, not a new cleft-concentration state). EAAT block extends
+// AMPA's and NMDA's decay (shared glutamatergic release site); GAT1 block
+// extends GABA-A's and GABA-B's decay (shared GABAergic release site).
+// SERT/DAT/NET are included for completeness and report purposes but have
+// no receptor of their own in this engine yet (Phase 3c neuromodulator gain
+// system) -- setting one of these is legal and will compute a real
+// occupancy/effective-tau number, but produces no network/current effect
+// until Phase 3c exists. Default is None (inert), so an unconfigured
+// profile behaves exactly as it did before Phase 3a existed.
+struct TransporterAction {
+    spp::synapse::TransporterBlockType mechanism = spp::synapse::TransporterBlockType::None;
+    float kiUm = 1.0e9f;             // uM, drug's inhibition constant at this transporter
+    float hill = 1.0f;
+    float maxExtensionFold = 1.0f;   // literature-bounded ceiling on decay-tau stretch
+};
+
 // One drug's full receptor pharmacology: an action per receptor type. A drug
 // that only touches one receptor leaves the other three at mechanism None.
 struct ReceptorDrugProfile {
@@ -86,6 +110,14 @@ struct ReceptorDrugProfile {
     ReceptorAction nmda;    // typically Block (e.g. ketamine, memantine) or None
     ReceptorAction gabaA;   // typically Potentiate (benzos/barbiturates) or None
     ReceptorAction gabaB;   // typically Agonist (baclofen) or None
+
+    // Phase 3a additions -- see TransporterAction comment above. All default
+    // to None/inert.
+    TransporterAction eaat; // glutamate transporter (EAAT1/2) -> extends AMPA+NMDA decay
+    TransporterAction gat1; // GABA transporter (GAT1) -> extends GABA-A+GABA-B decay
+    TransporterAction sert; // serotonin transporter -- report-only, no receptor yet
+    TransporterAction dat;  // dopamine transporter -- report-only, no receptor yet
+    TransporterAction net;  // norepinephrine transporter -- report-only, no receptor yet
 };
 
 } // namespace spp::drug
