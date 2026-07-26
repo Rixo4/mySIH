@@ -1464,10 +1464,10 @@ int main(int argc, char** argv) {
             input.config.noise_level            = 0.72;
             input.config.excitatory_weight_scale = 1.00;
             input.config.inhibitory_weight_scale = 1.00;
-            input.config.ic50_na = 200.0;
+            input.config.ic50_na = 1000.0;
             input.config.ic50_k  = 8.0;
             input.config.ic50_ca = 1000.0;
-            input.config.hill    = 3.2;
+            input.config.hill    = 1.0;
 
             std::string engineMode = "Default Internal Engine Config";
             std::optional<int> userRuns;
