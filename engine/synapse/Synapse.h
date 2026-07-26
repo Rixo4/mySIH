@@ -53,6 +53,24 @@ struct ReceptorConductances {
     float gGABAb = 0.0f;
 };
 
+// ─── Phase 3a: per-neuron drug-modified decay kinetics ─────────────────────
+// A transporter-blocking drug (see engine/drug/ReceptorDrugProfile.h's
+// TransporterAction / engine/synapse/ReuptakeTransporter.h) extends a
+// receptor's decay time constant. Because dose-eval batches many different
+// doses at once (one per block, see BatchedSimulationEngine), the effective
+// decay factor/norm can differ per neuron depending on which dose-block it
+// belongs to -- so these are precomputed per-neuron ONCE before a run starts
+// (dose is fixed for the whole run), not recomputed per timestep.
+// Passing nullptr to accumulateReceptorConductances (the default) uses the
+// original fixed ReceptorKinetics constants exactly as before Phase 3a --
+// zero behavior change for any caller that doesn't opt in.
+struct ReceptorKineticsOverride {
+    std::vector<float> ampaDecayF, ampaNorm;
+    std::vector<float> nmdaDecayF, nmdaNorm;
+    std::vector<float> gabaADecayF, gabaANorm;
+    std::vector<float> gabaBDecayF, gabaBNorm;
+};
+
 enum class SynapseType : std::uint8_t {
     Excitatory = 0,
     Inhibitory = 1
@@ -124,7 +142,8 @@ public:
         const DelayBuffer& delayBuffer,
         std::vector<ReceptorConductanceState>& states,
         float dtMs,
-        std::vector<ReceptorConductances>& outConductances
+        std::vector<ReceptorConductances>& outConductances,
+        const ReceptorKineticsOverride* kineticsOverride = nullptr
     ) const;
 
 private:
