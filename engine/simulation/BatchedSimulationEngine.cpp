@@ -289,6 +289,69 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     // dose.
     std::vector<drug::ReceptorConductanceModifiers> blockReceptorMods(blockCount_);
 
+    // Phase 3a: precompute per-neuron drug-modified decay kinetics ONCE
+    // (not per timestep -- dose is fixed per block for the whole run). Only
+    // built when a transporter-blocking mechanism is actually configured;
+    // otherwise nullptr is passed, so accumulateReceptorConductances falls
+    // back to the exact original fixed-constant behavior with zero
+    // overhead. NOTE simplification: uses each block's FINAL dose (not the
+    // onset-ramped effDose used by blockReceptorMods below) -- the decay
+    // time constant switches to its fully-blocked-transporter value from
+    // step 0, while the conductance modifiers still ramp in over
+    // drugOnsetTauMs. Documented rather than silently approximated; the
+    // difference only matters during the onset transient.
+    const bool needsKineticsOverride =
+        receptorProfile_.eaat.mechanism != synapse::TransporterBlockType::None ||
+        receptorProfile_.gat1.mechanism != synapse::TransporterBlockType::None;
+    synapse::ReceptorKineticsOverride kineticsOverride;
+    if (needsKineticsOverride) {
+        kineticsOverride.ampaDecayF.resize(totalNeurons_);
+        kineticsOverride.ampaNorm.resize(totalNeurons_);
+        kineticsOverride.nmdaDecayF.resize(totalNeurons_);
+        kineticsOverride.nmdaNorm.resize(totalNeurons_);
+        kineticsOverride.gabaADecayF.resize(totalNeurons_);
+        kineticsOverride.gabaANorm.resize(totalNeurons_);
+        kineticsOverride.gabaBDecayF.resize(totalNeurons_);
+        kineticsOverride.gabaBNorm.resize(totalNeurons_);
+
+        const auto expDecay = [](float dt, float tau) {
+            return (tau > 0.0f) ? std::exp(-dt / tau) : 0.0f;
+        };
+
+        for (std::size_t b = 0; b < blockCount_; ++b) {
+            const drug::ReceptorKineticsModifiers km =
+                drug::DrugModel::computeReceptorKineticsModifiers(receptorProfile_, blockDoses_[b]);
+
+            const float blockAmpaDecayF  = expDecay(config_.dtMs, km.ampaTauDecayMs);
+            const float blockNmdaDecayF  = expDecay(config_.dtMs, km.nmdaTauDecayMs);
+            const float blockGabaADecayF = expDecay(config_.dtMs, km.gabaATauDecayMs);
+            const float blockGabaBDecayF = expDecay(config_.dtMs, km.gabaBTauDecayMs);
+
+            const neuron::DualExpKernel ampaKernel{neuron::ReceptorKinetics::kAmpaTauRiseMs, km.ampaTauDecayMs, 0.0f};
+            const neuron::DualExpKernel nmdaKernel{neuron::ReceptorKinetics::kNmdaTauRiseMs, km.nmdaTauDecayMs, 0.0f};
+            const neuron::DualExpKernel gabaAKernel{neuron::ReceptorKinetics::kGabaATauRiseMs, km.gabaATauDecayMs, 0.0f};
+            const neuron::DualExpKernel gabaBKernel{neuron::ReceptorKinetics::kGabaBTauRiseMs, km.gabaBTauDecayMs, 0.0f};
+
+            const float blockAmpaNorm  = ampaKernel.normFactor();
+            const float blockNmdaNorm  = nmdaKernel.normFactor();
+            const float blockGabaANorm = gabaAKernel.normFactor();
+            const float blockGabaBNorm = gabaBKernel.normFactor();
+
+            const std::size_t offset = b * neuronsPerBlock_;
+            for (std::size_t j = 0; j < neuronsPerBlock_; ++j) {
+                const std::size_t idx = offset + j;
+                kineticsOverride.ampaDecayF[idx]  = blockAmpaDecayF;
+                kineticsOverride.ampaNorm[idx]    = blockAmpaNorm;
+                kineticsOverride.nmdaDecayF[idx]  = blockNmdaDecayF;
+                kineticsOverride.nmdaNorm[idx]    = blockNmdaNorm;
+                kineticsOverride.gabaADecayF[idx] = blockGabaADecayF;
+                kineticsOverride.gabaANorm[idx]   = blockGabaANorm;
+                kineticsOverride.gabaBDecayF[idx] = blockGabaBDecayF;
+                kineticsOverride.gabaBNorm[idx]   = blockGabaBNorm;
+            }
+        }
+    }
+
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
@@ -392,7 +455,9 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         // SimulationEngine::run()). The old flat accumulateSynapticCurrents
         // path has been fully retired now that AMPA has moved to the true
         // conductance model too.
-        matrix_.accumulateReceptorConductances(delayBuffer_, receptorStates, config_.dtMs, receptorConductances);
+        matrix_.accumulateReceptorConductances(
+            delayBuffer_, receptorStates, config_.dtMs, receptorConductances,
+            needsKineticsOverride ? &kineticsOverride : nullptr);
 
         for (std::size_t b = 0; b < blockCount_; ++b) {
             const float effDose = blockDoses_[b] * doseScale;
