@@ -1,4 +1,5 @@
 #include "DrugModel.h"
+#include "../synapse/ReuptakeTransporter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,56 @@ ReceptorConductanceModifiers DrugModel::computeReceptorModifiers(const ReceptorD
             profile.gabaB.hill
         );
     }
+
+    return mods;
+}
+
+namespace {
+
+spp::synapse::TransporterDrugEffect toTransporterDrugEffect(const TransporterAction& action) {
+    spp::synapse::TransporterDrugEffect effect;
+    effect.mechanism = action.mechanism;
+    effect.kiUm = action.kiUm;
+    effect.hill = action.hill;
+    effect.maxExtensionFold = action.maxExtensionFold;
+    return effect;
+}
+
+} // namespace
+
+ReceptorKineticsModifiers DrugModel::computeReceptorKineticsModifiers(const ReceptorDrugProfile& profile, float dose) {
+    ReceptorKineticsModifiers mods;
+
+    const spp::synapse::TransporterDrugEffect eaat = toTransporterDrugEffect(profile.eaat);
+    const spp::synapse::TransporterDrugEffect gat1 = toTransporterDrugEffect(profile.gat1);
+
+    // EAAT block extends AMPA's and NMDA's decay -- same glutamatergic
+    // release site (see ReuptakeTransporter.h design note).
+    mods.ampaTauDecayMs = spp::synapse::effectiveTauDecayMs(
+        spp::neuron::ReceptorKinetics::kAmpaTauDecayMs, dose, eaat);
+    mods.nmdaTauDecayMs = spp::synapse::effectiveTauDecayMs(
+        spp::neuron::ReceptorKinetics::kNmdaTauDecayMs, dose, eaat);
+
+    // GAT1 block extends GABA-A's and GABA-B's decay -- same GABAergic
+    // release site.
+    mods.gabaATauDecayMs = spp::synapse::effectiveTauDecayMs(
+        spp::neuron::ReceptorKinetics::kGabaATauDecayMs, dose, gat1);
+    mods.gabaBTauDecayMs = spp::synapse::effectiveTauDecayMs(
+        spp::neuron::ReceptorKinetics::kGabaBTauDecayMs, dose, gat1);
+
+    // SERT/DAT/NET: report-only, no receptor current to feed yet (Phase 3c).
+    const spp::synapse::TransporterDrugEffect sert = toTransporterDrugEffect(profile.sert);
+    const spp::synapse::TransporterDrugEffect dat = toTransporterDrugEffect(profile.dat);
+    const spp::synapse::TransporterDrugEffect net = toTransporterDrugEffect(profile.net);
+    // fold-change = effectiveTauDecayMs(1.0, dose, effect) -- reuses the
+    // same bounded-Hill-extension formula with a unit baseline, rather than
+    // re-deriving the same math here.
+    mods.sertOccupancy = spp::synapse::transporterOccupancy(dose, sert);
+    mods.sertEffectiveTauFoldChange = spp::synapse::effectiveTauDecayMs(1.0f, dose, sert);
+    mods.datOccupancy = spp::synapse::transporterOccupancy(dose, dat);
+    mods.datEffectiveTauFoldChange = spp::synapse::effectiveTauDecayMs(1.0f, dose, dat);
+    mods.netOccupancy = spp::synapse::transporterOccupancy(dose, net);
+    mods.netEffectiveTauFoldChange = spp::synapse::effectiveTauDecayMs(1.0f, dose, net);
 
     return mods;
 }
