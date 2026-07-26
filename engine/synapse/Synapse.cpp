@@ -135,13 +135,22 @@ void SynapseMatrix::accumulateReceptorConductances(
     const DelayBuffer& delayBuffer,
     std::vector<ReceptorConductanceState>& states,
     float dtMs,
-    std::vector<ReceptorConductances>& outConductances
+    std::vector<ReceptorConductances>& outConductances,
+    const ReceptorKineticsOverride* kineticsOverride
 ) const {
     if (delayBuffer.neuronCount() != neuronCount_) {
         throw std::invalid_argument("Delay buffer size does not match synapse matrix neuron count.");
     }
     if (states.size() != neuronCount_) {
         throw std::invalid_argument("Receptor conductance state size does not match neuron count.");
+    }
+    if (kineticsOverride != nullptr) {
+        if (kineticsOverride->ampaDecayF.size() != neuronCount_ ||
+            kineticsOverride->nmdaDecayF.size() != neuronCount_ ||
+            kineticsOverride->gabaADecayF.size() != neuronCount_ ||
+            kineticsOverride->gabaBDecayF.size() != neuronCount_) {
+            throw std::invalid_argument("Receptor kinetics override size does not match neuron count.");
+        }
     }
 
     outConductances.assign(neuronCount_, ReceptorConductances{});
@@ -150,6 +159,8 @@ void SynapseMatrix::accumulateReceptorConductances(
 
     // Precomputed once per call (dt is fixed within a run) rather than per
     // neuron -- these are the only transcendental-function calls needed.
+    // Baseline (pre-Phase-3a) values -- used directly when kineticsOverride
+    // is nullptr, exactly reproducing the original behavior.
     const float ampaDecayF  = decayFactor(dtMs, kAmpaTauDecayMs);
     const float ampaRiseF   = decayFactor(dtMs, kAmpaTauRiseMs);
     const float nmdaDecayF  = decayFactor(dtMs, kNmdaTauDecayMs);
@@ -189,23 +200,34 @@ void SynapseMatrix::accumulateReceptorConductances(
 
         ReceptorConductanceState& s = states[post];
 
+        const float postAmpaDecayF  = kineticsOverride ? kineticsOverride->ampaDecayF[post]  : ampaDecayF;
+        const float postNmdaDecayF  = kineticsOverride ? kineticsOverride->nmdaDecayF[post]  : nmdaDecayF;
+        const float postGabaADecayF = kineticsOverride ? kineticsOverride->gabaADecayF[post] : gabaADecayF;
+        const float postGabaBDecayF = kineticsOverride ? kineticsOverride->gabaBDecayF[post] : gabaBDecayF;
+        const float postAmpaNorm  = kineticsOverride ? kineticsOverride->ampaNorm[post]  : ampaNorm;
+        const float postNmdaNorm  = kineticsOverride ? kineticsOverride->nmdaNorm[post]  : nmdaNorm;
+        const float postGabaANorm = kineticsOverride ? kineticsOverride->gabaANorm[post] : gabaANorm;
+        const float postGabaBNorm = kineticsOverride ? kineticsOverride->gabaBNorm[post] : gabaBNorm;
+
         // Decay first, then add this timestep's input -- the standard
         // "decay then impulse" discretization, exact for a pure exponential
-        // between input events.
-        s.ampaDecay  = s.ampaDecay  * ampaDecayF  + excInput;
+        // between input events. Rise kinetics are never drug-modified (see
+        // ReuptakeTransporter.h design note), so ampaRiseF etc. stay the
+        // fixed baseline constants regardless of kineticsOverride.
+        s.ampaDecay  = s.ampaDecay  * postAmpaDecayF  + excInput;
         s.ampaRise   = s.ampaRise   * ampaRiseF   + excInput;
-        s.nmdaDecay  = s.nmdaDecay  * nmdaDecayF  + excInput;
+        s.nmdaDecay  = s.nmdaDecay  * postNmdaDecayF  + excInput;
         s.nmdaRise   = s.nmdaRise   * nmdaRiseF   + excInput;
-        s.gabaADecay = s.gabaADecay * gabaADecayF + inhInput;
+        s.gabaADecay = s.gabaADecay * postGabaADecayF + inhInput;
         s.gabaARise  = s.gabaARise  * gabaARiseF  + inhInput;
-        s.gabaBDecay = s.gabaBDecay * gabaBDecayF + inhInput;
+        s.gabaBDecay = s.gabaBDecay * postGabaBDecayF + inhInput;
         s.gabaBRise  = s.gabaBRise  * gabaBRiseF  + inhInput;
 
         ReceptorConductances& out = outConductances[post];
-        out.gAMPA  = std::max(0.0f, ampaNorm  * (s.ampaDecay  - s.ampaRise));
-        out.gNMDA  = std::max(0.0f, nmdaNorm  * (s.nmdaDecay  - s.nmdaRise));
-        out.gGABAa = std::max(0.0f, gabaANorm * (s.gabaADecay - s.gabaARise));
-        out.gGABAb = std::max(0.0f, gabaBNorm * (s.gabaBDecay - s.gabaBRise));
+        out.gAMPA  = std::max(0.0f, postAmpaNorm  * (s.ampaDecay  - s.ampaRise));
+        out.gNMDA  = std::max(0.0f, postNmdaNorm  * (s.nmdaDecay  - s.nmdaRise));
+        out.gGABAa = std::max(0.0f, postGabaANorm * (s.gabaADecay - s.gabaARise));
+        out.gGABAb = std::max(0.0f, postGabaBNorm * (s.gabaBDecay - s.gabaBRise));
     }
 }
 
