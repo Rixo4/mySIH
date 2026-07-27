@@ -168,6 +168,29 @@ struct SimulationConfig {
     double desensitization_tau_recovery_ms = 124000.0;
     double desensitization_max_attenuation = 0.9;
 
+    // Phase 3c: neuromodulator gain system (D1/D2/5-HT1A/5-HT2A), see
+    // engine/synapse/NeuromodulatorSystem.h for the full design/literature
+    // basis. Defaults are inert (ec50 huge, gain ceilings inert), matching
+    // every other Phase 1/2/3 mechanism's "unconfigured = bit-identical
+    // no-op" policy.
+    double ec50_d1                  = 1.0e9;
+    double hill_d1                  = 1.0;
+    double max_adaptation_reduction_d1 = 0.0; // 0..1 fraction
+    double max_nmda_gain_d1         = 1.0;    // fold, >=1
+
+    double ec50_d2                  = 1.0e9;
+    double hill_d2                  = 1.0;
+    double max_release_reduction_d2 = 0.0;    // 0..1 fraction
+
+    double ec50_ht1a                = 1.0e9;
+    double hill_ht1a                = 1.0;
+    double max_k_gain_ht1a          = 1.0;    // fold, >=1
+
+    double ec50_ht2a                = 1.0e9;
+    double hill_ht2a                = 1.0;
+    double max_k_reduction_ht2a          = 0.0; // 0..1 fraction
+    double max_adaptation_reduction_ht2a = 0.0; // 0..1 fraction
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
@@ -494,6 +517,29 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
         profile.net.hill             = static_cast<float>(cfg.hill_net);
         profile.net.maxExtensionFold = static_cast<float>(cfg.max_extension_net);
     }
+
+    // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A). No mechanism
+    // enum to gate on here (unlike Block/Potentiate/Agonist/Transporter) --
+    // these are always a plain Hill-occupancy gain, so unconditional
+    // assignment is safe: cfg's defaults (ec50=1e9, gain ceilings inert)
+    // already produce a no-op profile with no special-casing needed.
+    profile.neuromod.d1.ec50 = static_cast<float>(cfg.ec50_d1);
+    profile.neuromod.d1.hill = static_cast<float>(cfg.hill_d1);
+    profile.neuromod.d1.maxAdaptationReductionFrac = static_cast<float>(cfg.max_adaptation_reduction_d1);
+    profile.neuromod.d1.maxNmdaGainFold = static_cast<float>(cfg.max_nmda_gain_d1);
+
+    profile.neuromod.d2.ec50 = static_cast<float>(cfg.ec50_d2);
+    profile.neuromod.d2.hill = static_cast<float>(cfg.hill_d2);
+    profile.neuromod.d2.maxReleaseReductionFrac = static_cast<float>(cfg.max_release_reduction_d2);
+
+    profile.neuromod.ht1a.ec50 = static_cast<float>(cfg.ec50_ht1a);
+    profile.neuromod.ht1a.hill = static_cast<float>(cfg.hill_ht1a);
+    profile.neuromod.ht1a.maxKGainFold = static_cast<float>(cfg.max_k_gain_ht1a);
+
+    profile.neuromod.ht2a.ec50 = static_cast<float>(cfg.ec50_ht2a);
+    profile.neuromod.ht2a.hill = static_cast<float>(cfg.hill_ht2a);
+    profile.neuromod.ht2a.maxKReductionFrac = static_cast<float>(cfg.max_k_reduction_ht2a);
+    profile.neuromod.ht2a.maxAdaptationReductionFrac = static_cast<float>(cfg.max_adaptation_reduction_ht2a);
 
     return profile;
 }
@@ -1081,6 +1127,40 @@ static bool loadDrugConfigFromJsonFile(
             if(auto m=extractJsonNumber(c,"max_extension",netP);m) out.config.max_extension_net=*m;
         }
     }
+    // Phase 3c: top-level "neuromodulators" section -- same "block name,
+    // look for numbers nearby" pattern as "transporters"/"receptors" above.
+    // Key names match each struct's field names directly (see
+    // NeuromodulatorSystem.h): "ec50"/"hill" on all four, plus each one's
+    // own specific ceiling key(s).
+    const auto nmPos=c.find("\"neuromodulators\"");
+    if(nmPos!=c.npos){
+        const auto d1P=c.find("\"D1\"",nmPos);
+        if(d1P!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",d1P);n) out.config.ec50_d1=*n;
+            if(auto h=extractJsonNumber(c,"hill",d1P);h) out.config.hill_d1=*h;
+            if(auto m=extractJsonNumber(c,"max_adaptation_reduction",d1P);m) out.config.max_adaptation_reduction_d1=*m;
+            if(auto m=extractJsonNumber(c,"max_nmda_gain",d1P);m) out.config.max_nmda_gain_d1=*m;
+        }
+        const auto d2P=c.find("\"D2\"",nmPos);
+        if(d2P!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",d2P);n) out.config.ec50_d2=*n;
+            if(auto h=extractJsonNumber(c,"hill",d2P);h) out.config.hill_d2=*h;
+            if(auto m=extractJsonNumber(c,"max_release_reduction",d2P);m) out.config.max_release_reduction_d2=*m;
+        }
+        const auto ht1aP=c.find("\"5HT1A\"",nmPos);
+        if(ht1aP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",ht1aP);n) out.config.ec50_ht1a=*n;
+            if(auto h=extractJsonNumber(c,"hill",ht1aP);h) out.config.hill_ht1a=*h;
+            if(auto m=extractJsonNumber(c,"max_k_gain",ht1aP);m) out.config.max_k_gain_ht1a=*m;
+        }
+        const auto ht2aP=c.find("\"5HT2A\"",nmPos);
+        if(ht2aP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",ht2aP);n) out.config.ec50_ht2a=*n;
+            if(auto h=extractJsonNumber(c,"hill",ht2aP);h) out.config.hill_ht2a=*h;
+            if(auto m=extractJsonNumber(c,"max_k_reduction",ht2aP);m) out.config.max_k_reduction_ht2a=*m;
+            if(auto m=extractJsonNumber(c,"max_adaptation_reduction",ht2aP);m) out.config.max_adaptation_reduction_ht2a=*m;
+        }
+    }
     const auto drP=c.find("\"dose_range\"");
     if(drP!=c.npos){
         if(auto v=extractJsonNumber(c,"min",drP);v)  { out.config.dose=*v; outDoseMin=*v; }
@@ -1284,6 +1364,31 @@ std::string buildDrugEvaluationReportText(
         aLine("  Recovery Tau",         formatRuntimeNumber(evalInput.config.desensitization_tau_recovery_ms) + " ms");
         aLine("  Max Attenuation",      formatRuntimeNumber(evalInput.config.desensitization_max_attenuation * 100.0) + "%");
         aLine("  Run Duration",         formatRuntimeNumber(evalInput.config.sim_time) + " ms");
+    }
+    // Phase 3c: neuromodulator gain config, only printed per-receptor when
+    // that receptor is actually configured (kReceptorInertThreshold already
+    // declared above in this function).
+    if (evalInput.config.ec50_d1 < kReceptorInertThreshold) {
+        aLine("D1 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d1));
+        aLine("D1 Hill",               formatRuntimeNumber(evalInput.config.hill_d1));
+        aLine("D1 Max Adapt Reduction", formatRuntimeNumber(evalInput.config.max_adaptation_reduction_d1 * 100.0) + "%");
+        aLine("D1 Max NMDA Gain",      formatRuntimeNumber(evalInput.config.max_nmda_gain_d1) + "x");
+    }
+    if (evalInput.config.ec50_d2 < kReceptorInertThreshold) {
+        aLine("D2 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d2));
+        aLine("D2 Hill",               formatRuntimeNumber(evalInput.config.hill_d2));
+        aLine("D2 Max Release Reduction", formatRuntimeNumber(evalInput.config.max_release_reduction_d2 * 100.0) + "%");
+    }
+    if (evalInput.config.ec50_ht1a < kReceptorInertThreshold) {
+        aLine("5-HT1A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht1a));
+        aLine("5-HT1A Hill",           formatRuntimeNumber(evalInput.config.hill_ht1a));
+        aLine("5-HT1A Max K+ Gain",    formatRuntimeNumber(evalInput.config.max_k_gain_ht1a) + "x");
+    }
+    if (evalInput.config.ec50_ht2a < kReceptorInertThreshold) {
+        aLine("5-HT2A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht2a));
+        aLine("5-HT2A Hill",           formatRuntimeNumber(evalInput.config.hill_ht2a));
+        aLine("5-HT2A Max K+ Reduction", formatRuntimeNumber(evalInput.config.max_k_reduction_ht2a * 100.0) + "%");
+        aLine("5-HT2A Max Adapt Reduction", formatRuntimeNumber(evalInput.config.max_adaptation_reduction_ht2a * 100.0) + "%");
     }
     // Early/Late-half firing rate split -- printed UNCONDITIONALLY (not
     // gated on desensitization_enabled) so an ON run and an OFF run (or any
@@ -1524,6 +1629,75 @@ std::string buildDrugEvaluationReportText(
               (lastPct > 0.05 ? " (rate rising -- classic tolerance signature)" :
                lastPct < -0.05 ? " (rate falling -- not the expected tolerance direction)" :
                " (no measurable drift)"));
+        out << "\n--------------------------------------------------\n\n";
+    }
+
+    // Phase 3c: [Neuromodulator Gain Profile], per PHASE3_PLAN.md §4's
+    // report fields (Network gain score, Signal-to-noise ratio, Arousal
+    // level prediction, Neuromodulator balance). Only printed when at
+    // least one of D1/D2/5-HT1A/5-HT2A is actually configured -- same
+    // reasoning as the Neurotransmitter Profile / Adaptation Profile gates
+    // above. Network Gain Score and the Arousal/SNR readings are OUR
+    // derived composite metrics (not literature-measured clinical
+    // quantities -- there's no real "network gain score" you can look up),
+    // clearly flagged as such, same honest-about-thresholds discipline as
+    // Tolerance Risk in the Adaptation Profile section.
+    constexpr double kNeuromodInertThreshold = 1.0e8;
+    const bool anyNeuromodConfigured =
+        evalInput.config.ec50_d1   < kNeuromodInertThreshold ||
+        evalInput.config.ec50_d2   < kNeuromodInertThreshold ||
+        evalInput.config.ec50_ht1a < kNeuromodInertThreshold ||
+        evalInput.config.ec50_ht2a < kNeuromodInertThreshold;
+    if (anyNeuromodConfigured) {
+        out << "[Neuromodulator Gain Profile]\n";
+        const double peakDoseForNm = report.analyzedDoses.empty() ? 0.0 : report.analyzedDoses[peakIdx].dose;
+        const float peakDoseF = static_cast<float>(peakDoseForNm);
+
+        const float d1Occ   = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_d1),   static_cast<float>(evalInput.config.hill_d1));
+        const float d2Occ   = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_d2),   static_cast<float>(evalInput.config.hill_d2));
+        const float ht1aOcc = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_ht1a), static_cast<float>(evalInput.config.hill_ht1a));
+        const float ht2aOcc = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_ht2a), static_cast<float>(evalInput.config.hill_ht2a));
+
+        spp::drug::ReceptorDrugProfile nmProfileForReport;
+        nmProfileForReport.neuromod.d1.ec50 = static_cast<float>(evalInput.config.ec50_d1);
+        nmProfileForReport.neuromod.d1.hill = static_cast<float>(evalInput.config.hill_d1);
+        nmProfileForReport.neuromod.d1.maxAdaptationReductionFrac = static_cast<float>(evalInput.config.max_adaptation_reduction_d1);
+        nmProfileForReport.neuromod.d1.maxNmdaGainFold = static_cast<float>(evalInput.config.max_nmda_gain_d1);
+        nmProfileForReport.neuromod.d2.ec50 = static_cast<float>(evalInput.config.ec50_d2);
+        nmProfileForReport.neuromod.d2.hill = static_cast<float>(evalInput.config.hill_d2);
+        nmProfileForReport.neuromod.d2.maxReleaseReductionFrac = static_cast<float>(evalInput.config.max_release_reduction_d2);
+        nmProfileForReport.neuromod.ht1a.ec50 = static_cast<float>(evalInput.config.ec50_ht1a);
+        nmProfileForReport.neuromod.ht1a.hill = static_cast<float>(evalInput.config.hill_ht1a);
+        nmProfileForReport.neuromod.ht1a.maxKGainFold = static_cast<float>(evalInput.config.max_k_gain_ht1a);
+        nmProfileForReport.neuromod.ht2a.ec50 = static_cast<float>(evalInput.config.ec50_ht2a);
+        nmProfileForReport.neuromod.ht2a.hill = static_cast<float>(evalInput.config.hill_ht2a);
+        nmProfileForReport.neuromod.ht2a.maxKReductionFrac = static_cast<float>(evalInput.config.max_k_reduction_ht2a);
+        nmProfileForReport.neuromod.ht2a.maxAdaptationReductionFrac = static_cast<float>(evalInput.config.max_adaptation_reduction_ht2a);
+
+        const spp::synapse::NeuromodulatorGainModifiers gainMods =
+            spp::drug::DrugModel::computeNeuromodulatorGainModifiers(nmProfileForReport, peakDoseF);
+
+        aLine("D1 Occupancy",    formatRuntimeNumber(d1Occ   * 100.0, 0) + " % (at peak dose)");
+        aLine("D2 Occupancy",    formatRuntimeNumber(d2Occ   * 100.0, 0) + " % (at peak dose)");
+        aLine("5-HT1A Occupancy", formatRuntimeNumber(ht1aOcc * 100.0, 0) + " % (at peak dose)");
+        aLine("5-HT2A Occupancy", formatRuntimeNumber(ht2aOcc * 100.0, 0) + " % (at peak dose)");
+
+        // Network Gain Score: >1 = net excitatory/disinhibited (NMDA gain
+        // and/or reduced adaptation outweighing any K+/release reduction),
+        // <1 = net suppressive. Derived, not a measured quantity.
+        const double gainScore =
+            (gainMods.gKEffScale > 1.0e-6f && gainMods.adaptationScale > 1.0e-6f)
+                ? static_cast<double>(gainMods.gMaxNmdaScale * gainMods.excitatoryWeightScale)
+                    / static_cast<double>(gainMods.gKEffScale * gainMods.adaptationScale)
+                : 0.0;
+        aLine("Network Gain Score", formatRuntimeNumber(gainScore, 2) +
+              " (>1 = net excitatory/disinhibited, <1 = net suppressive) [derived]");
+        aLine("Signal-to-Noise Shift", formatRuntimeNumber((gainMods.gMaxNmdaScale - 1.0) * 100.0, 1) +
+              "% (NMDA-gain proxy) [derived]");
+        const std::string arousal =
+            (gainScore > 1.05) ? "INCREASED (more alert/excitable)" :
+            (gainScore < 0.95) ? "DECREASED (more sedated/suppressed)" : "UNCHANGED";
+        aLine("Arousal Prediction", arousal + " [derived]");
         out << "\n--------------------------------------------------\n\n";
     }
 
