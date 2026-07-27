@@ -39,6 +39,12 @@ struct ReceptorConductanceState {
     float nmdaDecay = 0.0f, nmdaRise = 0.0f;
     float gabaADecay = 0.0f, gabaARise = 0.0f;
     float gabaBDecay = 0.0f, gabaBRise = 0.0f;
+
+    // Phase 3b: GABA-A desensitization state, 0 (fresh) .. 1 (fully tired).
+    // Persists across timesteps like the accumulators above. Left at 0.0f
+    // and never touched unless a DesensitizationConfig is passed in below --
+    // zero behavior change for any caller that doesn't opt in.
+    float gabaADesensitization = 0.0f;
 };
 
 // Peak-normalized (0..~1) conductances for one neuron at one timestep.
@@ -69,6 +75,40 @@ struct ReceptorKineticsOverride {
     std::vector<float> nmdaDecayF, nmdaNorm;
     std::vector<float> gabaADecayF, gabaANorm;
     std::vector<float> gabaBDecayF, gabaBNorm;
+};
+
+// ─── Phase 3b: GABA-A desensitization (receptor "tiredness") ───────────────
+// Real GABA-A receptors lose responsiveness under sustained activation and
+// recover once left alone -- an intrinsic receptor property, not something a
+// drug turns on. It is modeled as a single 0..1 "tiredness" state D per
+// neuron (ReceptorConductanceState::gabaADesensitization) evolving each
+// timestep as:
+//
+//   dD/dt = (1/tauDesenseMs) * drive * (1 - D) - (1/tauRecoveryMs) * D
+//
+// where `drive` is the neuron's own instantaneous (pre-desensitization)
+// GABA-A conductance (already 0..1, peak-normalized) -- used as the
+// activation proxy instead of a literal [GABA] concentration, since that's
+// exactly what the existing accumulator already computes. The receptor's
+// output conductance is then scaled by (1 - maxAttenuation*D).
+//
+// tauDesenseMs ~30000 (30s) and tauRecoveryMs ~124000 (124s) are literature
+// values for GABA-A desensitization/recovery under continuous agonist
+// exposure (Serpa & Ozawa 2002 and related rapid-perfusion patch-clamp
+// work); maxAttenuation ~0.9 reflects "near-complete" (not literal 100%)
+// desensitization reported at saturating, prolonged exposure.
+//
+// This is deliberately opt-in and OFF by default (enabled=false / nullptr):
+// with dt in the tens-of-ms and typical dose-eval runs lasting ~0.4-0.5s,
+// D never accumulates meaningfully anyway (500ms << 30s tau), so leaving it
+// enabled would be a no-op for those runs -- but it's kept as an explicit
+// switch so every already-validated Phase 2/3a result stays byte-identical
+// unless a test deliberately opts in for a long-duration 3b run.
+struct DesensitizationConfig {
+    bool enabled = false;
+    float tauDesenseMs = 30000.0f;
+    float tauRecoveryMs = 124000.0f;
+    float maxAttenuation = 0.9f;
 };
 
 enum class SynapseType : std::uint8_t {
@@ -143,7 +183,8 @@ public:
         std::vector<ReceptorConductanceState>& states,
         float dtMs,
         std::vector<ReceptorConductances>& outConductances,
-        const ReceptorKineticsOverride* kineticsOverride = nullptr
+        const ReceptorKineticsOverride* kineticsOverride = nullptr,
+        const DesensitizationConfig* desensitization = nullptr
     ) const;
 
 private:
