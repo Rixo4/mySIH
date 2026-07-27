@@ -360,6 +360,15 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         }
     }
 
+    // Phase 3b: built once, reused across the whole run (config is fixed
+    // per run). nullptr-equivalent when disabled -- accumulateReceptorConductances
+    // treats desensitization->enabled == false exactly like a nullptr.
+    synapse::DesensitizationConfig desensitizationConfig;
+    desensitizationConfig.enabled = config_.desensitizationEnabled;
+    desensitizationConfig.tauDesenseMs = config_.desensitizationTauDesenseMs;
+    desensitizationConfig.tauRecoveryMs = config_.desensitizationTauRecoveryMs;
+    desensitizationConfig.maxAttenuation = config_.desensitizationMaxAttenuation;
+
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
@@ -465,7 +474,8 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         // conductance model too.
         matrix_.accumulateReceptorConductances(
             delayBuffer_, receptorStates, config_.dtMs, receptorConductances,
-            needsKineticsOverride ? &kineticsOverride : nullptr);
+            needsKineticsOverride ? &kineticsOverride : nullptr,
+            &desensitizationConfig);
 
         for (std::size_t b = 0; b < blockCount_; ++b) {
             const float effDose = blockDoses_[b] * doseScale;
