@@ -236,7 +236,13 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             static_cast<int>(receptorProfile_.gat1.mechanism),
             receptorProfile_.gat1.kiUm,
             receptorProfile_.gat1.hill,
-            receptorProfile_.gat1.maxExtensionFold
+            receptorProfile_.gat1.maxExtensionFold,
+            // Phase 3b: GABA-A desensitization -- see CudaSimulator.h /
+            // NeuronUpdate.h's BatchedStepLaunchInfo comment.
+            config_.desensitizationEnabled,
+            config_.desensitizationTauDesenseMs,
+            config_.desensitizationTauRecoveryMs,
+            config_.desensitizationMaxAttenuation
         );
 #endif
     }
