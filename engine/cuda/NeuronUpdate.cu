@@ -510,6 +510,23 @@ __global__ void fusedBatchedStepKernel(
     const float gGABAaRaw = fmaxf(0.0f, gabaANorm * (gabaADecayAcc - gabaARiseAcc));
     const float gGABAbRaw = fmaxf(0.0f, gabaBNorm * (gabaBDecayAcc - gabaBRiseAcc));
 
+    // Phase 3b: GABA-A desensitization -- mirrors Synapse.cpp's
+    // accumulateReceptorConductances exactly (Euler step on a 0..1
+    // "tiredness" state, driven by this thread's own raw GABA-A conductance
+    // as the activation proxy). See Synapse.h's DesensitizationConfig for
+    // the full design comment. Off by default (desensitizationEnabled ==
+    // false) -- gGABAaFinal == gGABAaRaw unchanged, zero behavior change.
+    float gGABAaFinal = gGABAaRaw;
+    if (launchInfo.desensitizationEnabled) {
+        const float kDesenseStep = launchInfo.dtMs / fmaxf(1.0f, launchInfo.desensitizationTauDesenseMs);
+        const float kRecoverStep = launchInfo.dtMs / fmaxf(1.0f, launchInfo.desensitizationTauRecoveryMs);
+        float d = devicePointers.gabaADesensitization[i];
+        d += kDesenseStep * gGABAaRaw * (1.0f - d) - kRecoverStep * d;
+        d = clamp01(d);
+        devicePointers.gabaADesensitization[i] = d;
+        gGABAaFinal = gGABAaRaw * (1.0f - launchInfo.desensitizationMaxAttenuation * d);
+    }
+
     // Receptor drug profile (block/potentiate/agonist) -- mirrors
     // DrugModel::computeReceptorModifiers exactly. Single shared profile
     // for the whole batch, same `dose` already computed above for channel
@@ -542,7 +559,7 @@ __global__ void fusedBatchedStepKernel(
         fmaxf(0.0f, launchInfo.gMaxAMPA * gAMPARaw * ampaResidual)
     );
     const float gNMDAEff = launchInfo.gMaxNMDA * gNMDARaw * nmdaResidual;
-    const float gGABAaEff = launchInfo.gMaxGABAa * gGABAaRaw * gabaAPotentiation;
+    const float gGABAaEff = launchInfo.gMaxGABAa * gGABAaFinal * gabaAPotentiation;
     const float gGABAbEff = launchInfo.gMaxGABAb * gGABAbRaw +
                              launchInfo.gMaxGABAbAgonist * gabaBAgonistActivation;
 
@@ -861,6 +878,16 @@ struct CudaSimulator::DeviceBuffers {
     float batchedGat1Hill = 1.0f;
     float batchedGat1MaxExtensionFold = 1.0f;
 
+    // Phase 3b: GABA-A desensitization -- persistent per-neuron 0..1 state
+    // (separate single-float allocation, see NeuronUpdate.h's
+    // BatchedStepDevicePointers comment) plus the shared-scalar config,
+    // same storage pattern as the GAT1 fields above.
+    float* batchedGabaADesensitization = nullptr;
+    bool batchedDesensitizationEnabled = false;
+    float batchedDesensitizationTauDesenseMs = 30000.0f;
+    float batchedDesensitizationTauRecoveryMs = 124000.0f;
+    float batchedDesensitizationMaxAttenuation = 0.9f;
+
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
     std::size_t batchedBatchWindowSteps = 0;
@@ -962,6 +989,7 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->batchedRngStates);
             cudaFree(buffers_->batchedSpikeHistory);
             cudaFree(buffers_->batchedReceptorState);
+            cudaFree(buffers_->batchedGabaADesensitization);
             if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
             if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
             delete buffers_;
@@ -1010,6 +1038,7 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->batchedRngStates);
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
+    cudaFree(buffers_->batchedGabaADesensitization);
 
     if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
     if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
@@ -1230,7 +1259,13 @@ void CudaSimulator::initializeBatchedSimulation(
     int gat1Mechanism,
     float gat1KiUm,
     float gat1Hill,
-    float gat1MaxExtensionFold
+    float gat1MaxExtensionFold,
+    // Phase 3b: GABA-A desensitization -- see NeuronUpdate.h's
+    // BatchedStepLaunchInfo comment.
+    bool desensitizationEnabled,
+    float desensitizationTauDesenseMs,
+    float desensitizationTauRecoveryMs,
+    float desensitizationMaxAttenuation
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1271,6 +1306,7 @@ void CudaSimulator::initializeBatchedSimulation(
     cudaFree(buffers_->batchedRngStates);
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
+    cudaFree(buffers_->batchedGabaADesensitization);
 
     checkCuda(cudaMalloc(&buffers_->incomingOffsets, offsetBytes), "cudaMalloc incomingOffsets");
     checkCuda(cudaMalloc(&buffers_->incomingPre, edgeBytes), "cudaMalloc incomingPre");
@@ -1316,6 +1352,10 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedGat1KiUm = gat1KiUm;
     buffers_->batchedGat1Hill = gat1Hill;
     buffers_->batchedGat1MaxExtensionFold = gat1MaxExtensionFold;
+    buffers_->batchedDesensitizationEnabled = desensitizationEnabled;
+    buffers_->batchedDesensitizationTauDesenseMs = desensitizationTauDesenseMs;
+    buffers_->batchedDesensitizationTauRecoveryMs = desensitizationTauRecoveryMs;
+    buffers_->batchedDesensitizationMaxAttenuation = desensitizationMaxAttenuation;
 
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
@@ -1344,6 +1384,12 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedReceptorGabaARise  = buffers_->batchedReceptorState + 5 * neuronCount_;
     buffers_->batchedReceptorGabaBDecay = buffers_->batchedReceptorState + 6 * neuronCount_;
     buffers_->batchedReceptorGabaBRise  = buffers_->batchedReceptorState + 7 * neuronCount_;
+
+    // Phase 3b: single-float-per-neuron desensitization state, separate
+    // allocation (not packed into the 8-wide receptor state block above --
+    // it's one value, not a decay/rise pair).
+    checkCuda(cudaMalloc(&buffers_->batchedGabaADesensitization, floatBytes), "cudaMalloc batchedGabaADesensitization");
+    checkCuda(cudaMemset(buffers_->batchedGabaADesensitization, 0, floatBytes), "memset batchedGabaADesensitization");
 
     checkCuda(cudaMemset(buffers_->batchedDelayBuffer, 0, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "memset batchedDelayBuffer");
     checkCuda(cudaMemset(buffers_->batchedIExcState, 0, floatBytes), "memset batchedIExcState");
@@ -1420,6 +1466,10 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.gat1KiUm = buffers_->batchedGat1KiUm;
     launchInfo.gat1Hill = buffers_->batchedGat1Hill;
     launchInfo.gat1MaxExtensionFold = buffers_->batchedGat1MaxExtensionFold;
+    launchInfo.desensitizationEnabled = buffers_->batchedDesensitizationEnabled;
+    launchInfo.desensitizationTauDesenseMs = buffers_->batchedDesensitizationTauDesenseMs;
+    launchInfo.desensitizationTauRecoveryMs = buffers_->batchedDesensitizationTauRecoveryMs;
+    launchInfo.desensitizationMaxAttenuation = buffers_->batchedDesensitizationMaxAttenuation;
 
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;
@@ -1457,6 +1507,7 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     devicePointers.receptorGabaARise = buffers_->batchedReceptorGabaARise;
     devicePointers.receptorGabaBDecay = buffers_->batchedReceptorGabaBDecay;
     devicePointers.receptorGabaBRise = buffers_->batchedReceptorGabaBRise;
+    devicePointers.gabaADesensitization = buffers_->batchedGabaADesensitization;
 
     launchBatchedStepKernel(launchInfo, devicePointers);
     checkCuda(cudaGetLastError(), "batched step kernel launch");
