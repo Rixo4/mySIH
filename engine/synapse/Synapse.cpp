@@ -136,7 +136,8 @@ void SynapseMatrix::accumulateReceptorConductances(
     std::vector<ReceptorConductanceState>& states,
     float dtMs,
     std::vector<ReceptorConductances>& outConductances,
-    const ReceptorKineticsOverride* kineticsOverride
+    const ReceptorKineticsOverride* kineticsOverride,
+    const DesensitizationConfig* desensitization
 ) const {
     if (delayBuffer.neuronCount() != neuronCount_) {
         throw std::invalid_argument("Delay buffer size does not match synapse matrix neuron count.");
@@ -178,6 +179,15 @@ void SynapseMatrix::accumulateReceptorConductances(
     const float nmdaNorm  = nmdaKernel.normFactor();
     const float gabaANorm = gabaAKernel.normFactor();
     const float gabaBNorm = gabaBKernel.normFactor();
+
+    // Phase 3b desensitization: precompute the per-step rate constants once
+    // (dt and the config are both fixed within a call), same pattern as the
+    // decay factors above. desensitization == nullptr or ->enabled == false
+    // means these are never used below (raw gGABAa is emitted unchanged).
+    const bool desenseOn = (desensitization != nullptr) && desensitization->enabled;
+    const float kDesenseStep  = desenseOn ? (dtMs / std::max(1.0f, desensitization->tauDesenseMs))  : 0.0f;
+    const float kRecoverStep  = desenseOn ? (dtMs / std::max(1.0f, desensitization->tauRecoveryMs)) : 0.0f;
+    const float maxAttenuation = desenseOn ? desensitization->maxAttenuation : 0.0f;
 
     for (std::size_t post = 0; post < neuronCount_; ++post) {
         const std::uint32_t begin = incomingOffsets_[post];
@@ -226,8 +236,22 @@ void SynapseMatrix::accumulateReceptorConductances(
         ReceptorConductances& out = outConductances[post];
         out.gAMPA  = std::max(0.0f, postAmpaNorm  * (s.ampaDecay  - s.ampaRise));
         out.gNMDA  = std::max(0.0f, postNmdaNorm  * (s.nmdaDecay  - s.nmdaRise));
-        out.gGABAa = std::max(0.0f, postGabaANorm * (s.gabaADecay - s.gabaARise));
+        const float gabaARaw = std::max(0.0f, postGabaANorm * (s.gabaADecay - s.gabaARise));
         out.gGABAb = std::max(0.0f, postGabaBNorm * (s.gabaBDecay - s.gabaBRise));
+
+        if (desenseOn) {
+            // Euler step on the 0..1 tiredness state, driven by this
+            // neuron's own raw (pre-desensitization) GABA-A conductance as
+            // the activation proxy -- see DesensitizationConfig comment in
+            // Synapse.h for why no literal [GABA] concentration is needed.
+            float d = s.gabaADesensitization;
+            d += kDesenseStep * gabaARaw * (1.0f - d) - kRecoverStep * d;
+            d = std::clamp(d, 0.0f, 1.0f);
+            s.gabaADesensitization = d;
+            out.gGABAa = gabaARaw * (1.0f - maxAttenuation * d);
+        } else {
+            out.gGABAa = gabaARaw;
+        }
     }
 }
 
