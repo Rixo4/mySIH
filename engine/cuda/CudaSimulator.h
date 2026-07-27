@@ -121,7 +121,14 @@ public:
         int gat1Mechanism,
         float gat1KiUm,
         float gat1Hill,
-        float gat1MaxExtensionFold
+        float gat1MaxExtensionFold,
+        // Phase 3b: GABA-A desensitization -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment / Synapse.h's DesensitizationConfig
+        // for the design.
+        bool desensitizationEnabled,
+        float desensitizationTauDesenseMs,
+        float desensitizationTauRecoveryMs,
+        float desensitizationMaxAttenuation
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);
