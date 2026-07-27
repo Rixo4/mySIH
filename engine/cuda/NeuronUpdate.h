@@ -87,6 +87,17 @@ struct BatchedStepLaunchInfo {
     float gat1KiUm = 1.0e9f;
     float gat1Hill = 1.0f;
     float gat1MaxExtensionFold = 1.0f;
+
+    // Phase 3b: GABA-A desensitization ("receptor tiredness") -- mirrors
+    // synapse::DesensitizationConfig (Synapse.h) exactly, same equation, same
+    // per-thread computation pattern as gat1* above (dose/drive is already
+    // per-neuron via the kernel's own state, tau/attenuation are shared
+    // scalars for the whole batch). See Synapse.h's DesensitizationConfig
+    // comment for the full design rationale and literature citations.
+    bool desensitizationEnabled = false;
+    float desensitizationTauDesenseMs = 30000.0f;
+    float desensitizationTauRecoveryMs = 124000.0f;
+    float desensitizationMaxAttenuation = 0.9f;
 };
 
 struct BatchedStepDevicePointers {
@@ -124,6 +135,13 @@ struct BatchedStepDevicePointers {
     float* receptorGabaARise = nullptr;
     float* receptorGabaBDecay = nullptr;
     float* receptorGabaBRise = nullptr;
+
+    // Phase 3b: persistent per-neuron GABA-A desensitization state (0..1
+    // "tiredness"), mirrors ReceptorConductanceState::gabaADesensitization
+    // (Synapse.h) exactly -- a single float per neuron, separate from the
+    // packed 8-wide receptor state block above since it's one value instead
+    // of a decay/rise pair.
+    float* gabaADesensitization = nullptr;
 
     float* v = nullptr;
     float* m = nullptr;
