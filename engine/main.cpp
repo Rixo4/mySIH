@@ -156,6 +156,18 @@ struct SimulationConfig {
     double hill_net           = 1.0;
     double max_extension_net  = 1.0;
 
+    // Phase 3b: GABA-A desensitization ("receptor tiredness"). OFF by
+    // default -- see SimulationConfig::desensitizationEnabled in
+    // simulation/SimulationEngine.h for why this is safe to leave off for
+    // every existing (short-duration) drug config. sim_time above already
+    // exists as the run-duration knob -- a 3b desensitization test simply
+    // sets both desensitization_enabled and a much larger sim_time (tens of
+    // seconds, in ms) in the same JSON file.
+    bool desensitization_enabled          = false;
+    double desensitization_tau_desense_ms  = 30000.0;
+    double desensitization_tau_recovery_ms = 124000.0;
+    double desensitization_max_attenuation = 0.9;
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
@@ -333,6 +345,16 @@ void validateConfig(const SimulationConfig& cfg) {
     if (cfg.noise_level < 0.0)   throw std::runtime_error("Noise level must be >= 0.");
     if (trim(cfg.output_folder).empty())
         throw std::runtime_error("Output folder cannot be empty.");
+    // Phase 3b: desensitization is CPU-only for now (see BatchedSimulationEngine.cpp
+    // -- the GPU batched kernel path returns before accumulateReceptorConductances
+    // is ever called, so it would silently ignore desensitization entirely rather
+    // than erroring). Fail loudly here instead of producing a misleading "ran fine,
+    // shows nothing" result -- same discipline as the SERT/DAT/NET report-only fix.
+    if (cfg.desensitization_enabled && cfg.use_cuda)
+        throw std::runtime_error(
+            "GABA-A desensitization is not yet implemented on GPU. Re-run with "
+            "SPP_FORCE_CPU=1 (or set use_cuda=false), otherwise it would be silently "
+            "skipped and the run wouldn't show any desensitization effect.");
 }
 
 std::uint32_t makeSeed() {
@@ -390,6 +412,14 @@ spp::simulation::SimulationConfig buildEngineConfig(const SimulationConfig& cfg,
     simCfg.adaptationInhibitoryScale = 0.50f;
     simCfg.drugOnsetTauMs            = 140.0f;
     simCfg.useGpu                    = cfg.use_cuda;
+
+    // Phase 3b: GABA-A desensitization pass-through, see SimulationConfig
+    // comment above and synapse::DesensitizationConfig for the full design.
+    simCfg.desensitizationEnabled          = cfg.desensitization_enabled;
+    simCfg.desensitizationTauDesenseMs     = static_cast<float>(cfg.desensitization_tau_desense_ms);
+    simCfg.desensitizationTauRecoveryMs    = static_cast<float>(cfg.desensitization_tau_recovery_ms);
+    simCfg.desensitizationMaxAttenuation   = static_cast<float>(cfg.desensitization_max_attenuation);
+
     return simCfg;
 }
 
@@ -897,6 +927,24 @@ static std::optional<double> extractJsonNumber(
     try{return std::stod(s.substr(ns,ne-ns));}catch(...){return std::nullopt;}
 }
 
+// Phase 3b: minimal true/false extractor, same "find key, look nearby"
+// pattern as extractJsonNumber/extractJsonString above -- this hand-rolled
+// parser has no general boolean support, so this is a small dedicated
+// helper rather than extending the number/string ones.
+static std::optional<bool> extractJsonBool(
+    const std::string& s, const std::string& key, std::size_t start=0)
+{
+    const std::string pat='"'+key+'"';
+    auto p=s.find(pat,start); if(p==s.npos) return std::nullopt;
+    auto colon=s.find(':',p+pat.size()); if(colon==s.npos) return std::nullopt;
+    auto t=s.find("true",colon);
+    auto f=s.find("false",colon);
+    auto comma=s.find_first_of(",}",colon);
+    if(f!=s.npos && (comma==s.npos || f<comma)) return false;
+    if(t!=s.npos && (comma==s.npos || t<comma)) return true;
+    return std::nullopt;
+}
+
 static bool loadDrugConfigFromJsonFile(
     const std::string& path, RuntimeInput& out,
     std::optional<int>& outRuns, std::string& outMode,
@@ -994,6 +1042,22 @@ static bool loadDrugConfigFromJsonFile(
     }
     if(auto v=extractJsonNumber(c,"runs");v) outRuns=static_cast<int>(*v);
     if(auto v=extractJsonString(c,"mode");v) outMode=*v;
+
+    // Phase 3b: top-level "desensitization" section, plus an optional
+    // "sim_time_ms" override for long-duration desensitization runs. Both
+    // deliberately opt-in (out.config.desensitization_enabled defaults to
+    // false and sim_time is already set to --dose-eval's normal 500ms
+    // default before this function runs) -- a drug config that doesn't
+    // mention either key changes nothing.
+    const auto dsPos=c.find("\"desensitization\"");
+    if(dsPos!=c.npos){
+        if(auto b=extractJsonBool(c,"enabled",dsPos);b) out.config.desensitization_enabled=*b;
+        if(auto n=extractJsonNumber(c,"tau_desense_ms",dsPos);n) out.config.desensitization_tau_desense_ms=*n;
+        if(auto n=extractJsonNumber(c,"tau_recovery_ms",dsPos);n) out.config.desensitization_tau_recovery_ms=*n;
+        if(auto n=extractJsonNumber(c,"max_attenuation",dsPos);n) out.config.desensitization_max_attenuation=*n;
+    }
+    if(auto v=extractJsonNumber(c,"sim_time_ms");v) out.config.sim_time=*v;
+
     return true;
 }
 // ─── Report text builder ──────────────────────────────────────────────────────
@@ -1165,6 +1229,17 @@ std::string buildDrugEvaluationReportText(
         aLine("NET Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_net) + " [report-only]");
         aLine("NET Hill",                 formatRuntimeNumber(evalInput.config.hill_net));
         aLine("NET Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_net) + "x");
+    }
+    // Phase 3b: GABA-A desensitization -- only meaningful (and only ever
+    // enabled) on a long-duration run, so flag the run's actual sim_time
+    // alongside it as a sanity check that the test was set up long enough
+    // to show anything (500ms default << 30s desensitization tau).
+    if (evalInput.config.desensitization_enabled) {
+        aLine("GABA-A Desensitization", "ENABLED");
+        aLine("  Desensitize Tau",      formatRuntimeNumber(evalInput.config.desensitization_tau_desense_ms) + " ms");
+        aLine("  Recovery Tau",         formatRuntimeNumber(evalInput.config.desensitization_tau_recovery_ms) + " ms");
+        aLine("  Max Attenuation",      formatRuntimeNumber(evalInput.config.desensitization_max_attenuation * 100.0) + "%");
+        aLine("  Run Duration",         formatRuntimeNumber(evalInput.config.sim_time) + " ms");
     }
     aLine("Runs",              std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
