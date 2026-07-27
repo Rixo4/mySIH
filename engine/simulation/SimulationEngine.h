@@ -272,6 +272,17 @@ struct SimulationConfig {
     float drugOnsetTauMs = 120.0f;
 
     bool useGpu = false;
+
+    // Phase 3b: GABA-A desensitization ("receptor tiredness"), see
+    // synapse::DesensitizationConfig for the full design comment. OFF by
+    // default -- with the default 400ms/500ms run durations this would be a
+    // no-op anyway (500ms << 30s tau), but kept as an explicit opt-in so
+    // every existing result stays byte-identical unless a test deliberately
+    // enables it for a long-duration 3b run.
+    bool desensitizationEnabled = false;
+    float desensitizationTauDesenseMs = 30000.0f;
+    float desensitizationTauRecoveryMs = 124000.0f;
+    float desensitizationMaxAttenuation = 0.9f;
 };
 
 struct SimulationResult {
