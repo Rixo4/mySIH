@@ -119,6 +119,15 @@ public:
     // as computeReceptorModifiers -- see ReceptorKineticsModifiers comment.
     static ReceptorKineticsModifiers computeReceptorKineticsModifiers(const ReceptorDrugProfile& profile, float dose);
 
+    // Phase 3c: neuromodulator gain modifiers (D1/D2/5-HT1A/5-HT2A), see
+    // engine/synapse/NeuromodulatorSystem.h. Stateless, same pattern as
+    // computeReceptorKineticsModifiers -- thin pass-through to the synapse-
+    // level math, kept here so callers (BatchedSimulationEngine) go through
+    // the same DrugModel entry point as every other mechanism family rather
+    // than reaching into engine/synapse directly.
+    static spp::synapse::NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
+        const ReceptorDrugProfile& profile, float dose);
+
     void enablePerNeuronProfiles(std::size_t neuronCount);
     [[nodiscard]] bool hasPerNeuronProfiles() const { return perNeuronEnabled_; }
 

@@ -249,4 +249,9 @@ ReceptorConductanceModifiers DrugModel::applyReceptors(float doseScale) const {
     return computeReceptorModifiers(globalReceptorProfile_, dose);
 }
 
+spp::synapse::NeuromodulatorGainModifiers DrugModel::computeNeuromodulatorGainModifiers(
+    const ReceptorDrugProfile& profile, float dose) {
+    return spp::synapse::computeNeuromodulatorGainModifiers(dose, profile.neuromod);
+}
+
 } // namespace spp::drug
