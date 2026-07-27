@@ -25,6 +25,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.o"
   "CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.o.d"
+  "CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.o"
+  "CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o"
   "CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/synapse/Synapse.cpp.o"

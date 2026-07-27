@@ -441,6 +441,30 @@ engine/simulation/SimulationEngine.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.s
 .PHONY : engine/simulation/SimulationEngine.cpp.s
 
+engine/synapse/NeuromodulatorSystem.o: engine/synapse/NeuromodulatorSystem.cpp.o
+.PHONY : engine/synapse/NeuromodulatorSystem.o
+
+# target to build an object file
+engine/synapse/NeuromodulatorSystem.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.o
+.PHONY : engine/synapse/NeuromodulatorSystem.cpp.o
+
+engine/synapse/NeuromodulatorSystem.i: engine/synapse/NeuromodulatorSystem.cpp.i
+.PHONY : engine/synapse/NeuromodulatorSystem.i
+
+# target to preprocess a source file
+engine/synapse/NeuromodulatorSystem.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.i
+.PHONY : engine/synapse/NeuromodulatorSystem.cpp.i
+
+engine/synapse/NeuromodulatorSystem.s: engine/synapse/NeuromodulatorSystem.cpp.s
+.PHONY : engine/synapse/NeuromodulatorSystem.s
+
+# target to generate assembly for a file
+engine/synapse/NeuromodulatorSystem.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.s
+.PHONY : engine/synapse/NeuromodulatorSystem.cpp.s
+
 engine/synapse/ReuptakeTransporter.o: engine/synapse/ReuptakeTransporter.cpp.o
 .PHONY : engine/synapse/ReuptakeTransporter.o
 
@@ -537,6 +561,9 @@ help:
 	@echo "... engine/simulation/SimulationEngine.o"
 	@echo "... engine/simulation/SimulationEngine.i"
 	@echo "... engine/simulation/SimulationEngine.s"
+	@echo "... engine/synapse/NeuromodulatorSystem.o"
+	@echo "... engine/synapse/NeuromodulatorSystem.i"
+	@echo "... engine/synapse/NeuromodulatorSystem.s"
 	@echo "... engine/synapse/ReuptakeTransporter.o"
 	@echo "... engine/synapse/ReuptakeTransporter.i"
 	@echo "... engine/synapse/ReuptakeTransporter.s"
