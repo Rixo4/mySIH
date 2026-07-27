@@ -40,6 +40,7 @@
 #include <cstdint>
 
 #include "../synapse/ReuptakeTransporter.h"
+#include "../synapse/NeuromodulatorSystem.h"
 
 namespace spp::drug {
 
@@ -118,6 +119,12 @@ struct ReceptorDrugProfile {
     TransporterAction sert; // serotonin transporter -- report-only, no receptor yet
     TransporterAction dat;  // dopamine transporter -- report-only, no receptor yet
     TransporterAction net;  // norepinephrine transporter -- report-only, no receptor yet
+
+    // Phase 3c additions -- see engine/synapse/NeuromodulatorSystem.h for the
+    // full design rationale. All default to inert (ec50 huge / gain
+    // ceilings = 1.0), so an unconfigured profile is a no-op, same policy
+    // as every other field in this struct.
+    spp::synapse::NeuromodulatorProfile neuromod;
 };
 
 } // namespace spp::drug
