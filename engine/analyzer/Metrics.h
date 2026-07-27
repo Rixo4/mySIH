@@ -32,6 +32,16 @@ struct NetworkMetrics {
     float earlyWindowRateHz         = 0.0f;
     float lateWindowRateHz          = 0.0f;
 
+    // Phase 3b: three-way split (first/middle/last third of the run),
+    // added specifically for the [Adaptation Profile] report section
+    // (PHASE3_PLAN.md §7's Short/Medium/Long-term tiers). Same fixed-window
+    // computation as earlyWindowRateHz/lateWindowRateHz above, just three
+    // windows instead of two -- only meaningful on long-duration
+    // (desensitization-style) runs, same caveat as the two-way split.
+    float firstThirdRateHz          = 0.0f;
+    float middleThirdRateHz         = 0.0f;
+    float lastThirdRateHz           = 0.0f;
+
     // Synchronization
     float synchronizationIndex      = 0.0f;
     float peakSynchronizationIndex  = 0.0f;

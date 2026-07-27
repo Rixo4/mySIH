@@ -548,6 +548,25 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         net.lateWindowRateHz     = static_cast<float>(lateSpikes)  / (neuronCount * halfSec);
     }
 
+    // -----------------------------------------------------------------------
+    // 8b. Phase 3b: first/middle/last third rates (Adaptation Profile)
+    // -----------------------------------------------------------------------
+    {
+        const std::size_t n = result.populationSpikesPerStep.size();
+        const std::size_t oneThird = n / 3U;
+        const std::size_t twoThirds = (2U * n) / 3U;
+        std::uint64_t firstSpikes = 0U, middleSpikes = 0U, lastSpikes = 0U;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i < oneThird)            firstSpikes  += result.populationSpikesPerStep[i];
+            else if (i < twoThirds)      middleSpikes += result.populationSpikesPerStep[i];
+            else                         lastSpikes   += result.populationSpikesPerStep[i];
+        }
+        const float thirdSec = std::max(1.0e-6f, (result.durationMs / 3.0f) / 1000.0f);
+        net.firstThirdRateHz  = static_cast<float>(firstSpikes)  / (neuronCount * thirdSec);
+        net.middleThirdRateHz = static_cast<float>(middleSpikes) / (neuronCount * thirdSec);
+        net.lastThirdRateHz   = static_cast<float>(lastSpikes)   / (neuronCount * thirdSec);
+    }
+
 
     // -----------------------------------------------------------------------
     // 12. Sanitize — guard against any remaining NaN / Inf
@@ -565,6 +584,9 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
     net.irregularityIndex    = sanitize(net.irregularityIndex,    0.0f);
     net.earlyWindowRateHz    = sanitize(net.earlyWindowRateHz,    0.0f);
     net.lateWindowRateHz     = sanitize(net.lateWindowRateHz,     0.0f);
+    net.firstThirdRateHz     = sanitize(net.firstThirdRateHz,     0.0f);
+    net.middleThirdRateHz    = sanitize(net.middleThirdRateHz,    0.0f);
+    net.lastThirdRateHz      = sanitize(net.lastThirdRateHz,      0.0f);
     net.firingRateStdHz      = sanitize(net.firingRateStdHz,      0.0f);
     net.silentNeuronPct      = sanitize(net.silentNeuronPct,      0.0f);
     net.peakSynchronizationIndex = sanitize(net.peakSynchronizationIndex, 0.0f);

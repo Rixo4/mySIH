@@ -223,6 +223,9 @@ struct RunResult {
     float silentNeuronPct     = 0.0f;
     float earlyWindowRateHz   = 0.0f;
     float lateWindowRateHz    = 0.0f;
+    float firstThirdRateHz    = 0.0f;
+    float middleThirdRateHz   = 0.0f;
+    float lastThirdRateHz     = 0.0f;
 };
 
 struct AggregatedStats {
@@ -240,6 +243,9 @@ struct AggregatedStats {
     float meanSilentNeuronPct     = 0.0f;
     float meanEarlyWindowRateHz   = 0.0f;
     float meanLateWindowRateHz    = 0.0f;
+    float meanFirstThirdRateHz    = 0.0f;
+    float meanMiddleThirdRateHz   = 0.0f;
+    float meanLastThirdRateHz     = 0.0f;
 };
 
 struct SigmoidFitResult {
@@ -603,6 +609,7 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     if (results.empty()) return stats;
     std::vector<float> rates,syncs,bursts,burstRates,isis;
     std::vector<float> peakSyncs, burstingPcts, burstDurs, rateStds, silentPcts, earlyRates, lateRates;
+    std::vector<float> firstThirdRates, middleThirdRates, lastThirdRates;
     rates.reserve(results.size());      syncs.reserve(results.size());
     bursts.reserve(results.size());     isis.reserve(results.size());
     burstRates.reserve(results.size());
@@ -610,6 +617,9 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     burstDurs.reserve(results.size());  rateStds.reserve(results.size());
     silentPcts.reserve(results.size()); earlyRates.reserve(results.size());
     lateRates.reserve(results.size());
+    firstThirdRates.reserve(results.size());
+    middleThirdRates.reserve(results.size());
+    lastThirdRates.reserve(results.size());
 
     for (const auto& r : results) {
         rates.push_back(r.firingRate);
@@ -624,6 +634,9 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
         silentPcts.push_back(r.silentNeuronPct);
         earlyRates.push_back(r.earlyWindowRateHz);
         lateRates.push_back(r.lateWindowRateHz);
+        firstThirdRates.push_back(r.firstThirdRateHz);
+        middleThirdRates.push_back(r.middleThirdRateHz);
+        lastThirdRates.push_back(r.lastThirdRateHz);
     }
 
     stats.meanRate      = computeMean(rates);      stats.stdRate  = computeStd(rates,  stats.meanRate);
@@ -640,6 +653,9 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     stats.meanSilentNeuronPct   = computeMean(silentPcts);
     stats.meanEarlyWindowRateHz = computeMean(earlyRates);
     stats.meanLateWindowRateHz  = computeMean(lateRates);
+    stats.meanFirstThirdRateHz  = computeMean(firstThirdRates);
+    stats.meanMiddleThirdRateHz = computeMean(middleThirdRates);
+    stats.meanLastThirdRateHz   = computeMean(lastThirdRates);
 
     return stats;
 }
@@ -674,6 +690,18 @@ std::vector<RunResult> runMultipleSimulations(
         r.burstRateHz = s.network_metrics.burstRateHz;
         r.isiCV       = computeMeanIsiCv(s.neuron_metrics);
         r.popVariance = s.network_metrics.populationVariance;
+        // BUGFIX: same gap as the batched RunResult construction site --
+        // see the comment there.
+        r.peakSync            = s.network_metrics.peakSynchronizationIndex;
+        r.burstingNeuronPct   = s.network_metrics.burstingNeuronPct;
+        r.meanBurstDurationMs = s.network_metrics.meanBurstDurationMs;
+        r.firingRateStdHz     = s.network_metrics.firingRateStdHz;
+        r.silentNeuronPct     = s.network_metrics.silentNeuronPct;
+        r.earlyWindowRateHz   = s.network_metrics.earlyWindowRateHz;
+        r.lateWindowRateHz    = s.network_metrics.lateWindowRateHz;
+        r.firstThirdRateHz    = s.network_metrics.firstThirdRateHz;
+        r.middleThirdRateHz   = s.network_metrics.middleThirdRateHz;
+        r.lastThirdRateHz     = s.network_metrics.lastThirdRateHz;
         results.push_back(r);
     }
     return results;
@@ -757,6 +785,26 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
             rr.burstRateHz = netm.burstRateHz;
             rr.isiCV       = computeMeanIsiCv(nm);
             rr.popVariance = netm.populationVariance;
+            // BUGFIX: these 7 RunResult fields existed and were correctly
+            // averaged by computeStats()/AggregatedStats, but were never
+            // actually copied from netm here -- silently 0.0f in every
+            // RunResult ever built via this (the actual --dose-eval) path.
+            // Found while adding the Phase 3b early/late-window report
+            // lines (the first code to ever print meanEarlyWindowRateHz/
+            // meanLateWindowRateHz), but it affects more than those two --
+            // "Silent Neuron Δ" has read 0.0% in every report all session
+            // for the same reason, not because there were genuinely no
+            // silent neurons.
+            rr.peakSync            = netm.peakSynchronizationIndex;
+            rr.burstingNeuronPct   = netm.burstingNeuronPct;
+            rr.meanBurstDurationMs = netm.meanBurstDurationMs;
+            rr.firingRateStdHz     = netm.firingRateStdHz;
+            rr.silentNeuronPct     = netm.silentNeuronPct;
+            rr.earlyWindowRateHz   = netm.earlyWindowRateHz;
+            rr.lateWindowRateHz    = netm.lateWindowRateHz;
+            rr.firstThirdRateHz    = netm.firstThirdRateHz;
+            rr.middleThirdRateHz   = netm.middleThirdRateHz;
+            rr.lastThirdRateHz     = netm.lastThirdRateHz;
             perDoseResults[d].push_back(rr);
         }
     }
@@ -1229,16 +1277,33 @@ std::string buildDrugEvaluationReportText(
         aLine("NET Hill",                 formatRuntimeNumber(evalInput.config.hill_net));
         aLine("NET Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_net) + "x");
     }
-    // Phase 3b: GABA-A desensitization -- only meaningful (and only ever
-    // enabled) on a long-duration run, so flag the run's actual sim_time
-    // alongside it as a sanity check that the test was set up long enough
-    // to show anything (500ms default << 30s desensitization tau).
+    // Phase 3b: GABA-A desensitization config, only printed when configured.
     if (evalInput.config.desensitization_enabled) {
         aLine("GABA-A Desensitization", "ENABLED");
         aLine("  Desensitize Tau",      formatRuntimeNumber(evalInput.config.desensitization_tau_desense_ms) + " ms");
         aLine("  Recovery Tau",         formatRuntimeNumber(evalInput.config.desensitization_tau_recovery_ms) + " ms");
         aLine("  Max Attenuation",      formatRuntimeNumber(evalInput.config.desensitization_max_attenuation * 100.0) + "%");
         aLine("  Run Duration",         formatRuntimeNumber(evalInput.config.sim_time) + " ms");
+    }
+    // Early/Late-half firing rate split -- printed UNCONDITIONALLY (not
+    // gated on desensitization_enabled) so an ON run and an OFF run (or any
+    // long-duration run at all) can be directly compared using the exact
+    // same lines. The [Response Characteristics]/[Network Impact] sections
+    // elsewhere in this report compare ACROSS doses (dose[0] is always
+    // treated as baseline) -- meaningless for a single-dose test (dose[0]
+    // IS the tested dose, so "change vs baseline" trivially reads 0%).
+    // This is what actually shows a within-run effect: the run's own
+    // firing rate in the first half of sim_time vs the second half. Only
+    // worth reading for long runs (500ms default splits into two 250ms
+    // halves, far too short for any real biological process to show up);
+    // works for any drug, not just desensitization tests.
+    {
+        const double earlyHz = stabilityStats.meanEarlyWindowRateHz;
+        const double lateHz  = stabilityStats.meanLateWindowRateHz;
+        const double fadePct = (earlyHz > 1.0e-6) ? ((lateHz - earlyHz) / earlyHz * 100.0) : 0.0;
+        aLine("Early-Half Rate",   formatRuntimeNumber(earlyHz) + " Hz (first " + formatRuntimeNumber(evalInput.config.sim_time/2000.0) + "s)");
+        aLine("Late-Half Rate",    formatRuntimeNumber(lateHz)  + " Hz (last "  + formatRuntimeNumber(evalInput.config.sim_time/2000.0) + "s)");
+        aLine("Early/Late Change", formatRuntimeNumber(fadePct) + "% (rising = suppression easing over the run)");
     }
     aLine("Runs",              std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
@@ -1339,6 +1404,13 @@ std::string buildDrugEvaluationReportText(
     out << "[Network Impact at Peak Dose]\n";
     if (!report.analyzedDoses.empty()) {
         const auto& pk = report.analyzedDoses[peakIdx];
+        // Ground-truth absolute rate, unconditional (not gated behind the
+        // desensitization block) -- "Rate Change" below is only meaningful
+        // when dose[0] in the sweep is a true no-drug baseline; for a
+        // single-dose test (dose[0] IS the tested dose) it always reads 0%
+        // by construction, so this line is what actually tells you whether
+        // the network is firing at all.
+        aLine("Absolute Rate",     formatRuntimeNumber(stabilityStats.meanRate, 2) + " Hz");
         aLine("Rate Change",       formatRuntimeNumber(pk.rateChangePct, 1) + " %");
         aLine("Burst Rate Delta",  formatRuntimeNumber(pk.burstRateDelta, 2) + " Hz");
         aLine("Sync Delta",        formatRuntimeNumber(pk.syncDelta, 3));
@@ -1414,6 +1486,44 @@ std::string buildDrugEvaluationReportText(
         if (evalInput.config.ki_net < kReceptorInertThreshold) {
             printReportOnlyTransporter("NET", evalInput.config.ki_net, evalInput.config.hill_net, evalInput.config.max_extension_net);
         }
+        out << "\n--------------------------------------------------\n\n";
+    }
+
+    // Phase 3b: [Adaptation Profile], per PHASE3_PLAN.md §7's sample report
+    // (Short/Medium/Long-term tiers + a Tolerance Risk rating). Only
+    // printed when desensitization is actually configured -- meaningless
+    // otherwise (same reasoning as the Neurotransmitter Profile gate
+    // above). Uses the first/middle/last-third firing rate split
+    // (Metrics.cpp, added specifically for this section) rather than the
+    // coarser two-way early/late split shown unconditionally elsewhere in
+    // this report -- three tiers map directly onto the plan's Short/
+    // Medium/Long-term language instead of forcing a two-bucket read into
+    // a three-label report shape.
+    if (evalInput.config.desensitization_enabled) {
+        out << "[Adaptation Profile]\n";
+        const double firstHz  = stabilityStats.meanFirstThirdRateHz;
+        const double middleHz = stabilityStats.meanMiddleThirdRateHz;
+        const double lastHz   = stabilityStats.meanLastThirdRateHz;
+        const double midPct  = (firstHz > 1.0e-6) ? ((middleHz - firstHz) / firstHz * 100.0) : 0.0;
+        const double lastPct = (firstHz > 1.0e-6) ? ((lastHz  - firstHz) / firstHz * 100.0) : 0.0;
+        const double thirdMs = evalInput.config.sim_time / 3.0;
+        aLine("Short Term",  formatRuntimeNumber(firstHz)  + " Hz (0-" + formatRuntimeNumber(thirdMs/1000.0) + "s)");
+        aLine("Medium Term", formatRuntimeNumber(middleHz) + " Hz (" + formatRuntimeNumber(midPct) + "% vs short-term)");
+        aLine("Long Term",   formatRuntimeNumber(lastHz)   + " Hz (" + formatRuntimeNumber(lastPct) + "% vs short-term)");
+        // Tolerance-risk banding is a first-pass illustrative scale (not a
+        // literature-sourced threshold, same honest caveat as
+        // getStability()'s bands elsewhere in this file) -- based on the
+        // magnitude of the short-to-long-term rate swing. A RISING rate is
+        // the expected tolerance signature (GABA-A losing potency ->
+        // less suppression -> more firing); the magnitude bands just say
+        // how much of that signature showed up in this particular run.
+        const double absSwing = std::fabs(lastPct);
+        const std::string toleranceRisk =
+            (absSwing < 2.0) ? "LOW" : (absSwing < 5.0) ? "MODERATE" : "HIGH";
+        aLine("Tolerance Risk", toleranceRisk +
+              (lastPct > 0.05 ? " (rate rising -- classic tolerance signature)" :
+               lastPct < -0.05 ? " (rate falling -- not the expected tolerance direction)" :
+               " (no measurable drift)"));
         out << "\n--------------------------------------------------\n\n";
     }
 
