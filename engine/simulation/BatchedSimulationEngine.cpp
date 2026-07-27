@@ -303,6 +303,14 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     // dose.
     std::vector<drug::ReceptorConductanceModifiers> blockReceptorMods(blockCount_);
 
+    // Phase 3c: per-block neuromodulator gain modifiers (D1/D2/5-HT1A/
+    // 5-HT2A), recomputed once per timestep alongside blockReceptorMods --
+    // same "per-block since each block has its own dose" reasoning. All
+    // fields default to 1.0 (inert) via NeuromodulatorGainModifiers{}, so an
+    // unconfigured profile leaves gKEff/gMaxNMDA/adaptation/excitatory-weight
+    // exactly as they were before Phase 3c existed.
+    std::vector<synapse::NeuromodulatorGainModifiers> blockNeuromodMods(blockCount_);
+
     // Phase 3a: precompute per-neuron drug-modified decay kinetics ONCE
     // (not per timestep -- dose is fixed per block for the whole run). Only
     // built when a transporter-blocking mechanism is actually configured;
@@ -494,6 +502,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 };
             }
             blockReceptorMods[b] = drug::DrugModel::computeReceptorModifiers(receptorProfile_, effDose);
+            blockNeuromodMods[b] = drug::DrugModel::computeNeuromodulatorGainModifiers(receptorProfile_, effDose);
         }
 
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
@@ -511,15 +520,21 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             // above -- see the long comment in SimulationEngine::run() for
             // what each field means.
             const drug::ReceptorConductanceModifiers& rMods = blockReceptorMods[i / neuronsPerBlock_];
+            // Phase 3c: D1 boosts gMaxNMDA, D2 shrinks excitatory drive
+            // (release-probability proxy applied to both AMPA and NMDA --
+            // same "one glutamatergic release site drives both" reasoning
+            // already used for the receptor-conductance accumulator
+            // pattern, see Synapse.h). Inert (1.0) when unconfigured.
+            const synapse::NeuromodulatorGainModifiers& nMods = blockNeuromodMods[i / neuronsPerBlock_];
             synapticEff[i].gAMPAEff = std::clamp(
-                config_.gMaxAMPA * receptorConductances[i].gAMPA * rMods.ampaResidual,
+                config_.gMaxAMPA * receptorConductances[i].gAMPA * rMods.ampaResidual * nMods.excitatoryWeightScale,
                 0.0f,
                 config_.ampaConductanceCeiling
             );
             synapticEff[i].gGABAaEff =
                 config_.gMaxGABAa * receptorConductances[i].gGABAa * rMods.gabaAPotentiation;
             synapticEff[i].gNMDAEff =
-                config_.gMaxNMDA * receptorConductances[i].gNMDA * rMods.nmdaResidual;
+                config_.gMaxNMDA * nMods.gMaxNmdaScale * receptorConductances[i].gNMDA * rMods.nmdaResidual * nMods.excitatoryWeightScale;
             synapticEff[i].gGABAbEff =
                 config_.gMaxGABAb * receptorConductances[i].gGABAb +
                 config_.gMaxGABAbAgonist * rMods.gabaBAgonistActivation;
@@ -548,7 +563,11 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float safeGCa = (std::isfinite(population_.gCa[i]) && population_.gCa[i] > 0.0f) ? population_.gCa[i] : 0.0f;
 
             gNaEff[i] = std::max(0.05f * safeGNa, safeGNa * std::max(0.0f, 1.0f - blockNa));
-            gKEff[i]  = std::max(0.05f * safeGK,  safeGK  * (1.0f - blockK));
+            // Phase 3c: 5-HT1A increases / 5-HT2A decreases intrinsic K+
+            // conductance -- applied AFTER the existing Phase 1 channel-
+            // block reduction, as an independent multiplicative factor
+            // (nMods.gKEffScale == 1.0 when unconfigured, exact no-op).
+            gKEff[i]  = std::max(0.05f * safeGK,  safeGK  * (1.0f - blockK)) * nMods.gKEffScale;
             gCaEff[i] = std::max(0.02f * safeGCa, safeGCa * std::max(0.0f, 1.0f - blockCa));
         }
 
@@ -630,9 +649,16 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 ++blockSpikeCount[block];
                 results[block].spikeTimes[local].push_back(timeMs);
 
-                const float adaptStep = (population_.neuronType[i] == 1U)
+                // Phase 3c: D1 and 5-HT2A both shrink spike-frequency
+                // adaptation (see NeuromodulatorSystem.h header note) --
+                // applied as a per-block multiplicative scale on the
+                // increment step. nMods.adaptationScale == 1.0 when
+                // unconfigured, exact no-op.
+                const synapse::NeuromodulatorGainModifiers& nMods = blockNeuromodMods[i / neuronsPerBlock_];
+                const float adaptStep = ((population_.neuronType[i] == 1U)
                                             ? adaptationIncrement
-                                            : adaptationIncrement * adaptationInhibitoryScale;
+                                            : adaptationIncrement * adaptationInhibitoryScale)
+                                        * nMods.adaptationScale;
                 adaptationCurrent[i] = std::clamp(adaptationCurrent[i] + adaptStep, 0.0f, adaptationMaxCurrent);
             }
         }
