@@ -345,16 +345,15 @@ void validateConfig(const SimulationConfig& cfg) {
     if (cfg.noise_level < 0.0)   throw std::runtime_error("Noise level must be >= 0.");
     if (trim(cfg.output_folder).empty())
         throw std::runtime_error("Output folder cannot be empty.");
-    // Phase 3b: desensitization is CPU-only for now (see BatchedSimulationEngine.cpp
-    // -- the GPU batched kernel path returns before accumulateReceptorConductances
-    // is ever called, so it would silently ignore desensitization entirely rather
-    // than erroring). Fail loudly here instead of producing a misleading "ran fine,
-    // shows nothing" result -- same discipline as the SERT/DAT/NET report-only fix.
-    if (cfg.desensitization_enabled && cfg.use_cuda)
-        throw std::runtime_error(
-            "GABA-A desensitization is not yet implemented on GPU. Re-run with "
-            "SPP_FORCE_CPU=1 (or set use_cuda=false), otherwise it would be silently "
-            "skipped and the run wouldn't show any desensitization effect.");
+    // Phase 3b: desensitization is now mirrored to the GPU batched kernel
+    // (fusedBatchedStepKernel in NeuronUpdate.cu, same pattern as GAT1's
+    // tau-extension GPU port) -- NOT yet verified on real GPU hardware by
+    // this session, only compiled/reasoned through. The guard that used to
+    // live here (reject desensitization_enabled && use_cuda) is removed now
+    // that there's a real GPU implementation to fall through to, but treat
+    // the GPU path as implemented-but-unverified until a real CUDA run
+    // confirms it matches the CPU path's numbers, same caveat already
+    // documented for the rest of the receptor-conductance GPU mirror.
 }
 
 std::uint32_t makeSeed() {
