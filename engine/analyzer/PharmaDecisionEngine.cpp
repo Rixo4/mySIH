@@ -828,6 +828,8 @@ std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
         case MechanismSignature::NmdaBlock:       return "NMDA Receptor Block";
         case MechanismSignature::GabaAPotentiate: return "GABA-A Potentiation";
         case MechanismSignature::GabaBAgonist:    return "GABA-B Agonism";
+        // Phase 3a
+        case MechanismSignature::Gat1ReuptakeBlock: return "GABA Reuptake Block (GAT1)";
         default:                                  return "Unknown";
     }
 }

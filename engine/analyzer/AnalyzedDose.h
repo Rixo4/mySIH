@@ -30,7 +30,13 @@ enum class MechanismSignature {
     AmpaBlock,
     NmdaBlock,
     GabaAPotentiate,
-    GabaBAgonist
+    GabaBAgonist,
+    // Phase 3a: GAT1 reuptake block (tiagabine) -- a genuinely different
+    // axis from the four receptor mechanisms above (it extends a decay
+    // time constant, not a conductance/occupancy), but detectMechanism()
+    // still treats it as one more flat candidate on the same 0..1 scale,
+    // same reasoning as the Phase 2 receptor additions.
+    Gat1ReuptakeBlock
 };
 
 struct AnalyzedDose {
@@ -49,6 +55,7 @@ struct AnalyzedDose {
     float blockNmda       = 0.0f;
     float potentiateGabaA = 0.0f;
     float activateGabaB   = 0.0f;
+    float gat1ReuptakeBlock = 0.0f;
 
     RawMetrics metrics;
 

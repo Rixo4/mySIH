@@ -441,6 +441,30 @@ engine/simulation/SimulationEngine.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.s
 .PHONY : engine/simulation/SimulationEngine.cpp.s
 
+engine/synapse/ReuptakeTransporter.o: engine/synapse/ReuptakeTransporter.cpp.o
+.PHONY : engine/synapse/ReuptakeTransporter.o
+
+# target to build an object file
+engine/synapse/ReuptakeTransporter.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o
+.PHONY : engine/synapse/ReuptakeTransporter.cpp.o
+
+engine/synapse/ReuptakeTransporter.i: engine/synapse/ReuptakeTransporter.cpp.i
+.PHONY : engine/synapse/ReuptakeTransporter.i
+
+# target to preprocess a source file
+engine/synapse/ReuptakeTransporter.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.i
+.PHONY : engine/synapse/ReuptakeTransporter.cpp.i
+
+engine/synapse/ReuptakeTransporter.s: engine/synapse/ReuptakeTransporter.cpp.s
+.PHONY : engine/synapse/ReuptakeTransporter.s
+
+# target to generate assembly for a file
+engine/synapse/ReuptakeTransporter.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.s
+.PHONY : engine/synapse/ReuptakeTransporter.cpp.s
+
 engine/synapse/Synapse.o: engine/synapse/Synapse.cpp.o
 .PHONY : engine/synapse/Synapse.o
 
@@ -513,6 +537,9 @@ help:
 	@echo "... engine/simulation/SimulationEngine.o"
 	@echo "... engine/simulation/SimulationEngine.i"
 	@echo "... engine/simulation/SimulationEngine.s"
+	@echo "... engine/synapse/ReuptakeTransporter.o"
+	@echo "... engine/synapse/ReuptakeTransporter.i"
+	@echo "... engine/synapse/ReuptakeTransporter.s"
 	@echo "... engine/synapse/Synapse.o"
 	@echo "... engine/synapse/Synapse.i"
 	@echo "... engine/synapse/Synapse.s"

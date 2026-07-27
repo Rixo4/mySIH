@@ -1,13 +1,13 @@
 {
-  "drug_name": "Arbaclofen",
+  "drug_name": "Diazepam",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
   "receptors": {
-    "GABA_B": { "ec50": 0.1, "hill": 1.0 }
+    "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
   },
-  "dose_range": { "min": 0.0, "max": 0.5, "step": 0.05 },
-  "runs": 8
+  "dose_range": { "min": 0.0, "max": 0.03, "step": 0.003 },
+  "runs": 3
 }

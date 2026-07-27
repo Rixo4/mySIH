@@ -17,6 +17,11 @@ struct DoseObservation {
     float potentiateGabaA  = 0.0f;
     float activateGabaB    = 0.0f;
 
+    // Phase 3a: GAT1 reuptake-block occupancy (0..1), same Hill-occupancy
+    // scale as the fields above, so detectMechanism() can compare it
+    // directly. See AnalyzedDose.h.
+    float gat1ReuptakeBlock = 0.0f;
+
     RawMetrics metrics;
 };
 

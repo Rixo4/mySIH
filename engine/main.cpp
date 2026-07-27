@@ -741,6 +741,18 @@ DoseObservation buildDoseObservation(
         dF, static_cast<float>(input.config.ec50_gabaA), static_cast<float>(input.config.hill_gabaA)));
     o.activateGabaB = static_cast<float>(spp::drug::DrugModel::hillBlock(
         dF, static_cast<float>(input.config.ec50_gabaB), static_cast<float>(input.config.hill_gabaB)));
+    // Phase 3a: GAT1 reuptake-block occupancy, for NetworkAnalyzer::
+    // detectMechanism -- see AnalyzedDose.h/DoseObservation.h. Uses the raw
+    // Hill occupancy fraction (spp::synapse::transporterOccupancy), not the
+    // resulting tau fold-change, so it stays on the same 0..1 scale as the
+    // other seven candidates.
+    {
+        spp::synapse::TransporterDrugEffect gat1Effect;
+        gat1Effect.mechanism = spp::synapse::TransporterBlockType::Competitive;
+        gat1Effect.kiUm = static_cast<float>(input.config.ki_gat1);
+        gat1Effect.hill = static_cast<float>(input.config.hill_gat1);
+        o.gat1ReuptakeBlock = spp::synapse::transporterOccupancy(dF, gat1Effect);
+    }
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;
     o.metrics.peakSynchronizationIndex = metrics.peakSynchronizationIndex;

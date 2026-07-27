@@ -17,6 +17,7 @@ set(SPP_SOURCES
     engine/neuron/ReceptorModel.cpp
     engine/drug/DrugModel.cpp
     engine/synapse/Synapse.cpp
+    engine/synapse/ReuptakeTransporter.cpp
     engine/network/Network.cpp
     engine/simulation/SimulationEngine.cpp
     engine/simulation/BatchedSimulationEngine.cpp

@@ -1,0 +1,13 @@
+{
+  "drug_name": "Tiagabine",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "transporters": {
+    "GAT1": { "ki": 0.7, "hill": 1.0, "max_extension": 2.0 }
+  },
+  "dose_range": { "min": 0.0, "max": 3.5, "step": 0.35 },
+  "runs": 2
+}
