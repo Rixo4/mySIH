@@ -228,7 +228,15 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.gabaA.maxPotentiationFactor,
             static_cast<int>(receptorProfile_.gabaB.mechanism),
             receptorProfile_.gabaB.ec50,
-            receptorProfile_.gabaB.hill
+            receptorProfile_.gabaB.hill,
+            // Phase 3a: GAT1 reuptake block -- static_cast<int> works the
+            // same way, spp::synapse::TransporterBlockType's numeric values
+            // (None=0/Competitive=1/NonCompetitive=2) match the CUDA
+            // kernel's launchInfo.gat1Mechanism int expectations exactly.
+            static_cast<int>(receptorProfile_.gat1.mechanism),
+            receptorProfile_.gat1.kiUm,
+            receptorProfile_.gat1.hill,
+            receptorProfile_.gat1.maxExtensionFold
         );
 #endif
     }

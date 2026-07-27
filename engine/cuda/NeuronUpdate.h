@@ -68,6 +68,25 @@ struct BatchedStepLaunchInfo {
     int gabaBMechanism = 0;
     float gabaBEc50 = 1.0e9f;
     float gabaBHill = 1.0f;
+
+    // Phase 3a: GAT1 reuptake block (tiagabine) -- extends GABA-A's and
+    // GABA-B's decay time constant instead of touching gMax/occupancy, see
+    // engine/synapse/ReuptakeTransporter.h for the design rationale and
+    // engine/drug/ReceptorDrugProfile.h's TransporterAction for the CPU-side
+    // equivalent this mirrors. mechanism uses
+    // spp::synapse::TransporterBlockType's numeric values (0=None,
+    // 1=Competitive, 2=NonCompetitive) -- same static_cast-safe pattern as
+    // the receptor mechanism ints above. Unlike gMaxAMPA etc., there is no
+    // per-neuron override array on the GPU side -- since dose is already
+    // per-neuron (via drugParams) and gat1Ki/gat1Hill/gat1MaxExtensionFold
+    // are single scalars for the whole batch (one compound under test), the
+    // kernel computes each neuron's effective GABA-A/B decay factor and
+    // norm directly per-thread, same way it already computes
+    // gabaAPotentiation/nmdaResidual per-thread from a per-neuron dose.
+    int gat1Mechanism = 0;
+    float gat1KiUm = 1.0e9f;
+    float gat1Hill = 1.0f;
+    float gat1MaxExtensionFold = 1.0f;
 };
 
 struct BatchedStepDevicePointers {

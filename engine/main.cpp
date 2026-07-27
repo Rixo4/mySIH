@@ -136,6 +136,26 @@ struct SimulationConfig {
     double hill_gat1          = 1.0;
     double max_extension_gat1 = 1.0;
 
+    // Phase 3a, remaining 3 drugs (SSRI/cocaine/reboxetine): SERT/DAT/NET
+    // reuptake block. Serotonin/dopamine/norepinephrine have NO receptor
+    // current in this engine (that's Phase 3c's neuromodulator gain
+    // system, not built yet), so these three are REPORT-ONLY -- they
+    // produce real, literature-sourced occupancy/clearance-fold numbers in
+    // the Neurotransmitter Profile section, but deliberately no network/
+    // firing-rate effect, since there's no receptor for them to act on.
+    // Not wired into DoseObservation/AnalyzedDose/detectMechanism at all
+    // (unlike GAT1) -- they have no observable dynamics to attribute a
+    // mechanism signature to.
+    double ki_sert            = 1.0e9;
+    double hill_sert          = 1.0;
+    double max_extension_sert = 1.0;
+    double ki_dat             = 1.0e9;
+    double hill_dat           = 1.0;
+    double max_extension_dat  = 1.0;
+    double ki_net             = 1.0e9;
+    double hill_net           = 1.0;
+    double max_extension_net  = 1.0;
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
@@ -414,6 +434,30 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
         profile.gat1.kiUm             = static_cast<float>(cfg.ki_gat1);
         profile.gat1.hill             = static_cast<float>(cfg.hill_gat1);
         profile.gat1.maxExtensionFold = static_cast<float>(cfg.max_extension_gat1);
+    }
+
+    // Phase 3a: SERT/DAT/NET -- report-only (see SimulationConfig comment).
+    // Still wired into the profile with a real mechanism tag so
+    // DrugModel::computeReceptorKineticsModifiers can compute correct
+    // occupancy/fold numbers for the report; just never touches gMax or
+    // gets threaded into any conductance path.
+    if (cfg.ki_sert < kTransporterInertThreshold) {
+        profile.sert.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+        profile.sert.kiUm             = static_cast<float>(cfg.ki_sert);
+        profile.sert.hill             = static_cast<float>(cfg.hill_sert);
+        profile.sert.maxExtensionFold = static_cast<float>(cfg.max_extension_sert);
+    }
+    if (cfg.ki_dat < kTransporterInertThreshold) {
+        profile.dat.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+        profile.dat.kiUm             = static_cast<float>(cfg.ki_dat);
+        profile.dat.hill             = static_cast<float>(cfg.hill_dat);
+        profile.dat.maxExtensionFold = static_cast<float>(cfg.max_extension_dat);
+    }
+    if (cfg.ki_net < kTransporterInertThreshold) {
+        profile.net.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+        profile.net.kiUm             = static_cast<float>(cfg.ki_net);
+        profile.net.hill             = static_cast<float>(cfg.hill_net);
+        profile.net.maxExtensionFold = static_cast<float>(cfg.max_extension_net);
     }
 
     return profile;
@@ -920,6 +964,27 @@ static bool loadDrugConfigFromJsonFile(
             if(auto h=extractJsonNumber(c,"hill",gat1P);h) out.config.hill_gat1=*h;
             if(auto m=extractJsonNumber(c,"max_extension",gat1P);m) out.config.max_extension_gat1=*m;
         }
+        // Phase 3a, remaining 3 drugs: SERT/DAT/NET (report-only, see
+        // SimulationConfig comment) -- same "ki"/"hill"/"max_extension"
+        // keys as GAT1.
+        const auto sertP=c.find("\"SERT\"",trPos);
+        if(sertP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ki",sertP);n) out.config.ki_sert=*n;
+            if(auto h=extractJsonNumber(c,"hill",sertP);h) out.config.hill_sert=*h;
+            if(auto m=extractJsonNumber(c,"max_extension",sertP);m) out.config.max_extension_sert=*m;
+        }
+        const auto datP=c.find("\"DAT\"",trPos);
+        if(datP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ki",datP);n) out.config.ki_dat=*n;
+            if(auto h=extractJsonNumber(c,"hill",datP);h) out.config.hill_dat=*h;
+            if(auto m=extractJsonNumber(c,"max_extension",datP);m) out.config.max_extension_dat=*m;
+        }
+        const auto netP=c.find("\"NET\"",trPos);
+        if(netP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ki",netP);n) out.config.ki_net=*n;
+            if(auto h=extractJsonNumber(c,"hill",netP);h) out.config.hill_net=*h;
+            if(auto m=extractJsonNumber(c,"max_extension",netP);m) out.config.max_extension_net=*m;
+        }
     }
     const auto drP=c.find("\"dose_range\"");
     if(drP!=c.npos){
@@ -1084,6 +1149,23 @@ std::string buildDrugEvaluationReportText(
         aLine("GAT1 Hill",                formatRuntimeNumber(evalInput.config.hill_gat1));
         aLine("GAT1 Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_gat1) + "x");
     }
+    // Phase 3a: SERT/DAT/NET -- report-only, explicitly labeled as such so
+    // it's never mistaken for a drug with a real network effect.
+    if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+        aLine("SERT Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_sert) + " [report-only]");
+        aLine("SERT Hill",                formatRuntimeNumber(evalInput.config.hill_sert));
+        aLine("SERT Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_sert) + "x");
+    }
+    if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+        aLine("DAT Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_dat) + " [report-only]");
+        aLine("DAT Hill",                 formatRuntimeNumber(evalInput.config.hill_dat));
+        aLine("DAT Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_dat) + "x");
+    }
+    if (evalInput.config.ki_net < kReceptorInertThreshold) {
+        aLine("NET Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_net) + " [report-only]");
+        aLine("NET Hill",                 formatRuntimeNumber(evalInput.config.hill_net));
+        aLine("NET Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_net) + "x");
+    }
     aLine("Runs",              std::to_string(runCount));
     out << "\n--------------------------------------------------\n\n";
 
@@ -1091,6 +1173,85 @@ std::string buildDrugEvaluationReportText(
     aLine("Tested Range", fRange(report.minTestedDose, report.maxTestedDose));
     aLine("Step Size",    formatRuntimeNumber(report.stepDose));
     out << "\n--------------------------------------------------\n\n";
+
+    // Phase 3a: report-only transporters (SERT/DAT/NET) have NO receptor/
+    // channel pathway wired into the simulation at all -- confirmed by
+    // grep, nothing in BatchedSimulationEngine.cpp reads profile.sert/dat/
+    // net (see ReceptorDrugProfile.h's TransporterAction comment). So if
+    // none of the channels/AMPA/NMDA/GABA-A/GABA-B/GAT1 are configured,
+    // every "dose" in this run is mechanistically identical to a zero-drug
+    // baseline -- the only thing differing across doses is which random
+    // network seed got drawn (seed depends on dose index, see
+    // BatchedSimulationEngine's fixed baseSeed formula), so any apparent
+    // dose-response the classifier reports is pure sampling noise, not a
+    // real pharmacological signal. Letting that noise flow into the normal
+    // Response Characteristics/FINAL DECISION path produces a misleading
+    // verdict -- caught directly during Phase 3a validation, where
+    // reboxetine (zero simulated mechanism) randomly showed "NOT
+    // RECOMMENDED, HIGH RISK" from nothing but run-to-run seed variance.
+    // Fix: detect this case and print an honest, explicit notice instead.
+    constexpr double kChannelInertThreshold = 1.0e5;
+    const bool hasChannelEffect =
+            evalInput.config.ic50_na < kChannelInertThreshold ||
+            evalInput.config.ic50_k  < kChannelInertThreshold ||
+            evalInput.config.ic50_ca < kChannelInertThreshold;
+    const bool hasReceptorOrGat1Effect =
+            evalInput.config.ic50_ampa  < kReceptorInertThreshold ||
+            evalInput.config.ic50_nmda  < kReceptorInertThreshold ||
+            evalInput.config.ec50_gabaA < kReceptorInertThreshold ||
+            evalInput.config.ec50_gabaB < kReceptorInertThreshold ||
+            evalInput.config.ki_gat1    < kReceptorInertThreshold;
+    const bool hasAnyReportOnlyTransporter =
+            evalInput.config.ki_sert < kReceptorInertThreshold ||
+            evalInput.config.ki_dat  < kReceptorInertThreshold ||
+            evalInput.config.ki_net  < kReceptorInertThreshold;
+
+    if (!hasChannelEffect && !hasReceptorOrGat1Effect && hasAnyReportOnlyTransporter) {
+        out << "[Neurotransmitter Profile]\n";
+        const float peakDoseF = static_cast<float>(report.maxTestedDose);
+        const auto printReportOnlyTransporterEarly = [&](const char* label, double kiUm, double hill, double maxExtension) {
+            spp::synapse::TransporterDrugEffect effect;
+            effect.mechanism = spp::synapse::TransporterBlockType::Competitive;
+            effect.kiUm = static_cast<float>(kiUm);
+            effect.hill = static_cast<float>(hill);
+            effect.maxExtensionFold = static_cast<float>(maxExtension);
+            const float occupancy = spp::synapse::transporterOccupancy(peakDoseF, effect);
+            const float foldChange = spp::synapse::effectiveTauDecayMs(1.0f, peakDoseF, effect);
+            aLine(std::string(label) + " Reuptake Block",
+                  formatRuntimeNumber(occupancy * 100.0, 0) + " % (at max tested dose)");
+            aLine(std::string(label) + " Clearance Fold",
+                  formatRuntimeNumber(foldChange, 2) + "x baseline");
+        };
+        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+            printReportOnlyTransporterEarly("SERT", evalInput.config.ki_sert, evalInput.config.hill_sert, evalInput.config.max_extension_sert);
+        }
+        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+            printReportOnlyTransporterEarly("DAT", evalInput.config.ki_dat, evalInput.config.hill_dat, evalInput.config.max_extension_dat);
+        }
+        if (evalInput.config.ki_net < kReceptorInertThreshold) {
+            printReportOnlyTransporterEarly("NET", evalInput.config.ki_net, evalInput.config.hill_net, evalInput.config.max_extension_net);
+        }
+        out << "\n--------------------------------------------------\n\n";
+
+        out << "[FINAL DECISION]\n";
+        aLine("Recommendation", "NOT APPLICABLE");
+        aLine("Risk Level",     "N/A");
+        aLine("Mechanism",      "No receptor/current pathway modeled for this transmitter yet");
+        out << "Reason               : This drug's target transporter (serotonin/dopamine/\n"
+            << "                       norepinephrine reuptake) has no receptor current\n"
+            << "                       modeled in this engine yet -- that needs Phase 3c's\n"
+            << "                       neuromodulator gain system (D1/D2/5-HT1A/5-HT2A\n"
+            << "                       modulating gNa/K+/release probability), not built yet.\n"
+            << "                       The transporter pharmacology above (occupancy, clearance\n"
+            << "                       fold) is real and literature-sourced. Every other section\n"
+            << "                       of this report is SUPPRESSED here because this drug\n"
+            << "                       config has zero effect on the simulated network -- any\n"
+            << "                       apparent dose-response would be random seed noise, not a\n"
+            << "                       real pharmacological signal.\n";
+        aLine("Confidence", "N/A");
+        out << "==================================================\n";
+        return out.str();
+    }
 
     out << "[Response Characteristics]\n";
     aLine("Curve Type",       report.curveType);
@@ -1111,6 +1272,76 @@ std::string buildDrugEvaluationReportText(
         aLine("Silent Neuron Δ",   formatRuntimeNumber(pk.silentNeuronDelta, 1) + " %");
     }
     out << "\n--------------------------------------------------\n\n";
+
+    // Phase 3a: neurotransmitter profile -- only printed when a
+    // transporter-blocking mechanism is actually configured (same
+    // "don't print no-op lines" discipline as the receptor lines in
+    // [Drug Input]). GAT1 (tiagabine) has a real network pathway (GABA-A/
+    // GABA-B), so it gets clearance-in-milliseconds lines. SERT/DAT/NET
+    // (SSRI/cocaine/reboxetine) are report-only -- serotonin/dopamine/
+    // norepinephrine have no receptor current in this engine yet (Phase
+    // 3c), so there is no baseline tau to report a "clearance in ms"
+    // against; only occupancy and the resulting clearance FOLD-CHANGE are
+    // shown, each explicitly labeled [report-only, no network effect
+    // modeled] so it can never be mistaken for an observed drug effect.
+    // Values computed at the same peak dose used by [Network Impact at
+    // Peak Dose] above.
+    const bool anyTransporterConfigured =
+        evalInput.config.ki_gat1 < kReceptorInertThreshold ||
+        evalInput.config.ki_sert < kReceptorInertThreshold ||
+        evalInput.config.ki_dat  < kReceptorInertThreshold ||
+        evalInput.config.ki_net  < kReceptorInertThreshold;
+    if (anyTransporterConfigured) {
+        out << "[Neurotransmitter Profile]\n";
+        const double peakDoseForNt = report.analyzedDoses.empty() ? 0.0 : report.analyzedDoses[peakIdx].dose;
+        const float peakDoseF = static_cast<float>(peakDoseForNt);
+
+        if (evalInput.config.ki_gat1 < kReceptorInertThreshold) {
+            spp::synapse::TransporterDrugEffect gat1Effect;
+            gat1Effect.mechanism = spp::synapse::TransporterBlockType::Competitive;
+            gat1Effect.kiUm = static_cast<float>(evalInput.config.ki_gat1);
+            gat1Effect.hill = static_cast<float>(evalInput.config.hill_gat1);
+            gat1Effect.maxExtensionFold = static_cast<float>(evalInput.config.max_extension_gat1);
+
+            const float gat1Occupancy = spp::synapse::transporterOccupancy(peakDoseF, gat1Effect);
+            const float gabaAClearanceMs = spp::synapse::effectiveTauDecayMs(
+                spp::neuron::ReceptorKinetics::kGabaATauDecayMs, peakDoseF, gat1Effect);
+            const float gabaBClearanceMs = spp::synapse::effectiveTauDecayMs(
+                spp::neuron::ReceptorKinetics::kGabaBTauDecayMs, peakDoseF, gat1Effect);
+
+            aLine("GAT1 Reuptake Block", formatRuntimeNumber(gat1Occupancy * 100.0, 0) + " % (at peak dose)");
+            aLine("GABA-A Clearance",    formatRuntimeNumber(gabaAClearanceMs, 1) + "ms (vs "
+                  + formatRuntimeNumber(spp::neuron::ReceptorKinetics::kGabaATauDecayMs, 1) + "ms baseline)");
+            aLine("GABA-B Clearance",    formatRuntimeNumber(gabaBClearanceMs, 1) + "ms (vs "
+                  + formatRuntimeNumber(spp::neuron::ReceptorKinetics::kGabaBTauDecayMs, 1) + "ms baseline)");
+        }
+
+        const auto printReportOnlyTransporter = [&](const char* label, double kiUm, double hill, double maxExtension) {
+            spp::synapse::TransporterDrugEffect effect;
+            effect.mechanism = spp::synapse::TransporterBlockType::Competitive;
+            effect.kiUm = static_cast<float>(kiUm);
+            effect.hill = static_cast<float>(hill);
+            effect.maxExtensionFold = static_cast<float>(maxExtension);
+
+            const float occupancy = spp::synapse::transporterOccupancy(peakDoseF, effect);
+            const float foldChange = spp::synapse::effectiveTauDecayMs(1.0f, peakDoseF, effect);
+
+            aLine(std::string(label) + " Reuptake Block",
+                  formatRuntimeNumber(occupancy * 100.0, 0) + " % [report-only, no network effect modeled]");
+            aLine(std::string(label) + " Clearance Fold",
+                  formatRuntimeNumber(foldChange, 2) + "x baseline [report-only]");
+        };
+        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+            printReportOnlyTransporter("SERT", evalInput.config.ki_sert, evalInput.config.hill_sert, evalInput.config.max_extension_sert);
+        }
+        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+            printReportOnlyTransporter("DAT", evalInput.config.ki_dat, evalInput.config.hill_dat, evalInput.config.max_extension_dat);
+        }
+        if (evalInput.config.ki_net < kReceptorInertThreshold) {
+            printReportOnlyTransporter("NET", evalInput.config.ki_net, evalInput.config.hill_net, evalInput.config.max_extension_net);
+        }
+        out << "\n--------------------------------------------------\n\n";
+    }
 
     out << "[Safety Analysis]\n";
     aLine("Toxic Threshold",

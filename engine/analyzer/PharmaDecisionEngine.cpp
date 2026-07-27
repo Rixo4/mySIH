@@ -488,13 +488,27 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     }
 
     // ─── Step 3: Dominant mechanism ───────────────────────────────────────────
-    // PHASE2_PLAN.md step 5: extended from the original 4-way (Na/K/Ca/
-    // Mixed) tally to all 9 MechanismSignature values (Unknown + 8 real
-    // mechanisms), same "count occurrences across doses, pick the max"
-    // logic -- just over a bigger set now that
-    // NetworkAnalyzer::detectMechanism can return any of the four receptor
-    // signatures too.
-    std::array<int, 9> counts{};
+    // PHASE2_PLAN.md step 5 / Phase 3a: extended from the original 4-way
+    // (Na/K/Ca/Mixed) tally to all 10 MechanismSignature values (Unknown +
+    // 9 real mechanisms: Na/K/Ca/Mixed's 3 channel blocks + Mixed + AMPA/
+    // NMDA/GABA-A/GABA-B + Phase 3a's Gat1ReuptakeBlock), same "count
+    // occurrences across doses, pick the max" logic -- just over a bigger
+    // set now that NetworkAnalyzer::detectMechanism can return any of the
+    // five receptor/transporter signatures too.
+    // BUG FIX (tiagabine validation, Phase 3a): this was
+    // std::array<int, 9>, sized for the enum's count BEFORE
+    // Gat1ReuptakeBlock was added as its 10th value (index 9). Writing
+    // counts[indexOf(Gat1ReuptakeBlock)] (index 9) into a 9-element array
+    // (valid indices 0-8) was an out-of-bounds write -- undefined behavior,
+    // not just a wrong answer. This is exactly why tiagabine's per-dose
+    // labels correctly read "GABA Reuptake Block (GAT1)" (that's
+    // NetworkAnalyzer::detectMechanism, unaffected by this) while the
+    // report's top-level Mechanism/FINAL DECISION still said Unknown (that
+    // aggregation step's tally never validly recorded a single
+    // Gat1ReuptakeBlock vote). Any enum addition to MechanismSignature must
+    // keep this array's size in sync -- there is no compile-time check
+    // tying the two together.
+    std::array<int, 10> counts{};
     auto indexOf = [](MechanismSignature s) -> std::size_t {
         return static_cast<std::size_t>(s);
     };

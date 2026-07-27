@@ -113,7 +113,15 @@ public:
         float gabaAMaxPotentiation,
         int gabaBMechanism,
         float gabaBEc50,
-        float gabaBHill
+        float gabaBHill,
+        // Phase 3a: GAT1 reuptake block -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment. Mechanism ints match
+        // spp::synapse::TransporterBlockType (0=None, 1=Competitive,
+        // 2=NonCompetitive).
+        int gat1Mechanism,
+        float gat1KiUm,
+        float gat1Hill,
+        float gat1MaxExtensionFold
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

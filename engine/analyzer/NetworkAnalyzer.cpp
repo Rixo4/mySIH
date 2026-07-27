@@ -49,6 +49,7 @@ std::vector<AnalyzedDose> NetworkAnalyzer::analyze(
         analyzed.blockNmda       = obs.blockNmda;
         analyzed.potentiateGabaA = obs.potentiateGabaA;
         analyzed.activateGabaB   = obs.activateGabaB;
+        analyzed.gat1ReuptakeBlock = obs.gat1ReuptakeBlock;
         analyzed.metrics = obs.metrics;
 
         // Compute deltas vs baseline
@@ -244,14 +245,17 @@ MechanismSignature NetworkAnalyzer::detectMechanism(const AnalyzedDose& dose) {
     // hierarchies) is enough; a genuine channel+receptor combination drug
     // isn't part of that set and would just show up as Mixed here, which
     // is the correct fallback.
-    const std::array<std::pair<MechanismSignature, float>, 7> candidates{{
+    const std::array<std::pair<MechanismSignature, float>, 8> candidates{{
         {MechanismSignature::NaBlock,         dose.blockNa},
         {MechanismSignature::KBlock,          dose.blockK},
         {MechanismSignature::CaBlock,         dose.blockCa},
         {MechanismSignature::AmpaBlock,       dose.blockAmpa},
         {MechanismSignature::NmdaBlock,       dose.blockNmda},
         {MechanismSignature::GabaAPotentiate, dose.potentiateGabaA},
-        {MechanismSignature::GabaBAgonist,    dose.activateGabaB}
+        {MechanismSignature::GabaBAgonist,    dose.activateGabaB},
+        // Phase 3a: GAT1 reuptake block occupancy, same flat-candidate
+        // treatment as the Phase 2 receptor additions -- see AnalyzedDose.h.
+        {MechanismSignature::Gat1ReuptakeBlock, dose.gat1ReuptakeBlock}
     }};
 
     auto sorted = candidates;

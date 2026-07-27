@@ -452,19 +452,40 @@ __global__ void fusedBatchedStepKernel(
     // in device code as-is -- no host/device duplication needed).
     using namespace spp::neuron::ReceptorKinetics;
 
+    // Phase 3a: GAT1 reuptake block (tiagabine) -- extends GABA-A's and
+    // GABA-B's decay time constant by a dose-dependent bounded fold, same
+    // Hill-occupancy math as the channel/receptor mechanisms below, just
+    // applied to a kinetic time constant instead of a conductance. Mirrors
+    // DrugModel::computeReceptorKineticsModifiers (CPU) exactly. No
+    // per-neuron override array needed here (unlike the CPU
+    // ReceptorKineticsOverride) -- dose is already per-neuron via drug[6],
+    // and gat1KiUm/gat1Hill/gat1MaxExtensionFold are shared scalars for the
+    // whole batch (one compound under test), so each thread just computes
+    // its own effective tau inline from its own dose. Rise kinetics are
+    // never drug-modified (see ReuptakeTransporter.h design note).
+    float gabaATauDecayEff = kGabaATauDecayMs;
+    float gabaBTauDecayEff = kGabaBTauDecayMs;
+    if (launchInfo.gat1Mechanism != 0) {
+        const float gat1Occupancy = hillBlockDevice(dose, launchInfo.gat1KiUm, launchInfo.gat1Hill);
+        const float gat1Ceiling = fmaxf(1.0f, launchInfo.gat1MaxExtensionFold);
+        const float gat1Fold = 1.0f + (gat1Ceiling - 1.0f) * gat1Occupancy;
+        gabaATauDecayEff = kGabaATauDecayMs * gat1Fold;
+        gabaBTauDecayEff = kGabaBTauDecayMs * gat1Fold;
+    }
+
     const float ampaDecayF  = expf(-launchInfo.dtMs / kAmpaTauDecayMs);
     const float ampaRiseF   = expf(-launchInfo.dtMs / kAmpaTauRiseMs);
     const float nmdaDecayF  = expf(-launchInfo.dtMs / kNmdaTauDecayMs);
     const float nmdaRiseF   = expf(-launchInfo.dtMs / kNmdaTauRiseMs);
-    const float gabaADecayF = expf(-launchInfo.dtMs / kGabaATauDecayMs);
+    const float gabaADecayF = expf(-launchInfo.dtMs / gabaATauDecayEff);
     const float gabaARiseF  = expf(-launchInfo.dtMs / kGabaATauRiseMs);
-    const float gabaBDecayF = expf(-launchInfo.dtMs / kGabaBTauDecayMs);
+    const float gabaBDecayF = expf(-launchInfo.dtMs / gabaBTauDecayEff);
     const float gabaBRiseF  = expf(-launchInfo.dtMs / kGabaBTauRiseMs);
 
     const float ampaNorm  = dualExpNormFactorDevice(kAmpaTauRiseMs, kAmpaTauDecayMs);
     const float nmdaNorm  = dualExpNormFactorDevice(kNmdaTauRiseMs, kNmdaTauDecayMs);
-    const float gabaANorm = dualExpNormFactorDevice(kGabaATauRiseMs, kGabaATauDecayMs);
-    const float gabaBNorm = dualExpNormFactorDevice(kGabaBTauRiseMs, kGabaBTauDecayMs);
+    const float gabaANorm = dualExpNormFactorDevice(kGabaATauRiseMs, gabaATauDecayEff);
+    const float gabaBNorm = dualExpNormFactorDevice(kGabaBTauRiseMs, gabaBTauDecayEff);
 
     const float ampaDecayAcc  = devicePointers.receptorAmpaDecay[i]  * ampaDecayF  + iExcPulse;
     const float ampaRiseAcc   = devicePointers.receptorAmpaRise[i]   * ampaRiseF   + iExcPulse;
@@ -833,6 +854,13 @@ struct CudaSimulator::DeviceBuffers {
     float batchedGabaBEc50 = 1.0e9f;
     float batchedGabaBHill = 1.0f;
 
+    // Phase 3a: GAT1 reuptake block -- same storage pattern as the
+    // receptor fields above.
+    int batchedGat1Mechanism = 0;
+    float batchedGat1KiUm = 1.0e9f;
+    float batchedGat1Hill = 1.0f;
+    float batchedGat1MaxExtensionFold = 1.0f;
+
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
     std::size_t batchedBatchWindowSteps = 0;
@@ -1196,7 +1224,13 @@ void CudaSimulator::initializeBatchedSimulation(
     float gabaAMaxPotentiation,
     int gabaBMechanism,
     float gabaBEc50,
-    float gabaBHill
+    float gabaBHill,
+    // Phase 3a: GAT1 reuptake block -- see NeuronUpdate.h's
+    // BatchedStepLaunchInfo comment.
+    int gat1Mechanism,
+    float gat1KiUm,
+    float gat1Hill,
+    float gat1MaxExtensionFold
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1278,6 +1312,10 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedGabaBMechanism = gabaBMechanism;
     buffers_->batchedGabaBEc50 = gabaBEc50;
     buffers_->batchedGabaBHill = gabaBHill;
+    buffers_->batchedGat1Mechanism = gat1Mechanism;
+    buffers_->batchedGat1KiUm = gat1KiUm;
+    buffers_->batchedGat1Hill = gat1Hill;
+    buffers_->batchedGat1MaxExtensionFold = gat1MaxExtensionFold;
 
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
@@ -1378,6 +1416,10 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.gabaBMechanism = buffers_->batchedGabaBMechanism;
     launchInfo.gabaBEc50 = buffers_->batchedGabaBEc50;
     launchInfo.gabaBHill = buffers_->batchedGabaBHill;
+    launchInfo.gat1Mechanism = buffers_->batchedGat1Mechanism;
+    launchInfo.gat1KiUm = buffers_->batchedGat1KiUm;
+    launchInfo.gat1Hill = buffers_->batchedGat1Hill;
+    launchInfo.gat1MaxExtensionFold = buffers_->batchedGat1MaxExtensionFold;
 
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;

@@ -9,5 +9,5 @@
     "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
   },
   "dose_range": { "min": 0.0, "max": 0.03, "step": 0.003 },
-  "runs": 3
+  "runs": 10
 }
