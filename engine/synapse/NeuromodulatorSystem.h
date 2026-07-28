@@ -137,11 +137,20 @@ struct NeuromodulatorGainModifiers {
 float neuromodulatorOccupancy(float dose, float ec50, float hill);
 
 // Composes all four receptors' contributions into one set of gain
-// modifiers. Dose=0 or a fully-inert profile returns NeuromodulatorGainModifiers{}
-// (all 1.0) exactly -- see DrugModel.cpp's call site for how this gets
-// applied per-block per-timestep.
+// modifiers. Takes TWO doses rather than one -- see ReuptakeTransporter.h's
+// amplifiedDoseUm comment: SERT/DAT reuptake block (Phase 3a) amplifies the
+// EFFECTIVE dose the corresponding receptor "sees", and since SERT only
+// touches serotonin (5-HT1A/5-HT2A) while DAT only touches dopamine
+// (D1/D2), the two systems can have genuinely different effective doses
+// once a transporter-blocking drug is layered on top of a direct
+// receptor-agonist dose. doseForDopamine and doseForSerotonin are identical
+// (both equal to the raw dose) whenever no SERT/DAT transporter block is
+// configured -- see DrugModel::computeNeuromodulatorGainModifiers for where
+// the amplification is actually computed. Dose=0 or a fully-inert profile
+// returns NeuromodulatorGainModifiers{} (all 1.0) exactly.
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
-    float dose,
+    float doseForDopamine,
+    float doseForSerotonin,
     const NeuromodulatorProfile& profile
 );
 
