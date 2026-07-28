@@ -125,6 +125,24 @@ struct BatchedStepLaunchInfo {
     float ht2aHill = 1.0f;
     float ht2aMaxKReductionFrac = 0.0f;
     float ht2aMaxAdaptationReductionFrac = 0.0f;
+
+    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification -- see
+    // ReuptakeTransporter.h's amplifiedDoseUm and NeuromodulatorSystem.h's
+    // two-dose computeNeuromodulatorGainModifiers comment. DAT amplifies
+    // the dose D1/D2 see; SERT amplifies the dose 5-HT1A/5-HT2A see.
+    // Mechanism ints match spp::synapse::TransporterBlockType (0=None,
+    // 1=Competitive, 2=NonCompetitive), same encoding as gat1Mechanism
+    // above. No per-neuron override array needed, same reasoning as
+    // gat1Ki/gat1Hill (dose is already per-neuron; these are shared scalars
+    // for the whole batch).
+    int sertMechanism = 0;
+    float sertKiUm = 1.0e9f;
+    float sertHill = 1.0f;
+    float sertMaxExtensionFold = 1.0f;
+    int datMechanism = 0;
+    float datKiUm = 1.0e9f;
+    float datHill = 1.0f;
+    float datMaxExtensionFold = 1.0f;
 };
 
 struct BatchedStepDevicePointers {
