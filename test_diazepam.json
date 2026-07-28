@@ -1,13 +1,13 @@
 {
-  "drug_name": "Diazepam",
+  "drug_name": "DOI (5-HT2A agonist)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "receptors": {
-    "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
+  "neuromodulators": {
+    "5HT2A": { "ec50": 0.0026, "hill": 1.0, "max_k_reduction": 0.02, "max_adaptation_reduction": 0.02 }
   },
-  "dose_range": { "min": 0.0, "max": 0.03, "step": 0.003 },
+  "dose_range": { "min": 0.0, "max": 0.01, "step": 0.001 },
   "runs": 10
 }

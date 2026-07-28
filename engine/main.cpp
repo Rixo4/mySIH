@@ -1527,7 +1527,17 @@ std::string buildDrugEvaluationReportText(
     aLine("Response Mode",    report.responseMode);
     aLine("Mechanism",        report.mechanismText);
     aLine("Model Fit (R^2)", formatRuntimeNumber(report.sigmoidR2, 2));
-    aLine("Max Effect",       formatRuntimeNumber(maxEffect*100.0, 0) + " %");
+    // BUG FIX: this used to print `maxEffect*100.0` -- a locally-computed
+    // weighted composite (rateDrive/burstDrive/irregDrive) that is a
+    // DIFFERENT number from the one PharmaDecisionEngine actually gates the
+    // NOT RECOMMENDED/excitatory verdict against. Found via a DOI/5-HT2A
+    // test that printed "Max Effect: 8%, Weak" directly above "NOT
+    // RECOMMENDED / HIGH RISK" -- the real decision-driving value was
+    // 11.3% (raw rate change), which crossed the 10% threshold the
+    // displayed 8% made it look like the drug was safely under. Now prints
+    // the same value the decision was actually made from. See
+    // PharmaDecisionEngine.h's decisionMaxEffectPct comment.
+    aLine("Max Effect",       formatRuntimeNumber(report.decisionMaxEffectPct, 0) + " %");
     aLine("Response Strength",report.responseStrength);
     out << "\n--------------------------------------------------\n\n";
 

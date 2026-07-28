@@ -702,6 +702,12 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         (report.responseMode == "EXCITATORY_RESPONSE" && maxEffectPct > 10.0);
     const bool stabilizing = report.responseMode == "STABILIZING_RESPONSE";
 
+    // Expose the exact value the `excitatory` gate above was just computed
+    // against, so main.cpp can print this SAME number instead of a
+    // differently-formulated "Max Effect" that can silently disagree with
+    // it (see PharmaDecisionEngine.h's decisionMaxEffectPct comment).
+    report.decisionMaxEffectPct = static_cast<float>(maxEffectPct);
+
     // The narrow-margin carve-out only applies to the suppression/"dangerous"
     // path, not to excitatory or before-therapy toxicity -- those never have
     // a real window to measure a margin from (see hasQualifyingWindow above,

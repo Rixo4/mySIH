@@ -99,6 +99,20 @@ struct PharmaDecisionReport {
     float peakEarlyWarningIndex     = 0.0f;
     float maxSeizureSlopePctPerDose = 0.0f;
 
+    // BUG FIX: the report used to print a DIFFERENT "Max Effect" number
+    // (main.cpp's own weighted composite of rateDrive/burstDrive/irregDrive)
+    // than the one this file actually gates the `excitatory` recommendation
+    // bool against (raw rateChangePct-derived effMag, see evaluate()'s
+    // maxEffectPct local). Found via a DOI/5-HT2A test showing "Max Effect:
+    // 8%, Weak" printed directly next to "NOT RECOMMENDED / HIGH RISK" --
+    // the two numbers disagreed on which side of the 10% notable-effect
+    // threshold the drug fell on (displayed 8% < 10%, but the actual
+    // decision-driving raw rate change was 11.3% > 10%), producing a report
+    // that visibly contradicted its own verdict. Exposing the real
+    // decision-driving value here so main.cpp can print the SAME number it
+    // was silently deciding on instead of recomputing an unrelated one.
+    float decisionMaxEffectPct      = 0.0f;
+
     // Stabilization metrics (Ca-block)
     double syncReductionPct       = 0.0;
     double seizureReductionPct    = 0.0;
