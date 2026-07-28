@@ -96,4 +96,21 @@ float transporterOccupancy(float doseUm, const TransporterDrugEffect& drug);
 // mechanism=None (exact baseline preservation by construction).
 float effectiveTauDecayMs(float tauBaselineMs, float doseUm, const TransporterDrugEffect& drug);
 
+// Phase 3c retrofit: SERT/DAT reuptake block now has a real receptor system
+// to act on (D1/D2/5-HT1A/5-HT2A neuromodulator gain, built this session --
+// see NeuromodulatorSystem.h), but unlike GABA-A/GABA-B/AMPA/NMDA there is
+// no decay-tau construct for dopamine/serotonin signaling to extend (the
+// neuromodulator gain system is a stateless Hill-occupancy function of dose,
+// not a spike-triggered decaying conductance). So the analogous, equally
+// bounded mechanism here is dose amplification: reuptake block makes the
+// corresponding receptor(s) act as if they're seeing a higher effective
+// dose, representing "more transmitter lingers around per unit exogenous
+// drug because it isn't being cleared as fast." Same Hill-occupancy math
+// and the same maxExtensionFold ceiling field as effectiveTauDecayMs above,
+// just a different downstream target. Returns doseUm unchanged at dose<=0
+// or mechanism=None (exact baseline preservation by construction) -- NET
+// still has no receptor system at all, so this is only meaningful for
+// SERT (feeds 5-HT1A/5-HT2A) and DAT (feeds D1/D2).
+float amplifiedDoseUm(float doseUm, const TransporterDrugEffect& drug);
+
 } // namespace spp::synapse

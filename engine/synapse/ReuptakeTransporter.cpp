@@ -67,4 +67,14 @@ float effectiveTauDecayMs(float tauBaselineMs, float doseUm, const TransporterDr
     return tauBaselineMs * fold;
 }
 
+float amplifiedDoseUm(float doseUm, const TransporterDrugEffect& drug) {
+    if (drug.mechanism == TransporterBlockType::None) {
+        return doseUm; // exact baseline preservation, no drift
+    }
+    const float occupancy = transporterOccupancy(doseUm, drug);
+    const float ceiling = std::max(1.0f, drug.maxExtensionFold);
+    const float fold = 1.0f + (ceiling - 1.0f) * occupancy;
+    return doseUm * fold;
+}
+
 } // namespace spp::synapse
