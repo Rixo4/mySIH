@@ -128,7 +128,25 @@ public:
         bool desensitizationEnabled,
         float desensitizationTauDesenseMs,
         float desensitizationTauRecoveryMs,
-        float desensitizationMaxAttenuation
+        float desensitizationMaxAttenuation,
+        // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A) -- see
+        // NeuronUpdate.h's BatchedStepLaunchInfo comment / NeuromodulatorSystem.h
+        // for the design and citations. Stateless (no persistent per-neuron
+        // buffer, unlike desensitization above).
+        float d1Ec50,
+        float d1Hill,
+        float d1MaxAdaptationReductionFrac,
+        float d1MaxNmdaGainFold,
+        float d2Ec50,
+        float d2Hill,
+        float d2MaxReleaseReductionFrac,
+        float ht1aEc50,
+        float ht1aHill,
+        float ht1aMaxKGainFold,
+        float ht2aEc50,
+        float ht2aHill,
+        float ht2aMaxKReductionFrac,
+        float ht2aMaxAdaptationReductionFrac
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

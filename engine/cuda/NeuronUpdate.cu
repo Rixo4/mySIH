@@ -440,8 +440,47 @@ __global__ void fusedBatchedStepKernel(
     const float blockCa = hillBlockDevice(dose, drug[2], drug[5]);
 
     const float gNaEff = fmaxf(0.05f * safeGNa, safeGNa * fmaxf(0.0f, 1.0f - blockNa));
-    const float gKEff = fmaxf(0.05f * safeGK, safeGK * (1.0f - blockK));
     const float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
+
+    // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A) -- mirrors
+    // DrugModel::computeNeuromodulatorGainModifiers (CPU,
+    // NeuromodulatorSystem.cpp) exactly, computed per-thread from this
+    // neuron's own `dose` (already available above for channel block).
+    // All four scale factors default to 1.0 when unconfigured (ec50=1e9,
+    // ceilings inert), same bit-identical-no-op-by-construction discipline
+    // as every other Phase 1/2/3 mechanism.
+    float nmodGKEffScale = 1.0f;
+    float nmodGMaxNmdaScale = 1.0f;
+    float nmodAdaptationScale = 1.0f;
+    float nmodExcitatoryWeightScale = 1.0f;
+    {
+        // D1: shrinks adaptation current, boosts NMDA gain.
+        const float d1Occ = hillBlockDevice(dose, launchInfo.d1Ec50, launchInfo.d1Hill);
+        const float d1AdaptFrac = clamp01(launchInfo.d1MaxAdaptationReductionFrac);
+        const float d1NmdaCeiling = fmaxf(1.0f, launchInfo.d1MaxNmdaGainFold);
+        nmodAdaptationScale *= (1.0f - d1AdaptFrac * d1Occ);
+        nmodGMaxNmdaScale   *= (1.0f + (d1NmdaCeiling - 1.0f) * d1Occ);
+
+        // D2: shrinks excitatory synaptic weight (release-probability proxy).
+        const float d2Occ = hillBlockDevice(dose, launchInfo.d2Ec50, launchInfo.d2Hill);
+        const float d2ReleaseFrac = clamp01(launchInfo.d2MaxReleaseReductionFrac);
+        nmodExcitatoryWeightScale *= (1.0f - d2ReleaseFrac * d2Occ);
+
+        // 5-HT1A: boosts gKEff (GIRK-mediated hyperpolarization).
+        const float ht1aOcc = hillBlockDevice(dose, launchInfo.ht1aEc50, launchInfo.ht1aHill);
+        const float ht1aKCeiling = fmaxf(1.0f, launchInfo.ht1aMaxKGainFold);
+        nmodGKEffScale *= (1.0f + (ht1aKCeiling - 1.0f) * ht1aOcc);
+
+        // 5-HT2A: shrinks gKEff (reduced K+ leak) AND shrinks adaptation
+        // (reduced IAHP).
+        const float ht2aOcc = hillBlockDevice(dose, launchInfo.ht2aEc50, launchInfo.ht2aHill);
+        const float ht2aKReductionFrac = clamp01(launchInfo.ht2aMaxKReductionFrac);
+        const float ht2aAdaptFrac = clamp01(launchInfo.ht2aMaxAdaptationReductionFrac);
+        nmodGKEffScale      *= (1.0f - ht2aKReductionFrac * ht2aOcc);
+        nmodAdaptationScale *= (1.0f - ht2aAdaptFrac * ht2aOcc);
+    }
+
+    const float gKEff = fmaxf(0.05f * safeGK, safeGK * (1.0f - blockK)) * nmodGKEffScale;
 
     // PHASE2_PLAN.md step 6: per-receptor conductance accumulation, mirrors
     // Synapse.cpp::accumulateReceptorConductances exactly -- same "decay
@@ -556,9 +595,9 @@ __global__ void fusedBatchedStepKernel(
     // CPU fallback loop (synapticEff[i].gXEff assignments).
     const float gAMPAEff = fminf(
         launchInfo.ampaConductanceCeiling,
-        fmaxf(0.0f, launchInfo.gMaxAMPA * gAMPARaw * ampaResidual)
+        fmaxf(0.0f, launchInfo.gMaxAMPA * gAMPARaw * ampaResidual * nmodExcitatoryWeightScale)
     );
-    const float gNMDAEff = launchInfo.gMaxNMDA * gNMDARaw * nmdaResidual;
+    const float gNMDAEff = launchInfo.gMaxNMDA * nmodGMaxNmdaScale * gNMDARaw * nmdaResidual * nmodExcitatoryWeightScale;
     const float gGABAaEff = launchInfo.gMaxGABAa * gGABAaFinal * gabaAPotentiation;
     const float gGABAbEff = launchInfo.gMaxGABAb * gGABAbRaw +
                              launchInfo.gMaxGABAbAgonist * gabaBAgonistActivation;
@@ -599,9 +638,10 @@ __global__ void fusedBatchedStepKernel(
     );
 
     if (spike != 0U) {
-        const float adaptStep = (devicePointers.neuronType[i] == 1U)
+        const float adaptStep = ((devicePointers.neuronType[i] == 1U)
                                     ? launchInfo.adaptationIncrement
-                                    : launchInfo.adaptationIncrement * launchInfo.adaptationInhibitoryScale;
+                                    : launchInfo.adaptationIncrement * launchInfo.adaptationInhibitoryScale)
+                                    * nmodAdaptationScale;
         adapt = fminf(launchInfo.adaptationMaxCurrent, fmaxf(0.0f, adapt + adaptStep));
     }
 
@@ -887,6 +927,24 @@ struct CudaSimulator::DeviceBuffers {
     float batchedDesensitizationTauDesenseMs = 30000.0f;
     float batchedDesensitizationTauRecoveryMs = 124000.0f;
     float batchedDesensitizationMaxAttenuation = 0.9f;
+
+    // Phase 3c: neuromodulator gain -- stateless (no persistent per-neuron
+    // buffer, unlike desensitization above), same shared-scalar storage
+    // pattern as the GAT1 fields.
+    float batchedD1Ec50 = 1.0e9f;
+    float batchedD1Hill = 1.0f;
+    float batchedD1MaxAdaptationReductionFrac = 0.0f;
+    float batchedD1MaxNmdaGainFold = 1.0f;
+    float batchedD2Ec50 = 1.0e9f;
+    float batchedD2Hill = 1.0f;
+    float batchedD2MaxReleaseReductionFrac = 0.0f;
+    float batchedHt1aEc50 = 1.0e9f;
+    float batchedHt1aHill = 1.0f;
+    float batchedHt1aMaxKGainFold = 1.0f;
+    float batchedHt2aEc50 = 1.0e9f;
+    float batchedHt2aHill = 1.0f;
+    float batchedHt2aMaxKReductionFrac = 0.0f;
+    float batchedHt2aMaxAdaptationReductionFrac = 0.0f;
 
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
@@ -1265,7 +1323,24 @@ void CudaSimulator::initializeBatchedSimulation(
     bool desensitizationEnabled,
     float desensitizationTauDesenseMs,
     float desensitizationTauRecoveryMs,
-    float desensitizationMaxAttenuation
+    float desensitizationMaxAttenuation,
+    // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A) -- see
+    // NeuronUpdate.h's BatchedStepLaunchInfo comment / NeuromodulatorSystem.h
+    // for the design.
+    float d1Ec50,
+    float d1Hill,
+    float d1MaxAdaptationReductionFrac,
+    float d1MaxNmdaGainFold,
+    float d2Ec50,
+    float d2Hill,
+    float d2MaxReleaseReductionFrac,
+    float ht1aEc50,
+    float ht1aHill,
+    float ht1aMaxKGainFold,
+    float ht2aEc50,
+    float ht2aHill,
+    float ht2aMaxKReductionFrac,
+    float ht2aMaxAdaptationReductionFrac
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1356,6 +1431,20 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedDesensitizationTauDesenseMs = desensitizationTauDesenseMs;
     buffers_->batchedDesensitizationTauRecoveryMs = desensitizationTauRecoveryMs;
     buffers_->batchedDesensitizationMaxAttenuation = desensitizationMaxAttenuation;
+    buffers_->batchedD1Ec50 = d1Ec50;
+    buffers_->batchedD1Hill = d1Hill;
+    buffers_->batchedD1MaxAdaptationReductionFrac = d1MaxAdaptationReductionFrac;
+    buffers_->batchedD1MaxNmdaGainFold = d1MaxNmdaGainFold;
+    buffers_->batchedD2Ec50 = d2Ec50;
+    buffers_->batchedD2Hill = d2Hill;
+    buffers_->batchedD2MaxReleaseReductionFrac = d2MaxReleaseReductionFrac;
+    buffers_->batchedHt1aEc50 = ht1aEc50;
+    buffers_->batchedHt1aHill = ht1aHill;
+    buffers_->batchedHt1aMaxKGainFold = ht1aMaxKGainFold;
+    buffers_->batchedHt2aEc50 = ht2aEc50;
+    buffers_->batchedHt2aHill = ht2aHill;
+    buffers_->batchedHt2aMaxKReductionFrac = ht2aMaxKReductionFrac;
+    buffers_->batchedHt2aMaxAdaptationReductionFrac = ht2aMaxAdaptationReductionFrac;
 
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
@@ -1470,6 +1559,20 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.desensitizationTauDesenseMs = buffers_->batchedDesensitizationTauDesenseMs;
     launchInfo.desensitizationTauRecoveryMs = buffers_->batchedDesensitizationTauRecoveryMs;
     launchInfo.desensitizationMaxAttenuation = buffers_->batchedDesensitizationMaxAttenuation;
+    launchInfo.d1Ec50 = buffers_->batchedD1Ec50;
+    launchInfo.d1Hill = buffers_->batchedD1Hill;
+    launchInfo.d1MaxAdaptationReductionFrac = buffers_->batchedD1MaxAdaptationReductionFrac;
+    launchInfo.d1MaxNmdaGainFold = buffers_->batchedD1MaxNmdaGainFold;
+    launchInfo.d2Ec50 = buffers_->batchedD2Ec50;
+    launchInfo.d2Hill = buffers_->batchedD2Hill;
+    launchInfo.d2MaxReleaseReductionFrac = buffers_->batchedD2MaxReleaseReductionFrac;
+    launchInfo.ht1aEc50 = buffers_->batchedHt1aEc50;
+    launchInfo.ht1aHill = buffers_->batchedHt1aHill;
+    launchInfo.ht1aMaxKGainFold = buffers_->batchedHt1aMaxKGainFold;
+    launchInfo.ht2aEc50 = buffers_->batchedHt2aEc50;
+    launchInfo.ht2aHill = buffers_->batchedHt2aHill;
+    launchInfo.ht2aMaxKReductionFrac = buffers_->batchedHt2aMaxKReductionFrac;
+    launchInfo.ht2aMaxAdaptationReductionFrac = buffers_->batchedHt2aMaxAdaptationReductionFrac;
 
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;

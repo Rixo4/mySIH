@@ -242,7 +242,24 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             config_.desensitizationEnabled,
             config_.desensitizationTauDesenseMs,
             config_.desensitizationTauRecoveryMs,
-            config_.desensitizationMaxAttenuation
+            config_.desensitizationMaxAttenuation,
+            // Phase 3c: neuromodulator gain -- same shared-profile values
+            // the CPU fallback loop reads from receptorProfile_.neuromod
+            // directly (see blockNeuromodMods above).
+            receptorProfile_.neuromod.d1.ec50,
+            receptorProfile_.neuromod.d1.hill,
+            receptorProfile_.neuromod.d1.maxAdaptationReductionFrac,
+            receptorProfile_.neuromod.d1.maxNmdaGainFold,
+            receptorProfile_.neuromod.d2.ec50,
+            receptorProfile_.neuromod.d2.hill,
+            receptorProfile_.neuromod.d2.maxReleaseReductionFrac,
+            receptorProfile_.neuromod.ht1a.ec50,
+            receptorProfile_.neuromod.ht1a.hill,
+            receptorProfile_.neuromod.ht1a.maxKGainFold,
+            receptorProfile_.neuromod.ht2a.ec50,
+            receptorProfile_.neuromod.ht2a.hill,
+            receptorProfile_.neuromod.ht2a.maxKReductionFrac,
+            receptorProfile_.neuromod.ht2a.maxAdaptationReductionFrac
         );
 #endif
     }

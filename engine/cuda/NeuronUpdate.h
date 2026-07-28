@@ -98,6 +98,33 @@ struct BatchedStepLaunchInfo {
     float desensitizationTauDesenseMs = 30000.0f;
     float desensitizationTauRecoveryMs = 124000.0f;
     float desensitizationMaxAttenuation = 0.9f;
+
+    // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A) -- mirrors
+    // synapse::NeuromodulatorProfile / DrugModel::computeNeuromodulatorGainModifiers
+    // (NeuromodulatorSystem.h/.cpp) exactly. Same per-thread computation
+    // pattern as gat1* above: dose is already per-neuron (drugParams), and
+    // every ec50/hill/ceiling below is a single shared scalar for the whole
+    // batch, since receptorProfile_ is one shared compound under test --
+    // exactly the same reasoning BatchedSimulationEngine.cpp's CPU path
+    // uses (its blockNeuromodMods is computed once per dose block from that
+    // same shared receptorProfile_). No persistent per-neuron state needed
+    // (unlike desensitization) -- this is a stateless function of dose each
+    // step, so no new BatchedStepDevicePointers fields either. See
+    // NeuromodulatorSystem.h for the full design rationale and citations.
+    float d1Ec50 = 1.0e9f;
+    float d1Hill = 1.0f;
+    float d1MaxAdaptationReductionFrac = 0.0f;
+    float d1MaxNmdaGainFold = 1.0f;
+    float d2Ec50 = 1.0e9f;
+    float d2Hill = 1.0f;
+    float d2MaxReleaseReductionFrac = 0.0f;
+    float ht1aEc50 = 1.0e9f;
+    float ht1aHill = 1.0f;
+    float ht1aMaxKGainFold = 1.0f;
+    float ht2aEc50 = 1.0e9f;
+    float ht2aHill = 1.0f;
+    float ht2aMaxKReductionFrac = 0.0f;
+    float ht2aMaxAdaptationReductionFrac = 0.0f;
 };
 
 struct BatchedStepDevicePointers {

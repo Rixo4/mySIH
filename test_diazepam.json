@@ -1,13 +1,13 @@
 {
-  "drug_name": "D1-Agonist (conceptual, e.g. SKF-38393-like)",
+  "drug_name": "Diazepam",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "neuromodulators": {
-    "D1": { "ec50": 1.0, "hill": 1.0, "max_adaptation_reduction": 0.6, "max_nmda_gain": 1.5 }
+  "receptors": {
+    "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
   },
-  "dose_range": { "min": 0.0, "max": 3.0, "step": 0.3 },
-  "runs": 5
+  "dose_range": { "min": 0.0, "max": 0.03, "step": 0.003 },
+  "runs": 10
 }

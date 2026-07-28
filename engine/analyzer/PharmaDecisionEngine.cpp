@@ -432,10 +432,34 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                                                       seizureSlopePctPerDose);
 
         // Classify dose band
+        // Phase 3c fix: originally only suppressionScore/stabilizationScore
+        // could mark a dose "effective" -- both are structurally zero for
+        // any excitatory response (suppressionScore only computes when rate
+        // DROPS; stabilizationScore requires sync/burst-duration
+        // improvement). That made it impossible for a genuinely beneficial
+        // excitatory drug (D1/D2/5-HT1A/5-HT2A neuromodulator gain is often
+        // *supposed* to be mildly excitatory -- arousal, cognition,
+        // wakefulness) to ever register a therapeutic window, no matter how
+        // real or clean the effect: e.g. a D1 agonist test showed a real,
+        // correctly-signed +9.7% rate increase, Stable state, R^2=0.68, yet
+        // fell through to "LIMITED EFFICACY / no meaningful biological
+        // response". Added a third OR branch: rateChangePct > 5.0f while
+        // still in Stable/MildInstability state. The state gate already
+        // excludes Hyperexcitable/SeizureRisk/etc (those are mutually
+        // exclusive NetworkState values, see classifyState), and Step 9's
+        // `excitatory` bool (maxEffectPct > 10.0 && EXCITATORY_RESPONSE)
+        // still overrides this with NOT RECOMMENDED for any genuinely
+        // dangerous excitatory drug -- this only affects the safe,
+        // mild-magnitude (5-10%) excitatory case that was previously
+        // invisible to the decision engine entirely. 5% floor is half of
+        // that existing 10% "notable effect" threshold, i.e. deliberately
+        // more permissive for what counts as a real signal worth reporting
+        // than what counts as dangerous.
         const bool isEffective =
             (dose.networkState == NetworkState::MildInstability ||
              dose.networkState == NetworkState::Stable) &&
-            (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f);
+            (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f ||
+             dose.rateChangePct > 5.0f);
 
         const bool isToxic =
             (dose.networkState == NetworkState::SeizureActive ||
