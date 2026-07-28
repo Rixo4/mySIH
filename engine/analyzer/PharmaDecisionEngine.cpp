@@ -488,14 +488,15 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     }
 
     // ─── Step 3: Dominant mechanism ───────────────────────────────────────────
-    // PHASE2_PLAN.md step 5 / Phase 3a: extended from the original 4-way
-    // (Na/K/Ca/Mixed) tally to all 10 MechanismSignature values (Unknown +
-    // 9 real mechanisms: Na/K/Ca/Mixed's 3 channel blocks + Mixed + AMPA/
-    // NMDA/GABA-A/GABA-B + Phase 3a's Gat1ReuptakeBlock), same "count
-    // occurrences across doses, pick the max" logic -- just over a bigger
-    // set now that NetworkAnalyzer::detectMechanism can return any of the
-    // five receptor/transporter signatures too.
-    // BUG FIX (tiagabine validation, Phase 3a): this was
+    // PHASE2_PLAN.md step 5 / Phase 3a / Phase 3c: extended from the original
+    // 4-way (Na/K/Ca/Mixed) tally to all 14 MechanismSignature values
+    // (Unknown + 13 real mechanisms: Na/K/Ca channel blocks + Mixed + AMPA/
+    // NMDA/GABA-A/GABA-B + Phase 3a's Gat1ReuptakeBlock + Phase 3c's
+    // D1Gain/D2Gain/Ht1aGain/Ht2aGain), same "count occurrences across
+    // doses, pick the max" logic -- just over a bigger set now that
+    // NetworkAnalyzer::detectMechanism can return any of the nine
+    // receptor/transporter/neuromodulator signatures too.
+    // BUG FIX (tiagabine validation, Phase 3a): this was once
     // std::array<int, 9>, sized for the enum's count BEFORE
     // Gat1ReuptakeBlock was added as its 10th value (index 9). Writing
     // counts[indexOf(Gat1ReuptakeBlock)] (index 9) into a 9-element array
@@ -507,8 +508,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     // aggregation step's tally never validly recorded a single
     // Gat1ReuptakeBlock vote). Any enum addition to MechanismSignature must
     // keep this array's size in sync -- there is no compile-time check
-    // tying the two together.
-    std::array<int, 10> counts{};
+    // tying the two together. Phase 3c added 4 more enum values
+    // (D1Gain/D2Gain/Ht1aGain/Ht2aGain), so this was bumped 10 -> 14 to
+    // avoid repeating the exact same bug.
+    std::array<int, 14> counts{};
     auto indexOf = [](MechanismSignature s) -> std::size_t {
         return static_cast<std::size_t>(s);
     };
@@ -844,6 +847,11 @@ std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
         case MechanismSignature::GabaBAgonist:    return "GABA-B Agonism";
         // Phase 3a
         case MechanismSignature::Gat1ReuptakeBlock: return "GABA Reuptake Block (GAT1)";
+        // Phase 3c
+        case MechanismSignature::D1Gain:          return "D1 Neuromodulator Gain";
+        case MechanismSignature::D2Gain:          return "D2 Neuromodulator Gain";
+        case MechanismSignature::Ht1aGain:        return "5-HT1A Neuromodulator Gain";
+        case MechanismSignature::Ht2aGain:        return "5-HT2A Neuromodulator Gain";
         default:                                  return "Unknown";
     }
 }

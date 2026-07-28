@@ -36,7 +36,14 @@ enum class MechanismSignature {
     // time constant, not a conductance/occupancy), but detectMechanism()
     // still treats it as one more flat candidate on the same 0..1 scale,
     // same reasoning as the Phase 2 receptor additions.
-    Gat1ReuptakeBlock
+    Gat1ReuptakeBlock,
+    // Phase 3c: neuromodulator gain receptor occupancy (D1/D2/5-HT1A/
+    // 5-HT2A). Same flat-candidate treatment as every mechanism above --
+    // detectMechanism() picks whichever occupancy magnitude is largest.
+    D1Gain,
+    D2Gain,
+    Ht1aGain,
+    Ht2aGain
 };
 
 struct AnalyzedDose {
@@ -56,6 +63,12 @@ struct AnalyzedDose {
     float potentiateGabaA = 0.0f;
     float activateGabaB   = 0.0f;
     float gat1ReuptakeBlock = 0.0f;
+
+    // Phase 3c: mirrors DoseObservation's d1Gain/d2Gain/ht1aGain/ht2aGain.
+    float d1Gain   = 0.0f;
+    float d2Gain   = 0.0f;
+    float ht1aGain = 0.0f;
+    float ht2aGain = 0.0f;
 
     RawMetrics metrics;
 

@@ -22,6 +22,13 @@ struct DoseObservation {
     // directly. See AnalyzedDose.h.
     float gat1ReuptakeBlock = 0.0f;
 
+    // Phase 3c: neuromodulator receptor occupancy (0..1 each), same scale
+    // and purpose as gat1ReuptakeBlock above. See AnalyzedDose.h.
+    float d1Gain   = 0.0f;
+    float d2Gain   = 0.0f;
+    float ht1aGain = 0.0f;
+    float ht2aGain = 0.0f;
+
     RawMetrics metrics;
 };
 

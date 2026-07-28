@@ -924,6 +924,20 @@ DoseObservation buildDoseObservation(
         gat1Effect.hill = static_cast<float>(input.config.hill_gat1);
         o.gat1ReuptakeBlock = spp::synapse::transporterOccupancy(dF, gat1Effect);
     }
+    // Phase 3c: neuromodulator receptor occupancy (0..1), for
+    // NetworkAnalyzer::detectMechanism -- same Hill-occupancy scale as
+    // gat1ReuptakeBlock above. Uses dose directly against each receptor's
+    // own EC50/hill (see spp::synapse::neuromodulatorOccupancy), mirroring
+    // the calculation used for the [Neuromodulator Gain Profile] report
+    // section.
+    o.d1Gain = spp::synapse::neuromodulatorOccupancy(
+        dF, static_cast<float>(input.config.ec50_d1), static_cast<float>(input.config.hill_d1));
+    o.d2Gain = spp::synapse::neuromodulatorOccupancy(
+        dF, static_cast<float>(input.config.ec50_d2), static_cast<float>(input.config.hill_d2));
+    o.ht1aGain = spp::synapse::neuromodulatorOccupancy(
+        dF, static_cast<float>(input.config.ec50_ht1a), static_cast<float>(input.config.hill_ht1a));
+    o.ht2aGain = spp::synapse::neuromodulatorOccupancy(
+        dF, static_cast<float>(input.config.ec50_ht2a), static_cast<float>(input.config.hill_ht2a));
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;
     o.metrics.peakSynchronizationIndex = metrics.peakSynchronizationIndex;
