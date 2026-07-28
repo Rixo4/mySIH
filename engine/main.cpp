@@ -926,18 +926,25 @@ DoseObservation buildDoseObservation(
     }
     // Phase 3c: neuromodulator receptor occupancy (0..1), for
     // NetworkAnalyzer::detectMechanism -- same Hill-occupancy scale as
-    // gat1ReuptakeBlock above. Uses dose directly against each receptor's
-    // own EC50/hill (see spp::synapse::neuromodulatorOccupancy), mirroring
-    // the calculation used for the [Neuromodulator Gain Profile] report
-    // section.
-    o.d1Gain = spp::synapse::neuromodulatorOccupancy(
-        dF, static_cast<float>(input.config.ec50_d1), static_cast<float>(input.config.hill_d1));
-    o.d2Gain = spp::synapse::neuromodulatorOccupancy(
-        dF, static_cast<float>(input.config.ec50_d2), static_cast<float>(input.config.hill_d2));
-    o.ht1aGain = spp::synapse::neuromodulatorOccupancy(
-        dF, static_cast<float>(input.config.ec50_ht1a), static_cast<float>(input.config.hill_ht1a));
-    o.ht2aGain = spp::synapse::neuromodulatorOccupancy(
-        dF, static_cast<float>(input.config.ec50_ht2a), static_cast<float>(input.config.hill_ht2a));
+    // gat1ReuptakeBlock above. Phase 3c retrofit: goes through
+    // buildReceptorProfile() (the same profile the simulation itself uses)
+    // and DrugModel's amplifiedDoseForDopamine/amplifiedDoseForSerotonin so
+    // SERT/DAT reuptake-block amplification is reflected here too --
+    // otherwise mechanism detection would be attributing doses that don't
+    // match what the network actually simulated.
+    {
+        const ReceptorDrugProfile fullProfile = buildReceptorProfile(input.config);
+        const float doseForDopamine  = spp::drug::DrugModel::amplifiedDoseForDopamine(fullProfile, dF);
+        const float doseForSerotonin = spp::drug::DrugModel::amplifiedDoseForSerotonin(fullProfile, dF);
+        o.d1Gain = spp::synapse::neuromodulatorOccupancy(
+            doseForDopamine, static_cast<float>(input.config.ec50_d1), static_cast<float>(input.config.hill_d1));
+        o.d2Gain = spp::synapse::neuromodulatorOccupancy(
+            doseForDopamine, static_cast<float>(input.config.ec50_d2), static_cast<float>(input.config.hill_d2));
+        o.ht1aGain = spp::synapse::neuromodulatorOccupancy(
+            doseForSerotonin, static_cast<float>(input.config.ec50_ht1a), static_cast<float>(input.config.hill_ht1a));
+        o.ht2aGain = spp::synapse::neuromodulatorOccupancy(
+            doseForSerotonin, static_cast<float>(input.config.ec50_ht2a), static_cast<float>(input.config.hill_ht2a));
+    }
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;
     o.metrics.peakSynchronizationIndex = metrics.peakSynchronizationIndex;
@@ -1443,22 +1450,24 @@ std::string buildDrugEvaluationReportText(
     aLine("Step Size",    formatRuntimeNumber(report.stepDose));
     out << "\n--------------------------------------------------\n\n";
 
-    // Phase 3a: report-only transporters (SERT/DAT/NET) have NO receptor/
-    // channel pathway wired into the simulation at all -- confirmed by
-    // grep, nothing in BatchedSimulationEngine.cpp reads profile.sert/dat/
-    // net (see ReceptorDrugProfile.h's TransporterAction comment). So if
-    // none of the channels/AMPA/NMDA/GABA-A/GABA-B/GAT1 are configured,
-    // every "dose" in this run is mechanistically identical to a zero-drug
-    // baseline -- the only thing differing across doses is which random
-    // network seed got drawn (seed depends on dose index, see
-    // BatchedSimulationEngine's fixed baseSeed formula), so any apparent
-    // dose-response the classifier reports is pure sampling noise, not a
-    // real pharmacological signal. Letting that noise flow into the normal
+    // Phase 3a / Phase 3c retrofit: SERT and DAT now DO have a real receptor
+    // pathway -- they amplify the effective dose seen by 5-HT1A/5-HT2A
+    // (SERT) or D1/D2 (DAT), see ReuptakeTransporter.h's amplifiedDoseUm and
+    // DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin. But
+    // that amplification is a no-op if the drug doesn't ALSO configure the
+    // corresponding neuromodulator receptor (amplifying a dose that only
+    // feeds an inert, huge-EC50 occupancy calculation still yields ~0
+    // occupancy). NET still has no receptor pathway at all -- no adrenergic
+    // gain system exists in this engine. So the "every dose in this run is
+    // mechanistically identical to baseline" case still exists, just
+    // narrower than before: SERT/DAT with no matching neuromod receptor, or
+    // NET at all, with nothing else configured. Original bug this guard
+    // fixes (Phase 3a validation): reboxetine (zero simulated mechanism)
+    // randomly showed "NOT RECOMMENDED, HIGH RISK" from nothing but
+    // run-to-run seed variance -- letting that noise flow into the normal
     // Response Characteristics/FINAL DECISION path produces a misleading
-    // verdict -- caught directly during Phase 3a validation, where
-    // reboxetine (zero simulated mechanism) randomly showed "NOT
-    // RECOMMENDED, HIGH RISK" from nothing but run-to-run seed variance.
-    // Fix: detect this case and print an honest, explicit notice instead.
+    // verdict. Fix: detect this case and print an honest, explicit notice
+    // instead.
     constexpr double kChannelInertThreshold = 1.0e5;
     const bool hasChannelEffect =
             evalInput.config.ic50_na < kChannelInertThreshold ||
@@ -1470,12 +1479,19 @@ std::string buildDrugEvaluationReportText(
             evalInput.config.ec50_gabaA < kReceptorInertThreshold ||
             evalInput.config.ec50_gabaB < kReceptorInertThreshold ||
             evalInput.config.ki_gat1    < kReceptorInertThreshold;
+    // Phase 3c: a neuromod receptor being configured is what makes SERT/DAT
+    // amplification actually DO something -- see comment above.
+    const bool hasNeuromodEffect =
+            evalInput.config.ec50_d1   < kReceptorInertThreshold ||
+            evalInput.config.ec50_d2   < kReceptorInertThreshold ||
+            evalInput.config.ec50_ht1a < kReceptorInertThreshold ||
+            evalInput.config.ec50_ht2a < kReceptorInertThreshold;
     const bool hasAnyReportOnlyTransporter =
             evalInput.config.ki_sert < kReceptorInertThreshold ||
             evalInput.config.ki_dat  < kReceptorInertThreshold ||
             evalInput.config.ki_net  < kReceptorInertThreshold;
 
-    if (!hasChannelEffect && !hasReceptorOrGat1Effect && hasAnyReportOnlyTransporter) {
+    if (!hasChannelEffect && !hasReceptorOrGat1Effect && !hasNeuromodEffect && hasAnyReportOnlyTransporter) {
         out << "[Neurotransmitter Profile]\n";
         const float peakDoseF = static_cast<float>(report.maxTestedDose);
         const auto printReportOnlyTransporterEarly = [&](const char* label, double kiUm, double hill, double maxExtension) {
@@ -1488,16 +1504,19 @@ std::string buildDrugEvaluationReportText(
             const float foldChange = spp::synapse::effectiveTauDecayMs(1.0f, peakDoseF, effect);
             aLine(std::string(label) + " Reuptake Block",
                   formatRuntimeNumber(occupancy * 100.0, 0) + " % (at max tested dose)");
-            aLine(std::string(label) + " Clearance Fold",
+            aLine(std::string(label) + " Amplification Fold",
                   formatRuntimeNumber(foldChange, 2) + "x baseline");
         };
-        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+        const bool sertConfigured = evalInput.config.ki_sert < kReceptorInertThreshold;
+        const bool datConfigured  = evalInput.config.ki_dat  < kReceptorInertThreshold;
+        const bool netConfigured  = evalInput.config.ki_net  < kReceptorInertThreshold;
+        if (sertConfigured) {
             printReportOnlyTransporterEarly("SERT", evalInput.config.ki_sert, evalInput.config.hill_sert, evalInput.config.max_extension_sert);
         }
-        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+        if (datConfigured) {
             printReportOnlyTransporterEarly("DAT", evalInput.config.ki_dat, evalInput.config.hill_dat, evalInput.config.max_extension_dat);
         }
-        if (evalInput.config.ki_net < kReceptorInertThreshold) {
+        if (netConfigured) {
             printReportOnlyTransporterEarly("NET", evalInput.config.ki_net, evalInput.config.hill_net, evalInput.config.max_extension_net);
         }
         out << "\n--------------------------------------------------\n\n";
@@ -1505,18 +1524,37 @@ std::string buildDrugEvaluationReportText(
         out << "[FINAL DECISION]\n";
         aLine("Recommendation", "NOT APPLICABLE");
         aLine("Risk Level",     "N/A");
-        aLine("Mechanism",      "No receptor/current pathway modeled for this transmitter yet");
-        out << "Reason               : This drug's target transporter (serotonin/dopamine/\n"
-            << "                       norepinephrine reuptake) has no receptor current\n"
-            << "                       modeled in this engine yet -- that needs Phase 3c's\n"
-            << "                       neuromodulator gain system (D1/D2/5-HT1A/5-HT2A\n"
-            << "                       modulating gNa/K+/release probability), not built yet.\n"
-            << "                       The transporter pharmacology above (occupancy, clearance\n"
-            << "                       fold) is real and literature-sourced. Every other section\n"
-            << "                       of this report is SUPPRESSED here because this drug\n"
-            << "                       config has zero effect on the simulated network -- any\n"
-            << "                       apparent dose-response would be random seed noise, not a\n"
-            << "                       real pharmacological signal.\n";
+        aLine("Mechanism",      "No effect on simulated network for this config");
+        if (netConfigured && !sertConfigured && !datConfigured) {
+            out << "Reason               : NET (norepinephrine transporter) has no receptor\n"
+                << "                       pathway modeled in this engine -- no adrenergic\n"
+                << "                       (alpha/beta) gain system exists, unlike D1/D2/\n"
+                << "                       5-HT1A/5-HT2A. The transporter pharmacology above\n"
+                << "                       (occupancy, clearance fold) is real and literature-\n"
+                << "                       sourced. Every other section of this report is\n"
+                << "                       SUPPRESSED because this config has zero effect on\n"
+                << "                       the simulated network -- any apparent dose-response\n"
+                << "                       would be random seed noise, not a real\n"
+                << "                       pharmacological signal.\n";
+        } else {
+            out << "Reason               : SERT/DAT reuptake block amplifies the dose the\n"
+                << "                       corresponding neuromodulator receptor (5-HT1A/\n"
+                << "                       5-HT2A for SERT, D1/D2 for DAT) sees -- but this\n"
+                << "                       config doesn't ALSO set up that receptor, so the\n"
+                << "                       amplification has nothing to act on (amplifying a\n"
+                << "                       dose that only feeds an unconfigured, inert\n"
+                << "                       occupancy calculation still yields ~0 effect). Add a\n"
+                << "                       matching D1/D2/5-HT1A/5-HT2A block to this drug's\n"
+                << "                       config for the transporter effect to reach the\n"
+                << "                       network. The transporter pharmacology above\n"
+                << "                       (occupancy, amplification fold) is real and\n"
+                << "                       literature-sourced regardless. Every other section\n"
+                << "                       of this report is SUPPRESSED here because this\n"
+                << "                       specific config has zero effect on the simulated\n"
+                << "                       network -- any apparent dose-response would be\n"
+                << "                       random seed noise, not a real pharmacological\n"
+                << "                       signal.\n";
+        }
         aLine("Confidence", "N/A");
         out << "==================================================\n";
         return out.str();
@@ -1688,11 +1726,6 @@ std::string buildDrugEvaluationReportText(
         const double peakDoseForNm = report.analyzedDoses.empty() ? 0.0 : report.analyzedDoses[peakIdx].dose;
         const float peakDoseF = static_cast<float>(peakDoseForNm);
 
-        const float d1Occ   = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_d1),   static_cast<float>(evalInput.config.hill_d1));
-        const float d2Occ   = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_d2),   static_cast<float>(evalInput.config.hill_d2));
-        const float ht1aOcc = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_ht1a), static_cast<float>(evalInput.config.hill_ht1a));
-        const float ht2aOcc = spp::synapse::neuromodulatorOccupancy(peakDoseF, static_cast<float>(evalInput.config.ec50_ht2a), static_cast<float>(evalInput.config.hill_ht2a));
-
         spp::drug::ReceptorDrugProfile nmProfileForReport;
         nmProfileForReport.neuromod.d1.ec50 = static_cast<float>(evalInput.config.ec50_d1);
         nmProfileForReport.neuromod.d1.hill = static_cast<float>(evalInput.config.hill_d1);
@@ -1708,6 +1741,32 @@ std::string buildDrugEvaluationReportText(
         nmProfileForReport.neuromod.ht2a.hill = static_cast<float>(evalInput.config.hill_ht2a);
         nmProfileForReport.neuromod.ht2a.maxKReductionFrac = static_cast<float>(evalInput.config.max_k_reduction_ht2a);
         nmProfileForReport.neuromod.ht2a.maxAdaptationReductionFrac = static_cast<float>(evalInput.config.max_adaptation_reduction_ht2a);
+        // Phase 3c retrofit: SERT/DAT reuptake block must be on this SAME
+        // profile object so the occupancy/gain numbers below reflect the
+        // real amplified dose the simulation actually used -- without this,
+        // these fields would silently disagree with the simulated network
+        // the same way the report's old "Max Effect" field once did (bug
+        // fixed earlier this session).
+        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+            nmProfileForReport.sert.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+            nmProfileForReport.sert.kiUm             = static_cast<float>(evalInput.config.ki_sert);
+            nmProfileForReport.sert.hill             = static_cast<float>(evalInput.config.hill_sert);
+            nmProfileForReport.sert.maxExtensionFold = static_cast<float>(evalInput.config.max_extension_sert);
+        }
+        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+            nmProfileForReport.dat.mechanism        = spp::synapse::TransporterBlockType::Competitive;
+            nmProfileForReport.dat.kiUm             = static_cast<float>(evalInput.config.ki_dat);
+            nmProfileForReport.dat.hill             = static_cast<float>(evalInput.config.hill_dat);
+            nmProfileForReport.dat.maxExtensionFold = static_cast<float>(evalInput.config.max_extension_dat);
+        }
+
+        const float doseForDopamine  = spp::drug::DrugModel::amplifiedDoseForDopamine(nmProfileForReport, peakDoseF);
+        const float doseForSerotonin = spp::drug::DrugModel::amplifiedDoseForSerotonin(nmProfileForReport, peakDoseF);
+
+        const float d1Occ   = spp::synapse::neuromodulatorOccupancy(doseForDopamine,  static_cast<float>(evalInput.config.ec50_d1),   static_cast<float>(evalInput.config.hill_d1));
+        const float d2Occ   = spp::synapse::neuromodulatorOccupancy(doseForDopamine,  static_cast<float>(evalInput.config.ec50_d2),   static_cast<float>(evalInput.config.hill_d2));
+        const float ht1aOcc = spp::synapse::neuromodulatorOccupancy(doseForSerotonin, static_cast<float>(evalInput.config.ec50_ht1a), static_cast<float>(evalInput.config.hill_ht1a));
+        const float ht2aOcc = spp::synapse::neuromodulatorOccupancy(doseForSerotonin, static_cast<float>(evalInput.config.ec50_ht2a), static_cast<float>(evalInput.config.hill_ht2a));
 
         const spp::synapse::NeuromodulatorGainModifiers gainMods =
             spp::drug::DrugModel::computeNeuromodulatorGainModifiers(nmProfileForReport, peakDoseF);
@@ -1716,6 +1775,28 @@ std::string buildDrugEvaluationReportText(
         aLine("D2 Occupancy",    formatRuntimeNumber(d2Occ   * 100.0, 0) + " % (at peak dose)");
         aLine("5-HT1A Occupancy", formatRuntimeNumber(ht1aOcc * 100.0, 0) + " % (at peak dose)");
         aLine("5-HT2A Occupancy", formatRuntimeNumber(ht2aOcc * 100.0, 0) + " % (at peak dose)");
+        // Phase 3c retrofit: surface SERT/DAT's contribution here too, since
+        // they now genuinely amplify the numbers directly above -- not just
+        // reported for their own sake the way the [Neurotransmitter Profile]
+        // early-exit block shows them for a fully-inert config.
+        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+            aLine("SERT Reuptake Block", formatRuntimeNumber(
+                spp::synapse::transporterOccupancy(peakDoseF, spp::synapse::TransporterDrugEffect{
+                    spp::synapse::TransporterBlockType::Competitive,
+                    static_cast<float>(evalInput.config.ki_sert),
+                    static_cast<float>(evalInput.config.hill_sert),
+                    static_cast<float>(evalInput.config.max_extension_sert)}) * 100.0, 0)
+                + " % (amplifies serotonin receptor dose " + formatRuntimeNumber(doseForSerotonin / std::max(peakDoseF, 1.0e-9f), 2) + "x)");
+        }
+        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+            aLine("DAT Reuptake Block", formatRuntimeNumber(
+                spp::synapse::transporterOccupancy(peakDoseF, spp::synapse::TransporterDrugEffect{
+                    spp::synapse::TransporterBlockType::Competitive,
+                    static_cast<float>(evalInput.config.ki_dat),
+                    static_cast<float>(evalInput.config.hill_dat),
+                    static_cast<float>(evalInput.config.max_extension_dat)}) * 100.0, 0)
+                + " % (amplifies dopamine receptor dose " + formatRuntimeNumber(doseForDopamine / std::max(peakDoseF, 1.0e-9f), 2) + "x)");
+        }
 
         // Network Gain Score: >1 = net excitatory/disinhibited (NMDA gain
         // and/or reduced adaptation outweighing any K+/release reduction),
