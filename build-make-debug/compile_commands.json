@@ -31,15 +31,15 @@
 },
 {
   "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
-  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/ReuptakeTransporter.cpp",
-  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/ReuptakeTransporter.cpp",
-  "output": "CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o"
-},
-{
-  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
   "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/NeuromodulatorSystem.cpp",
   "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/NeuromodulatorSystem.cpp",
   "output": "CMakeFiles/silicon_patient.dir/engine/synapse/NeuromodulatorSystem.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/ReuptakeTransporter.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/synapse/ReuptakeTransporter.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/synapse/ReuptakeTransporter.cpp.o"
 },
 {
   "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",

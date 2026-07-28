@@ -385,6 +385,7 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
 
     std::normal_distribution<float> unitNormal(0.0f, 1.0f);
     const bool runOnGpu = config_.useGpu && cudaSimulator_ && cudaSimulator_->available();
+    lastRunUsedGpu_ = runOnGpu;
     const float adaptTauMs = std::max(1.0f, config_.adaptationTauMs);
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);

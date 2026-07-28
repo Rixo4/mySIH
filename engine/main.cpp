@@ -769,7 +769,8 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     const std::vector<double>& doses,
     int runs,
     std::uint32_t baseSeed,
-    std::vector<spp::analyzer::NeuronMetrics>* outLastNeuronMetrics)
+    std::vector<spp::analyzer::NeuronMetrics>* outLastNeuronMetrics,
+    bool* outUsedGpu = nullptr)
 {
     std::vector<std::vector<RunResult>> perDoseResults(doses.size());
     if (doses.empty() || runs <= 0) return perDoseResults;
@@ -815,6 +816,9 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     );
 
     std::vector<spp::simulation::SimulationResult> blockResults = batched.run();
+    if (outUsedGpu) {
+        *outUsedGpu = batched.lastRunUsedGpu();
+    }
 
     std::size_t idx = 0;
     for (std::size_t d = 0; d < doses.size(); ++d) {
@@ -1193,7 +1197,8 @@ std::string buildDrugEvaluationReportText(
     const AggregatedStats& stabilityStats,
     int runCount,
     const RuntimeInput& evalInput,
-    const std::string& engineInputMode)
+    const std::string& engineInputMode,
+    std::optional<bool> usedGpu = std::nullopt)
 {
     std::ostringstream out;
     const auto aLine=[&](const std::string& label, const std::string& value){
@@ -1306,6 +1311,12 @@ std::string buildDrugEvaluationReportText(
     out << "[Drug Input]\n";
     aLine("Drug Name",         evalInput.drug_name);
     aLine("Engine Input Mode", engineInputMode);
+    // Added after a user asked "did this actually run on GPU or CPU?" and
+    // there was no honest way to answer from the report alone -- see
+    // BatchedSimulationEngine::lastRunUsedGpu(). std::nullopt for any
+    // caller that doesn't thread this through (yet -- currently just
+    // --dose-eval's batched path).
+    aLine("Compute Backend", usedGpu.has_value() ? (*usedGpu ? "GPU" : "CPU") : "Unknown (not reported by this run path)");
     aLine("Na IC50",           formatRuntimeNumber(evalInput.config.ic50_na));
     aLine("K IC50",            formatRuntimeNumber(evalInput.config.ic50_k));
     aLine("Ca IC50",           formatRuntimeNumber(evalInput.config.ic50_ca));
@@ -1780,11 +1791,12 @@ std::string buildDrugEvaluationReportText(
 void writeDrugEvaluationReport(
     const std::string& path, const PharmaDecisionReport& report,
     const AggregatedStats& stats, int runs,
-    const RuntimeInput& input, const std::string& mode)
+    const RuntimeInput& input, const std::string& mode,
+    std::optional<bool> usedGpu = std::nullopt)
 {
     std::ofstream out(path, std::ios::out|std::ios::trunc);
     if (!out.is_open()) throw std::runtime_error("Cannot open: " + path);
-    out << buildDrugEvaluationReportText(report, stats, runs, input, mode);
+    out << buildDrugEvaluationReportText(report, stats, runs, input, mode, usedGpu);
 }
 
 // ─── Single run report ────────────────────────────────────────────────────────
@@ -1958,7 +1970,8 @@ void runDoseEvaluationMode(
 
     // One batched call covers every (dose x repeat) combination in a single
     // shared timestep loop, instead of looping runMultipleSimulations per dose.
-    const auto perDoseResults = runAllDosesBatched(evalInput, doses, runs, baseSeed, &finalNM);
+    bool usedGpu = false;
+    const auto perDoseResults = runAllDosesBatched(evalInput, doses, runs, baseSeed, &finalNM, &usedGpu);
 
     for(std::size_t i=0; i<doses.size(); ++i) {
         const auto& rr = perDoseResults[i];
@@ -2008,7 +2021,7 @@ void runDoseEvaluationMode(
 
     // ── Print and export ──────────────────────────────────────────────────────
     std::cout << buildDrugEvaluationReportText(
-        report, stabilityStats, runs, evalInput, engineInputMode);
+        report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
 
     if(evalInput.config.export_csv) {
         std::filesystem::create_directories(evalInput.config.output_folder);
@@ -2020,7 +2033,7 @@ void runDoseEvaluationMode(
             evalInput.config.output_folder + "/neuron_stats.csv", finalNM);
         writeDrugEvaluationReport(
             evalInput.config.output_folder + "/drug_evaluation_report.txt",
-            report, stabilityStats, runs, evalInput, engineInputMode);
+            report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
     }
 }
 

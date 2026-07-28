@@ -46,11 +46,13 @@ public:
 
     [[nodiscard]] std::size_t neuronsPerBlock() const { return neuronsPerBlock_; }
     [[nodiscard]] std::size_t blockCount() const { return blockCount_; }
+    [[nodiscard]] bool lastRunUsedGpu() const { return lastRunUsedGpu_; }
 
 private:
     std::size_t neuronsPerBlock_;
     std::size_t blockCount_;
     std::size_t totalNeurons_;
+    bool lastRunUsedGpu_ = false;
 
     SimulationConfig config_;
     drug::DrugModel drugModel_;
