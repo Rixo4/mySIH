@@ -454,26 +454,45 @@ __global__ void fusedBatchedStepKernel(
     float nmodAdaptationScale = 1.0f;
     float nmodExcitatoryWeightScale = 1.0f;
     {
+        // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
+        // mirrors DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin
+        // (CPU) exactly. DAT amplifies the dose D1/D2 see; SERT amplifies
+        // the dose 5-HT1A/5-HT2A see. Both default to the raw `dose`
+        // unchanged when unconfigured (mechanism=None), same no-op-by-
+        // construction discipline as gat1Occupancy above.
+        float doseForDopamine = dose;
+        if (launchInfo.datMechanism != 0) {
+            const float datOcc = hillBlockDevice(dose, launchInfo.datKiUm, launchInfo.datHill);
+            const float datCeiling = fmaxf(1.0f, launchInfo.datMaxExtensionFold);
+            doseForDopamine = dose * (1.0f + (datCeiling - 1.0f) * datOcc);
+        }
+        float doseForSerotonin = dose;
+        if (launchInfo.sertMechanism != 0) {
+            const float sertOcc = hillBlockDevice(dose, launchInfo.sertKiUm, launchInfo.sertHill);
+            const float sertCeiling = fmaxf(1.0f, launchInfo.sertMaxExtensionFold);
+            doseForSerotonin = dose * (1.0f + (sertCeiling - 1.0f) * sertOcc);
+        }
+
         // D1: shrinks adaptation current, boosts NMDA gain.
-        const float d1Occ = hillBlockDevice(dose, launchInfo.d1Ec50, launchInfo.d1Hill);
+        const float d1Occ = hillBlockDevice(doseForDopamine, launchInfo.d1Ec50, launchInfo.d1Hill);
         const float d1AdaptFrac = clamp01(launchInfo.d1MaxAdaptationReductionFrac);
         const float d1NmdaCeiling = fmaxf(1.0f, launchInfo.d1MaxNmdaGainFold);
         nmodAdaptationScale *= (1.0f - d1AdaptFrac * d1Occ);
         nmodGMaxNmdaScale   *= (1.0f + (d1NmdaCeiling - 1.0f) * d1Occ);
 
         // D2: shrinks excitatory synaptic weight (release-probability proxy).
-        const float d2Occ = hillBlockDevice(dose, launchInfo.d2Ec50, launchInfo.d2Hill);
+        const float d2Occ = hillBlockDevice(doseForDopamine, launchInfo.d2Ec50, launchInfo.d2Hill);
         const float d2ReleaseFrac = clamp01(launchInfo.d2MaxReleaseReductionFrac);
         nmodExcitatoryWeightScale *= (1.0f - d2ReleaseFrac * d2Occ);
 
         // 5-HT1A: boosts gKEff (GIRK-mediated hyperpolarization).
-        const float ht1aOcc = hillBlockDevice(dose, launchInfo.ht1aEc50, launchInfo.ht1aHill);
+        const float ht1aOcc = hillBlockDevice(doseForSerotonin, launchInfo.ht1aEc50, launchInfo.ht1aHill);
         const float ht1aKCeiling = fmaxf(1.0f, launchInfo.ht1aMaxKGainFold);
         nmodGKEffScale *= (1.0f + (ht1aKCeiling - 1.0f) * ht1aOcc);
 
         // 5-HT2A: shrinks gKEff (reduced K+ leak) AND shrinks adaptation
         // (reduced IAHP).
-        const float ht2aOcc = hillBlockDevice(dose, launchInfo.ht2aEc50, launchInfo.ht2aHill);
+        const float ht2aOcc = hillBlockDevice(doseForSerotonin, launchInfo.ht2aEc50, launchInfo.ht2aHill);
         const float ht2aKReductionFrac = clamp01(launchInfo.ht2aMaxKReductionFrac);
         const float ht2aAdaptFrac = clamp01(launchInfo.ht2aMaxAdaptationReductionFrac);
         nmodGKEffScale      *= (1.0f - ht2aKReductionFrac * ht2aOcc);
@@ -946,6 +965,18 @@ struct CudaSimulator::DeviceBuffers {
     float batchedHt2aMaxKReductionFrac = 0.0f;
     float batchedHt2aMaxAdaptationReductionFrac = 0.0f;
 
+    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
+    // stateless, same shared-scalar storage pattern as the neuromodulator
+    // fields above.
+    int batchedSertMechanism = 0;
+    float batchedSertKiUm = 1.0e9f;
+    float batchedSertHill = 1.0f;
+    float batchedSertMaxExtensionFold = 1.0f;
+    int batchedDatMechanism = 0;
+    float batchedDatKiUm = 1.0e9f;
+    float batchedDatHill = 1.0f;
+    float batchedDatMaxExtensionFold = 1.0f;
+
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
     std::size_t batchedBatchWindowSteps = 0;
@@ -1340,7 +1371,17 @@ void CudaSimulator::initializeBatchedSimulation(
     float ht2aEc50,
     float ht2aHill,
     float ht2aMaxKReductionFrac,
-    float ht2aMaxAdaptationReductionFrac
+    float ht2aMaxAdaptationReductionFrac,
+    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification -- see
+    // NeuronUpdate.h's BatchedStepLaunchInfo comment.
+    int sertMechanism,
+    float sertKiUm,
+    float sertHill,
+    float sertMaxExtensionFold,
+    int datMechanism,
+    float datKiUm,
+    float datHill,
+    float datMaxExtensionFold
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1445,6 +1486,14 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedHt2aHill = ht2aHill;
     buffers_->batchedHt2aMaxKReductionFrac = ht2aMaxKReductionFrac;
     buffers_->batchedHt2aMaxAdaptationReductionFrac = ht2aMaxAdaptationReductionFrac;
+    buffers_->batchedSertMechanism = sertMechanism;
+    buffers_->batchedSertKiUm = sertKiUm;
+    buffers_->batchedSertHill = sertHill;
+    buffers_->batchedSertMaxExtensionFold = sertMaxExtensionFold;
+    buffers_->batchedDatMechanism = datMechanism;
+    buffers_->batchedDatKiUm = datKiUm;
+    buffers_->batchedDatHill = datHill;
+    buffers_->batchedDatMaxExtensionFold = datMaxExtensionFold;
 
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
@@ -1573,6 +1622,14 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.ht2aHill = buffers_->batchedHt2aHill;
     launchInfo.ht2aMaxKReductionFrac = buffers_->batchedHt2aMaxKReductionFrac;
     launchInfo.ht2aMaxAdaptationReductionFrac = buffers_->batchedHt2aMaxAdaptationReductionFrac;
+    launchInfo.sertMechanism = buffers_->batchedSertMechanism;
+    launchInfo.sertKiUm = buffers_->batchedSertKiUm;
+    launchInfo.sertHill = buffers_->batchedSertHill;
+    launchInfo.sertMaxExtensionFold = buffers_->batchedSertMaxExtensionFold;
+    launchInfo.datMechanism = buffers_->batchedDatMechanism;
+    launchInfo.datKiUm = buffers_->batchedDatKiUm;
+    launchInfo.datHill = buffers_->batchedDatHill;
+    launchInfo.datMaxExtensionFold = buffers_->batchedDatMaxExtensionFold;
 
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;
