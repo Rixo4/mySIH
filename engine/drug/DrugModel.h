@@ -128,6 +128,20 @@ public:
     static spp::synapse::NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
         const ReceptorDrugProfile& profile, float dose);
 
+    // Phase 3c retrofit: SERT/DAT reuptake block amplifies the effective
+    // dose the dopamine (D1/D2) or serotonin (5-HT1A/5-HT2A) receptors see
+    // -- see ReuptakeTransporter.h's amplifiedDoseUm comment. These are the
+    // SAME two amplified doses computeNeuromodulatorGainModifiers computes
+    // internally; exposed here so callers that need to DISPLAY an
+    // occupancy/gain number (main.cpp's report, buildDoseObservation) use
+    // the identical effective dose the simulation actually ran with,
+    // instead of silently recomputing occupancy from the raw dose and
+    // drifting out of sync with what's really driving the network (the
+    // exact class of bug found and fixed this session for the report's
+    // "Max Effect" field).
+    static float amplifiedDoseForDopamine(const ReceptorDrugProfile& profile, float dose);
+    static float amplifiedDoseForSerotonin(const ReceptorDrugProfile& profile, float dose);
+
     void enablePerNeuronProfiles(std::size_t neuronCount);
     [[nodiscard]] bool hasPerNeuronProfiles() const { return perNeuronEnabled_; }
 
