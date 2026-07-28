@@ -146,7 +146,20 @@ public:
         float ht2aEc50,
         float ht2aHill,
         float ht2aMaxKReductionFrac,
-        float ht2aMaxAdaptationReductionFrac
+        float ht2aMaxAdaptationReductionFrac,
+        // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
+        // see NeuronUpdate.h's BatchedStepLaunchInfo comment /
+        // ReuptakeTransporter.h's amplifiedDoseUm for the design. Mechanism
+        // ints match spp::synapse::TransporterBlockType (0=None,
+        // 1=Competitive, 2=NonCompetitive).
+        int sertMechanism,
+        float sertKiUm,
+        float sertHill,
+        float sertMaxExtensionFold,
+        int datMechanism,
+        float datKiUm,
+        float datHill,
+        float datMaxExtensionFold
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);
