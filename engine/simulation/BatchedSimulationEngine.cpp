@@ -259,7 +259,19 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.ht2a.ec50,
             receptorProfile_.neuromod.ht2a.hill,
             receptorProfile_.neuromod.ht2a.maxKReductionFrac,
-            receptorProfile_.neuromod.ht2a.maxAdaptationReductionFrac
+            receptorProfile_.neuromod.ht2a.maxAdaptationReductionFrac,
+            // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification
+            // -- same shared-profile values the CPU fallback loop reads
+            // from receptorProfile_.sert/dat directly (see
+            // DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin).
+            static_cast<int>(receptorProfile_.sert.mechanism),
+            receptorProfile_.sert.kiUm,
+            receptorProfile_.sert.hill,
+            receptorProfile_.sert.maxExtensionFold,
+            static_cast<int>(receptorProfile_.dat.mechanism),
+            receptorProfile_.dat.kiUm,
+            receptorProfile_.dat.hill,
+            receptorProfile_.dat.maxExtensionFold
         );
 #endif
     }
