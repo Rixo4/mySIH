@@ -437,6 +437,22 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
     }
 
     // silentNeuronPct
+    //
+    // KNOWN LIMITATION (found validating test_na_blocker.json, heavy
+    // Na-channel block, 88.5% peak rate suppression): firingRates here is
+    // each neuron's WHOLE-RUN average (spikeCount/durationSec), so an
+    // onset-ramped drug (drugOnsetTauMs) that fires the neuron near-normally
+    // early and silences it late (this test's Early-Half 5.35 Hz -> Late-Half
+    // 1.48 Hz) can average out comfortably above the 2 Hz cutoff even though
+    // the neuron is effectively silent by the end of the run -- silentCount
+    // undercounts real late-stage silencing for any drug with a slow onset
+    // ramp relative to sim_time. Not a copy/wiring bug (that one -- these
+    // RunResult fields never being populated at all -- was already fixed,
+    // see main.cpp's buildRunResultsForDoses). Future work: compute a
+    // second, late-window-only silent-neuron percentage (mirroring the
+    // existing earlyWindowRateHz/lateWindowRateHz split) so onset-ramped
+    // drugs report accurate late-stage silencing instead of being masked by
+    // the early portion of the run.
     {
         std::size_t silentCount = 0U;
         for (float rate : firingRates) {

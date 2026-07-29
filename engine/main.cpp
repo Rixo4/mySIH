@@ -1264,28 +1264,20 @@ std::string buildDrugEvaluationReportText(
                 break;
             case NetworkState::MildInstability:
             case NetworkState::Stable:
-                // BUG FIX (diazepam validation, Phase 2 receptor drugs):
-                // this was suppressionScore>0.20f || stabilizationScore>0.20f
-                // -- a SEPARATE, independently-hardcoded copy of the same
-                // "is this dose therapeutically effective" threshold
-                // PharmaDecisionEngine.cpp already computes (isEffective,
-                // used for report.hasTherapeuticWindow/windowQuality/the
-                // FINAL DECISION verdict), which uses suppressionScore>0.15f
-                // || stabilizationScore>0.10f. The two thresholds had
-                // silently drifted apart, so a dose landing between 0.15 and
-                // 0.20 suppressionScore (diazepam's real peak, ~0.18, given
-                // its literature EC50/ceiling) got counted as "therapeutic"
-                // by PharmaDecisionEngine (Window Quality: Continuous,
-                // Recommendation: PROMISING) but "ineffective" by this local
-                // duplicate (Effective Range / Therapeutic Zone: Not
-                // observed) -- the exact contradiction seen in the report.
-                // Fixed by matching PharmaDecisionEngine.cpp's thresholds
-                // exactly rather than keeping two independent copies that
-                // can drift again; ideally this loop would read an
-                // isEffective flag PharmaDecisionEngine already computed per
-                // dose instead of re-deriving it, but that's a larger
-                // refactor than this fix warrants.
-                if (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f)
+                // BUG FIX (diazepam validation, Phase 2 receptor drugs; then
+                // AGAIN for cocaine/D1, Phase 3c): this used to re-derive its
+                // own local copy of "is this dose effective" (first
+                // suppressionScore/stabilizationScore thresholds that drifted
+                // from PharmaDecisionEngine.cpp's real ones, then even after
+                // matching those, still missing the rateChangePct>5.0f
+                // excitatory branch -- so cocaine's real +49% rate-increase
+                // MildInstability doses silently fell into "Ineffective Zone"
+                // instead of "Excitatory Zone" even though FINAL DECISION
+                // correctly flagged them NOT RECOMMENDED/HIGH RISK). Fixed
+                // for good by reading AnalyzedDose::isEffective, the single
+                // flag PharmaDecisionEngine::evaluate() already computes per
+                // dose -- no local threshold copy left here to drift.
+                if (dose.isEffective)
                     therapeuticDoses.push_back(static_cast<double>(dose.dose));
                 else
                     ineffDoses.push_back(static_cast<double>(dose.dose));
@@ -1296,12 +1288,26 @@ std::string buildDrugEvaluationReportText(
         }
     }
 
+    // Display-precision fix: each dose in report.analyzedDoses lands in
+    // EXACTLY ONE of ineffDoses/exciDoses/overSuppDoses/therapeuticDoses
+    // (the switch/if-else above is mutually exclusive per dose) -- so the
+    // same VALUE can never legitimately appear in two zones. But a fine
+    // dose_range step (e.g. step=0.006) can put two adjacent, genuinely
+    // different doses on the same 2-decimal rounding boundary (0.048 and
+    // 0.054 both print "0.05" under kRuntimeOutputPrecision=2), so one
+    // dose correctly classified Ineffective and a DIFFERENT dose correctly
+    // classified Therapeutic can print the identical string in both zone
+    // lists, looking like a contradiction when it's a display collision
+    // only. Fixed by using a fixed 4-decimal precision for this dose-list
+    // formatter only (enough to separate any dose_range step used so far).
+    constexpr int kDoseListPrecision = 4;
+
     auto formatDoses=[&](const std::vector<double>& doses) -> std::string {
         if (doses.empty()) return "Not observed";
         std::ostringstream t;
         for (std::size_t i=0;i<doses.size();++i){
             if (i) t << ", ";
-            t << formatRuntimeNumber(doses[i]);
+            t << formatRuntimeNumber(doses[i], kDoseListPrecision);
         }
         return t.str();
     };
@@ -1372,15 +1378,27 @@ std::string buildDrugEvaluationReportText(
         aLine("GAT1 Hill",                formatRuntimeNumber(evalInput.config.hill_gat1));
         aLine("GAT1 Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_gat1) + "x");
     }
-    // Phase 3a: SERT/DAT/NET -- report-only, explicitly labeled as such so
-    // it's never mistaken for a drug with a real network effect.
+    // Phase 3a / Phase 3c retrofit: SERT/DAT now have a real network effect
+    // (dose-amplification into 5-HT1A/5-HT2A or D1/D2, see
+    // ReuptakeTransporter.h's amplifiedDoseUm) WHEN the drug also configures
+    // the matching receptor -- so the "[report-only]" tag is now
+    // conditional, not automatic, for these two. NET is unconditionally
+    // report-only (no adrenergic receptor system exists in this engine).
+    const bool sertHasReceptor =
+        evalInput.config.ec50_ht1a < kReceptorInertThreshold ||
+        evalInput.config.ec50_ht2a < kReceptorInertThreshold;
+    const bool datHasReceptor =
+        evalInput.config.ec50_d1 < kReceptorInertThreshold ||
+        evalInput.config.ec50_d2 < kReceptorInertThreshold;
     if (evalInput.config.ki_sert < kReceptorInertThreshold) {
-        aLine("SERT Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_sert) + " [report-only]");
+        aLine("SERT Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_sert)
+              + (sertHasReceptor ? "" : " [report-only]"));
         aLine("SERT Hill",                formatRuntimeNumber(evalInput.config.hill_sert));
         aLine("SERT Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_sert) + "x");
     }
     if (evalInput.config.ki_dat < kReceptorInertThreshold) {
-        aLine("DAT Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_dat) + " [report-only]");
+        aLine("DAT Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_dat)
+              + (datHasReceptor ? "" : " [report-only]"));
         aLine("DAT Hill",                 formatRuntimeNumber(evalInput.config.hill_dat));
         aLine("DAT Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_dat) + "x");
     }
@@ -1610,10 +1628,15 @@ std::string buildDrugEvaluationReportText(
     // modeled] so it can never be mistaken for an observed drug effect.
     // Values computed at the same peak dose used by [Network Impact at
     // Peak Dose] above.
+    // Phase 3c retrofit: SERT/DAT only contribute a line to THIS section
+    // when they DON'T have a matching receptor (see printReportOnlyTransporter
+    // call sites below) -- when they do, they're reported in
+    // [Neuromodulator Gain Profile] instead, so they shouldn't gate this
+    // section open on their own in that case.
     const bool anyTransporterConfigured =
         evalInput.config.ki_gat1 < kReceptorInertThreshold ||
-        evalInput.config.ki_sert < kReceptorInertThreshold ||
-        evalInput.config.ki_dat  < kReceptorInertThreshold ||
+        (evalInput.config.ki_sert < kReceptorInertThreshold && !sertHasReceptor) ||
+        (evalInput.config.ki_dat  < kReceptorInertThreshold && !datHasReceptor) ||
         evalInput.config.ki_net  < kReceptorInertThreshold;
     if (anyTransporterConfigured) {
         out << "[Neurotransmitter Profile]\n";
@@ -1655,10 +1678,20 @@ std::string buildDrugEvaluationReportText(
             aLine(std::string(label) + " Clearance Fold",
                   formatRuntimeNumber(foldChange, 2) + "x baseline [report-only]");
         };
-        if (evalInput.config.ki_sert < kReceptorInertThreshold) {
+        // Phase 3c retrofit: SERT/DAT are skipped HERE (not printed as
+        // "report-only, no network effect") when they're paired with a
+        // matching receptor (5-HT1A/5-HT2A for SERT, D1/D2 for DAT) --
+        // that combination has a real effect now (dose amplification), and
+        // is already reported accurately in [Neuromodulator Gain Profile]'s
+        // "SERT/DAT Reuptake Block ... (amplifies ... receptor dose Xx)"
+        // lines. Printing both here AND there, with contradictory labels,
+        // would be exactly the kind of "report disagrees with itself" bug
+        // fixed earlier this session for Max Effect. sertHasReceptor/
+        // datHasReceptor computed in [Drug Input] above.
+        if (evalInput.config.ki_sert < kReceptorInertThreshold && !sertHasReceptor) {
             printReportOnlyTransporter("SERT", evalInput.config.ki_sert, evalInput.config.hill_sert, evalInput.config.max_extension_sert);
         }
-        if (evalInput.config.ki_dat < kReceptorInertThreshold) {
+        if (evalInput.config.ki_dat < kReceptorInertThreshold && !datHasReceptor) {
             printReportOnlyTransporter("DAT", evalInput.config.ki_dat, evalInput.config.hill_dat, evalInput.config.max_extension_dat);
         }
         if (evalInput.config.ki_net < kReceptorInertThreshold) {
@@ -1834,6 +1867,16 @@ std::string buildDrugEvaluationReportText(
     aLine(effLabel,       effRange);
     aLine("Window Quality",report.windowQuality);
     aLine("Optimal Zone",  optZone);
+    if (!report.toleratedNoiseDoses.empty()) {
+        std::ostringstream noteT;
+        for (std::size_t i=0;i<report.toleratedNoiseDoses.size();++i){
+            if (i) noteT << ", ";
+            noteT << formatRuntimeNumber(report.toleratedNoiseDoses[i], kDoseListPrecision);
+        }
+        aLine("Note", noteT.str() + " read below threshold but sit inside this "
+              "window -- treated as single-point noise, not a break in the "
+              "response (see Dose Classification Summary below)");
+    }
     out << "\n--------------------------------------------------\n\n";
 
     out << "[Dose Classification Summary]\n";

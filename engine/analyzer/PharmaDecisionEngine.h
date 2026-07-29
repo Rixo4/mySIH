@@ -77,6 +77,16 @@ struct PharmaDecisionReport {
     float therapeuticWindow    = 0.0f;
     std::string windowQuality  = "Not observed";
 
+    // contiguousRanges() (see .cpp) tolerates a single missing dose point
+    // (gap <= 2*step) when deciding Continuous vs Fragmented, so one noisy
+    // dropout inside an otherwise solid window doesn't wrongly report
+    // "Fragmented". That means a dose can fall INSIDE the reported
+    // effectiveRangeMin/Max span yet still be absent from the per-dose
+    // Ineffective/Therapeutic classification -- expected, not a bug, but
+    // confusing to read without an explanation. This lists those doses so
+    // main.cpp can print a clarifying note next to the window.
+    std::vector<double> toleratedNoiseDoses;
+
     // Safety margin: ratio of toxic threshold dose to the top of the
     // therapeutic window, when a real window exists and toxicity appears
     // strictly above it (see buildNarrowMarginNote in .cpp for how this

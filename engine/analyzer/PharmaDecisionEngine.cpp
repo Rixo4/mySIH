@@ -460,6 +460,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
              dose.networkState == NetworkState::Stable) &&
             (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f ||
              dose.rateChangePct > 5.0f);
+        // Publish the single source of truth onto the report's copy of this
+        // dose (see AnalyzedDose.h's isEffective comment) so main.cpp's
+        // Dose Classification Summary doesn't re-derive its own threshold.
+        report.analyzedDoses[i].isEffective = isEffective;
 
         const bool isToxic =
             (dose.networkState == NetworkState::SeizureActive ||
@@ -598,6 +602,21 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.windowQuality      = therapeuticRanges.size() > 1U ? "Fragmented" : "Continuous";
         onsetDose    = widest.lo;
         hasOnsetDose = true;
+
+        // Doses that fall inside the widest window's [lo,hi] span but are
+        // NOT in therapeuticDoses are exactly the gap-tolerated dropouts
+        // contiguousRanges() smoothed over (see field comment in the
+        // header). Surface them explicitly rather than leaving the
+        // Continuous/effectiveRange numbers looking inconsistent with the
+        // per-dose classification.
+        for (const auto& dose : sorted) {
+            const double d = static_cast<double>(dose.dose);
+            if (d < widest.lo - 1.0e-6 || d > widest.hi + 1.0e-6) continue;
+            const bool inTherapeutic = std::any_of(
+                therapeuticDoses.begin(), therapeuticDoses.end(),
+                [&](double td){ return std::fabs(td - d) <= 1.0e-6; });
+            if (!inTherapeutic) report.toleratedNoiseDoses.push_back(d);
+        }
     } else {
         report.hasContinuousEffectiveWindow = false;
         report.hasTherapeuticWindow = false;

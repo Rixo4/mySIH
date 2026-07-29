@@ -92,6 +92,16 @@ struct AnalyzedDose {
     // Classification
     NetworkState networkState          = NetworkState::Stable;
     MechanismSignature mechanismSignature = MechanismSignature::Unknown;
+
+    // Single source of truth for "did this dose register a real biological
+    // response" -- computed once by PharmaDecisionEngine::evaluate() (see
+    // its per-dose loop) using suppressionScore/stabilizationScore/
+    // rateChangePct. main.cpp's Dose Classification Summary reads this
+    // instead of re-deriving its own copy of the threshold, which drifted
+    // out of sync twice already (diazepam's suppression threshold, then
+    // cocaine's excitatory-MildInstability doses landing in "Ineffective
+    // Zone" despite a real +49% rate increase) before this field existed.
+    bool isEffective = false;
 };
 
 } // namespace spp::analyzer

@@ -310,6 +310,23 @@ NetworkState NetworkAnalyzer::classifyState(
     }
 
     // 3. Seizure Active
+    // KNOWN LIMITATION (found validating test_4ap.json, a real convulsant --
+    // 184% peak rate increase, Hyperexcitable at 6/10 doses, irregularityDelta
+    // +0.5): burstRateHz stayed exactly 0.00 even here. Metrics.cpp's burst
+    // detector requires 3 spikes within a 12ms window (calibrated for
+    // cortical-pyramidal burst firing, i.e. near-instantaneous >150Hz local
+    // rate), but this network's peak mean rate under maximal tested 4-AP dose
+    // was only ~49Hz -- nowhere near burst-level clustering. So the
+    // `burstRateHz >= 8.0f` / `burstRateDelta > 2.0f` (Hyperexcitable, below)
+    // branches are effectively dead given this project's current network
+    // dynamics; sync/irregularity/rate-based branches are what actually catch
+    // dangerous states today (they did here -- verdict was correct). Not a
+    // wiring bug -- detection math and the 12ms constant are both
+    // intentional/literature-based (see kBurstWindowMsDefault comment) -- but
+    // worth recalibrating burstWindowMs or revisiting whether this network
+    // should ever produce true burst dynamics, if burst rate is meant to be a
+    // real independent seizure signal rather than permanently-redundant
+    // backup to the other branches.
     if (seizureProb >= 0.80f &&
         (sync >= 0.70f || dose.metrics.burstRateHz >= 8.0f)) {
         return NetworkState::SeizureActive;
