@@ -138,11 +138,24 @@ public:
     void pushSpikes(const std::vector<std::uint8_t>& spikes);
     [[nodiscard]] std::uint8_t getDelayedSpike(std::size_t neuronId, std::size_t delaySteps) const;
 
+    // Phase 3c: vesicle pool release-scale channel, parallel to the spike
+    // bits above. Optional and additive -- releaseScale_ is filled with 1.0f
+    // in resize()/clear() and NEVER written unless a caller explicitly calls
+    // pushReleaseScales(), so getDelayedReleaseScale() returns exactly 1.0
+    // (a pure multiplicative no-op) for any caller that doesn't opt into
+    // vesicle pools. Must be called in the same step as, and strictly after,
+    // pushSpikes() -- it writes to the SAME ring slot pushSpikes() just
+    // advanced to (head_), rather than advancing head_ itself, since the two
+    // arrays represent one combined event per (neuron, step).
+    void pushReleaseScales(const std::vector<float>& releaseScales);
+    [[nodiscard]] float getDelayedReleaseScale(std::size_t neuronId, std::size_t delaySteps) const;
+
 private:
     std::size_t neuronCount_;
     std::size_t delaySteps_;
     std::size_t head_;
     std::vector<std::uint8_t> buffer_;
+    std::vector<float> releaseScale_;
 
     [[nodiscard]] std::size_t rowIndexForDelay(std::size_t delaySteps) const;
 };

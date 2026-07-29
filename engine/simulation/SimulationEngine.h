@@ -283,6 +283,18 @@ struct SimulationConfig {
     float desensitizationTauDesenseMs = 30000.0f;
     float desensitizationTauRecoveryMs = 124000.0f;
     float desensitizationMaxAttenuation = 0.9f;
+
+    // Phase 3c: vesicle pool dynamics ("synaptic fatigue"), see
+    // synapse::VesiclePoolConfig for the full design comment (including why
+    // pools are tracked per-presynaptic-neuron rather than per-synapse, and
+    // why recovery -- unlike depletion -- is not observable within a default
+    // run). OFF by default, same opt-in discipline as desensitization above.
+    bool vesiclePoolEnabled = false;
+    float vesiclePoolRrpSize = 10.0f;
+    float vesiclePoolReserveSize = 100.0f;
+    float vesiclePoolRrpRefillTauMs = 1500.0f;
+    float vesiclePoolReserveRefillTauMs = 20000.0f;
+    float vesiclePoolCalciumFactor = 1.0f;
 };
 
 struct SimulationResult {

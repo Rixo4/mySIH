@@ -1,5 +1,6 @@
 #include "BatchedSimulationEngine.h"
 #include "../neuron/ReceptorModel.h"
+#include "../synapse/NeurotransmitterPool.h"
 
 #include <algorithm>
 #include <array>
@@ -321,6 +322,30 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     std::vector<std::uint32_t> blockSpikeCount(blockCount_, 0U);
     std::vector<std::uint8_t> batchSpikeHistory;
 
+    // Phase 3c: vesicle pool dynamics, CPU path only for now (see
+    // NeurotransmitterPool.h's design notes). One pool triplet per
+    // PRESYNAPTIC neuron -- see the header's per-neuron-not-per-synapse
+    // scope note -- initialized to each pool's own configured fresh size
+    // (not VesiclePoolState's own defaults, which may not match a custom
+    // config). releaseScales mirrors spikes but carries the vesicle-pool
+    // release-scale multiplier instead of a spike bit; defaults to 1.0
+    // (no-op) and is only ever set away from 1.0 for a neuron that spiked
+    // this step.
+    synapse::VesiclePoolConfig vesiclePoolConfig;
+    vesiclePoolConfig.enabled = config_.vesiclePoolEnabled;
+    vesiclePoolConfig.rrpSize = config_.vesiclePoolRrpSize;
+    vesiclePoolConfig.reserveSize = config_.vesiclePoolReserveSize;
+    vesiclePoolConfig.rrpRefillTauMs = config_.vesiclePoolRrpRefillTauMs;
+    vesiclePoolConfig.reserveRefillTauMs = config_.vesiclePoolReserveRefillTauMs;
+    vesiclePoolConfig.calciumFactor = config_.vesiclePoolCalciumFactor;
+
+    std::vector<synapse::VesiclePoolState> vesiclePoolStates(totalNeurons_);
+    for (auto& poolState : vesiclePoolStates) {
+        poolState.rrp = vesiclePoolConfig.rrpSize;
+        poolState.reserve = vesiclePoolConfig.reserveSize;
+    }
+    std::vector<float> releaseScales(totalNeurons_, 1.0f);
+
     // Per-(block, type) Hill-equation block fractions, recomputed once per
     // timestep instead of once per neuron. Index = block * 2 + type
     // (type: 0 = inhibitory, 1 = excitatory). {blockNa, blockK, blockCa}.
@@ -538,6 +563,12 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         for (std::size_t i = 0; i < totalNeurons_; ++i) {
             adaptationCurrent[i] = std::clamp(adaptationCurrent[i] * adaptationDecay, 0.0f, adaptationMaxCurrent);
 
+            // Phase 3c: continuous pool refill, every neuron, every step,
+            // regardless of whether it spikes -- refill is a background
+            // process independent of firing (see NeurotransmitterPool.h).
+            // No-op when vesiclePoolConfig.enabled is false.
+            synapse::refillVesiclePools(vesiclePoolStates[i], vesiclePoolConfig, config_.dtMs);
+
             // All four receptors: real conductance currents, same as
             // SimulationEngine::run() -- gMaxAMPA/gMaxGABAa/gMaxNMDA/
             // gMaxGABAb peak-scale the raw 0..1 conductance, applied inside
@@ -667,6 +698,18 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 population_.caCa[i] = state.caCa;  // FIX: write Ca concentration back
 
                 spikes[i] = didSpike;
+
+                // Phase 3c: spike-triggered vesicle release, using this
+                // neuron's own gCaEff (already computed above this step, see
+                // the synapticEff loop) as the Ca-dependent release-
+                // probability drive proxy, per PHASE3_PLAN.md section 4's
+                // releaseProb = 1 - exp(-gCaEff * calciumFactor). Returns
+                // 1.0 (no-op) whenever vesiclePoolConfig.enabled is false or
+                // this neuron didn't spike -- see NeurotransmitterPool.h's
+                // baseline-preservation note.
+                releaseScales[i] = (didSpike != 0U)
+                    ? synapse::triggerVesicleRelease(vesiclePoolStates[i], vesiclePoolConfig, gCaEff[i], rng_)
+                    : 1.0f;
             }
         }
 
@@ -698,6 +741,10 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         }
 
         delayBuffer_.pushSpikes(spikes);
+        // Must follow pushSpikes() in the same step -- see DelayBuffer's
+        // header comment on why this writes to the ring slot pushSpikes()
+        // just advanced to rather than advancing it again itself.
+        delayBuffer_.pushReleaseScales(releaseScales);
     }
 
     if (runOnGpu) {

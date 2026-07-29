@@ -46,13 +46,17 @@ public:
 
     [[nodiscard]] std::size_t neuronsPerBlock() const { return neuronsPerBlock_; }
     [[nodiscard]] std::size_t blockCount() const { return blockCount_; }
+
+    // Set by run() to whichever path actually executed (config_.useGpu &&
+    // cudaSimulator_->available()) -- added after a user asked "did this
+    // run on GPU or CPU?" and the honest answer was "no way to tell from
+    // the report." Valid only after run() has been called at least once.
     [[nodiscard]] bool lastRunUsedGpu() const { return lastRunUsedGpu_; }
 
 private:
     std::size_t neuronsPerBlock_;
     std::size_t blockCount_;
     std::size_t totalNeurons_;
-    bool lastRunUsedGpu_ = false;
 
     SimulationConfig config_;
     drug::DrugModel drugModel_;
@@ -77,6 +81,7 @@ private:
     std::mt19937 rng_;
 
     std::unique_ptr<cuda::CudaSimulator> cudaSimulator_;
+    bool lastRunUsedGpu_ = false;
 };
 
 } // namespace spp::simulation

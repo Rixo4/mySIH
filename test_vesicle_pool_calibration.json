@@ -1,0 +1,18 @@
+{
+  "drug_name": "Vesicle Pool Smoke Test (no drug -- network property only)",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "vesicle_pool": {
+    "enabled": true,
+    "rrp_size": 5.0,
+    "reserve_size": 100.0,
+    "rrp_refill_tau_ms": 1500.0,
+    "reserve_refill_tau_ms": 20000.0,
+    "calcium_factor": 2.0
+  },
+  "dose_range": { "min": 0.0, "max": 0.0, "step": 1.0 },
+  "runs": 10
+}

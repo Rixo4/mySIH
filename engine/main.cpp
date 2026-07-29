@@ -168,6 +168,20 @@ struct SimulationConfig {
     double desensitization_tau_recovery_ms = 124000.0;
     double desensitization_max_attenuation = 0.9;
 
+    // Phase 3c: vesicle pool dynamics ("synaptic fatigue"), see
+    // engine/synapse/NeurotransmitterPool.h for the full design (including
+    // why depletion is observable within a default-duration run but recovery
+    // is not -- same "sim_time is the knob for the slow dynamics" pattern as
+    // desensitization above). CPU-only until the GPU kernel is ported (see
+    // validateConfig()) -- OFF by default, zero behavior change unless a
+    // test deliberately opts in.
+    bool vesicle_pool_enabled              = false;
+    double vesicle_pool_rrp_size           = 10.0;
+    double vesicle_pool_reserve_size       = 100.0;
+    double vesicle_pool_rrp_refill_tau_ms     = 1500.0;
+    double vesicle_pool_reserve_refill_tau_ms = 20000.0;
+    double vesicle_pool_calcium_factor     = 1.0;
+
     // Phase 3c: neuromodulator gain system (D1/D2/5-HT1A/5-HT2A), see
     // engine/synapse/NeuromodulatorSystem.h for the full design/literature
     // basis. Defaults are inert (ec50 huge, gain ceilings inert), matching
@@ -383,6 +397,24 @@ void validateConfig(const SimulationConfig& cfg) {
     // the GPU path as implemented-but-unverified until a real CUDA run
     // confirms it matches the CPU path's numbers, same caveat already
     // documented for the rest of the receptor-conductance GPU mirror.
+
+    // Phase 3c: vesicle pools have NO GPU kernel yet at all (unlike
+    // desensitization above, which at least has an unverified GPU mirror to
+    // fall through to) -- the batched CUDA path in NeuronUpdate.cu doesn't
+    // know this feature exists. Silently running "Compute Backend: GPU"
+    // while vesicle pool effects are structurally absent from that run would
+    // be a real report-vs-reality inconsistency, exactly the kind of thing
+    // this project has caught and fixed before rather than shipped. Reject
+    // explicitly instead. NOTE: "use_cuda" is NOT a parsed JSON key anywhere
+    // in this file (use_cuda defaults to true and can only be forced off via
+    // the SPP_FORCE_CPU=1 environment variable) -- the error message below
+    // must say that, not point at a JSON key that doesn't exist.
+    if (cfg.vesicle_pool_enabled && cfg.use_cuda) {
+        throw std::runtime_error(
+            "Vesicle pool dynamics (Phase 3c) have no GPU kernel yet -- "
+            "rerun with the SPP_FORCE_CPU=1 environment variable set, or "
+            "disable vesicle_pool.");
+    }
 }
 
 std::uint32_t makeSeed() {
@@ -447,6 +479,15 @@ spp::simulation::SimulationConfig buildEngineConfig(const SimulationConfig& cfg,
     simCfg.desensitizationTauDesenseMs     = static_cast<float>(cfg.desensitization_tau_desense_ms);
     simCfg.desensitizationTauRecoveryMs    = static_cast<float>(cfg.desensitization_tau_recovery_ms);
     simCfg.desensitizationMaxAttenuation   = static_cast<float>(cfg.desensitization_max_attenuation);
+
+    // Phase 3c: vesicle pool pass-through, see SimulationConfig comment
+    // above and synapse::VesiclePoolConfig for the full design.
+    simCfg.vesiclePoolEnabled              = cfg.vesicle_pool_enabled;
+    simCfg.vesiclePoolRrpSize              = static_cast<float>(cfg.vesicle_pool_rrp_size);
+    simCfg.vesiclePoolReserveSize          = static_cast<float>(cfg.vesicle_pool_reserve_size);
+    simCfg.vesiclePoolRrpRefillTauMs       = static_cast<float>(cfg.vesicle_pool_rrp_refill_tau_ms);
+    simCfg.vesiclePoolReserveRefillTauMs   = static_cast<float>(cfg.vesicle_pool_reserve_refill_tau_ms);
+    simCfg.vesiclePoolCalciumFactor        = static_cast<float>(cfg.vesicle_pool_calcium_factor);
 
     return simCfg;
 }
@@ -1208,6 +1249,23 @@ static bool loadDrugConfigFromJsonFile(
         if(auto n=extractJsonNumber(c,"tau_recovery_ms",dsPos);n) out.config.desensitization_tau_recovery_ms=*n;
         if(auto n=extractJsonNumber(c,"max_attenuation",dsPos);n) out.config.desensitization_max_attenuation=*n;
     }
+
+    // Phase 3c: top-level "vesicle_pool" section, same opt-in discipline as
+    // "desensitization" above (out.config.vesicle_pool_enabled defaults to
+    // false; a drug config that never mentions this key changes nothing).
+    // Depletion is observable at the normal ~400-500ms sim_time; recovery is
+    // not (see NeurotransmitterPool.h) -- pair with the same "sim_time_ms"
+    // override below for a long-duration recovery test.
+    const auto vpPos=c.find("\"vesicle_pool\"");
+    if(vpPos!=c.npos){
+        if(auto b=extractJsonBool(c,"enabled",vpPos);b) out.config.vesicle_pool_enabled=*b;
+        if(auto n=extractJsonNumber(c,"rrp_size",vpPos);n) out.config.vesicle_pool_rrp_size=*n;
+        if(auto n=extractJsonNumber(c,"reserve_size",vpPos);n) out.config.vesicle_pool_reserve_size=*n;
+        if(auto n=extractJsonNumber(c,"rrp_refill_tau_ms",vpPos);n) out.config.vesicle_pool_rrp_refill_tau_ms=*n;
+        if(auto n=extractJsonNumber(c,"reserve_refill_tau_ms",vpPos);n) out.config.vesicle_pool_reserve_refill_tau_ms=*n;
+        if(auto n=extractJsonNumber(c,"calcium_factor",vpPos);n) out.config.vesicle_pool_calcium_factor=*n;
+    }
+
     if(auto v=extractJsonNumber(c,"sim_time_ms");v) out.config.sim_time=*v;
 
     return true;
@@ -1414,6 +1472,25 @@ std::string buildDrugEvaluationReportText(
         aLine("  Recovery Tau",         formatRuntimeNumber(evalInput.config.desensitization_tau_recovery_ms) + " ms");
         aLine("  Max Attenuation",      formatRuntimeNumber(evalInput.config.desensitization_max_attenuation * 100.0) + "%");
         aLine("  Run Duration",         formatRuntimeNumber(evalInput.config.sim_time) + " ms");
+    }
+    // Phase 3c: vesicle pool config, only printed when configured. Honest
+    // scoping note printed alongside it every time (not just in comments) --
+    // see NeurotransmitterPool.h for why depletion is observable at default
+    // sim_time but recovery is not.
+    if (evalInput.config.vesicle_pool_enabled) {
+        aLine("Vesicle Pool Dynamics", "ENABLED (CPU only)");
+        aLine("  RRP Size",            formatRuntimeNumber(evalInput.config.vesicle_pool_rrp_size) + " vesicles");
+        aLine("  Reserve Size",        formatRuntimeNumber(evalInput.config.vesicle_pool_reserve_size) + " vesicles");
+        aLine("  RRP Refill Tau",      formatRuntimeNumber(evalInput.config.vesicle_pool_rrp_refill_tau_ms) + " ms");
+        aLine("  Reserve Refill Tau",  formatRuntimeNumber(evalInput.config.vesicle_pool_reserve_refill_tau_ms) + " ms");
+        aLine("  Calcium Factor",      formatRuntimeNumber(evalInput.config.vesicle_pool_calcium_factor));
+        aLine("  Run Duration",        formatRuntimeNumber(evalInput.config.sim_time) + " ms");
+        const bool longEnoughForRefill =
+            evalInput.config.sim_time > 3.0 * evalInput.config.vesicle_pool_rrp_refill_tau_ms;
+        aLine("  Recovery Observable", longEnoughForRefill
+            ? "Plausible (run duration exceeds ~3x RRP refill tau)"
+            : "No (run duration is short relative to refill tau -- depletion "
+              "may show, recovery will not; see NeurotransmitterPool.h)");
     }
     // Phase 3c: neuromodulator gain config, only printed per-receptor when
     // that receptor is actually configured (kReceptorInertThreshold already

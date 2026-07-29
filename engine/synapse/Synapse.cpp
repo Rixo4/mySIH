@@ -30,10 +30,12 @@ void DelayBuffer::resize(std::size_t neuronCount, std::size_t delaySteps) {
     delaySteps_ = std::max<std::size_t>(1, delaySteps);
     head_ = 0;
     buffer_.assign(neuronCount_ * delaySteps_, 0U);
+    releaseScale_.assign(neuronCount_ * delaySteps_, 1.0f);
 }
 
 void DelayBuffer::clear() {
     std::fill(buffer_.begin(), buffer_.end(), 0U);
+    std::fill(releaseScale_.begin(), releaseScale_.end(), 1.0f);
     head_ = 0;
 }
 
@@ -61,6 +63,28 @@ std::uint8_t DelayBuffer::getDelayedSpike(std::size_t neuronId, std::size_t dela
     const std::size_t row = rowIndexForDelay(delaySteps);
     const std::size_t index = row * neuronCount_ + neuronId;
     return buffer_[index];
+}
+
+void DelayBuffer::pushReleaseScales(const std::vector<float>& releaseScales) {
+    if (releaseScales.size() != neuronCount_) {
+        throw std::invalid_argument("Release-scale vector size must match delay buffer neuron count.");
+    }
+
+    // Writes to the CURRENT head_ -- the slot pushSpikes() already advanced
+    // to for this same step. Does not advance head_ itself; see header
+    // comment on call-order requirement.
+    const std::size_t offset = head_ * neuronCount_;
+    std::copy(releaseScales.begin(), releaseScales.end(), releaseScale_.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+float DelayBuffer::getDelayedReleaseScale(std::size_t neuronId, std::size_t delaySteps) const {
+    if (neuronId >= neuronCount_) {
+        throw std::out_of_range("Neuron index out of range in delay buffer.");
+    }
+
+    const std::size_t row = rowIndexForDelay(delaySteps);
+    const std::size_t index = row * neuronCount_ + neuronId;
+    return releaseScale_[index];
 }
 
 void SynapseMatrix::build(std::size_t neuronCount, const std::vector<SynapseEdge>& edges) {
@@ -201,10 +225,17 @@ void SynapseMatrix::accumulateReceptorConductances(
             if (spike == 0U) {
                 continue;
             }
+            // Phase 3c: vesicle pool release scale, 1.0 (no-op) unless the
+            // caller opted in via DelayBuffer::pushReleaseScales -- see
+            // Synapse.h's DelayBuffer comment and NeurotransmitterPool.h's
+            // baseline-preservation note. Multiplying here rather than
+            // gating on it keeps this identical to today's math whenever
+            // vesicle pools are disabled.
+            const float releaseScale = delayBuffer.getDelayedReleaseScale(incomingPre_[idx], incomingDelay_[idx]);
             if (incomingSign_[idx] > 0) {
-                excInput += incomingWeight_[idx];
+                excInput += incomingWeight_[idx] * releaseScale;
             } else {
-                inhInput += incomingWeight_[idx];
+                inhInput += incomingWeight_[idx] * releaseScale;
             }
         }
 

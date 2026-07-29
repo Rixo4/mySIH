@@ -19,6 +19,7 @@ set(SPP_SOURCES
     engine/synapse/Synapse.cpp
     engine/synapse/NeuromodulatorSystem.cpp
     engine/synapse/ReuptakeTransporter.cpp
+    engine/synapse/NeurotransmitterPool.cpp
     engine/network/Network.cpp
     engine/simulation/SimulationEngine.cpp
     engine/simulation/BatchedSimulationEngine.cpp
@@ -63,7 +64,8 @@ if(SPP_CAN_ENABLE_CUDA)
     endif()
 endif()
 
-add_executable(silicon_patient ${SPP_SOURCES})
+add_executable(silicon_patient ${SPP_SOURCES}
+    engine/synapse/NeurotransmitterPool.cpp)
 
 target_include_directories(silicon_patient PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/engine

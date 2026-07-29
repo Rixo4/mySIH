@@ -1,0 +1,13 @@
+{
+  "drug_name": "Vesicle Pool Smoke Test CONTROL (pool disabled, same network)",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "vesicle_pool": {
+    "enabled": false
+  },
+  "dose_range": { "min": 0.0, "max": 0.0, "step": 1.0 },
+  "runs": 5
+}
