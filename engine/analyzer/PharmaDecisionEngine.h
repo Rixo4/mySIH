@@ -149,6 +149,8 @@ struct PharmaDecisionReport {
     std::string riskLevel      = "LOW";
     DrugRiskTier overallTier   = DrugRiskTier::Safe;
 
+    bool excitatoryVerdictViaMagnitudeFloor = false;
+
     // Deprecated — kept so report_parser.py still finds these fields
     std::string stabilityScore = "UNSPECIFIED";
 };

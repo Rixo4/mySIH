@@ -272,7 +272,18 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             static_cast<int>(receptorProfile_.dat.mechanism),
             receptorProfile_.dat.kiUm,
             receptorProfile_.dat.hill,
-            receptorProfile_.dat.maxExtensionFold
+            receptorProfile_.dat.maxExtensionFold,
+            // Phase 3c: vesicle pool dynamics -- same config_.vesiclePool*
+            // fields the CPU fallback loop below reads directly (see
+            // vesiclePoolConfig construction further down in this
+            // function). static_cast<int> for the bool, same POD-copied-
+            // to-device reasoning as every other mechanism int above.
+            static_cast<int>(config_.vesiclePoolEnabled),
+            config_.vesiclePoolRrpSize,
+            config_.vesiclePoolReserveSize,
+            config_.vesiclePoolRrpRefillTauMs,
+            config_.vesiclePoolReserveRefillTauMs,
+            config_.vesiclePoolCalciumFactor
         );
 #endif
     }

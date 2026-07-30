@@ -788,7 +788,21 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.recommendation = "NOT RECOMMENDED";
         report.riskLevel      = "HIGH";
         report.overallTier    = DrugRiskTier::Toxic;
-        if (excitatory)
+        if (excitatory && dominantState != NetworkState::Hyperexcitable) {
+            // BUG FIX (Phase 3 10-drug validation, DOI): `excitatory` also fires via the
+            // categorical EXCITATORY_RESPONSE + maxEffectPct>10 path above (dominantState
+            // stays Stable the whole run -- see that branch's comment, same as the
+            // 4-AP/Nimodipine precedent). The old boilerplate text always blamed "burst
+            // rate" even when Burst Rate Delta was flat (e.g. DOI: 0.00 Hz, driven purely
+            // by a +12.2% rate change), contradicting the report's own printed numbers.
+            report.excitatoryVerdictViaMagnitudeFloor = true;
+            std::ostringstream r;
+            r << std::fixed << std::setprecision(1)
+              << "Firing rate rose " << finalDose.rateChangePct << "% from baseline, a net "
+                 "excitatory effect large enough to exceed this engine's safety floor for a "
+                 "categorical excitatory response, across the tested dose range.";
+            report.reason = r.str();
+        } else if (excitatory)
             report.reason = "Burst rate, irregularity, and excitability markers exceeded "
                             "safe neural stability limits across the tested dose range.";
         else if (dangerous)
@@ -817,9 +831,22 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         report.recommendation = lowStability ? "CAUTION"    : "PROMISING";
         report.riskLevel      = lowStability ? "MODERATE"   : "LOW";
         report.overallTier    = lowStability ? DrugRiskTier::ModerateRisk : DrugRiskTier::Safe;
-        report.reason = lowStability
-            ? "Therapeutic response detected but inter-run variability reduces confidence."
-            : "Continuous therapeutic window identified with no accompanying instability.";
+        // BUG FIX (Phase 3 10-drug validation, bromocriptine): this branch used
+        // to always say "Continuous therapeutic window" even when
+        // report.windowQuality was actually "Fragmented" (therapeuticRanges.size()
+        // > 1, i.e. multiple disjoint therapeutic sub-ranges with an ineffective
+        // dose in between) -- report text and report.windowQuality disagreed.
+        // fragmentedWindow already existed for the confidence calc below; just
+        // wasn't consulted here.
+        if (lowStability)
+            report.reason = "Therapeutic response detected but inter-run variability reduces confidence.";
+        else if (fragmentedWindow)
+            report.reason = "A therapeutic window was identified, but it is fragmented -- some "
+                            "doses within the tested range fell back below the effectiveness "
+                            "threshold rather than forming one unbroken window. No accompanying "
+                            "instability was observed.";
+        else
+            report.reason = "Continuous therapeutic window identified with no accompanying instability.";
 
     } else {
         report.recommendation = "LIMITED EFFICACY";

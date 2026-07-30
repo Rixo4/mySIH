@@ -143,6 +143,21 @@ struct BatchedStepLaunchInfo {
     float datKiUm = 1.0e9f;
     float datHill = 1.0f;
     float datMaxExtensionFold = 1.0f;
+
+    // Phase 3c: vesicle pool dynamics -- mirrors synapse::VesiclePoolConfig
+    // (NeurotransmitterPool.h) exactly. Unlike gat1Ki/d1Ec50/etc above, this
+    // DOES need persistent per-neuron state (BatchedStepDevicePointers::
+    // vesicleRrp/vesicleReserve below), same reasoning as desensitization's
+    // gabaADesensitization -- pool depletion/refill has to persist across
+    // steps, it isn't a stateless function of dose. vesiclePoolEnabled is an
+    // int (not bool) for the same launch-struct-is-POD-copied-to-device
+    // reason gat1Mechanism/sertMechanism etc. are ints, not enums.
+    int vesiclePoolEnabled = 0;
+    float vesiclePoolRrpSize = 10.0f;
+    float vesiclePoolReserveSize = 100.0f;
+    float vesiclePoolRrpRefillTauMs = 1500.0f;
+    float vesiclePoolReserveRefillTauMs = 20000.0f;
+    float vesiclePoolCalciumFactor = 1.0f;
 };
 
 struct BatchedStepDevicePointers {
@@ -187,6 +202,18 @@ struct BatchedStepDevicePointers {
     // packed 8-wide receptor state block above since it's one value instead
     // of a decay/rise pair.
     float* gabaADesensitization = nullptr;
+
+    // Phase 3c: vesicle pool release-scale ring buffer, parallel to
+    // delayBuffer above (same neuronCount*delaySteps shape, same indexing).
+    // Mirrors DelayBuffer::releaseScale_ (Synapse.h) exactly -- defaults to
+    // 1.0f everywhere (pure multiplicative no-op) unless vesiclePoolEnabled.
+    // Persistent per-neuron pool state (rrp/reserve), mirrors
+    // synapse::VesiclePoolState exactly -- one triplet's worth of state per
+    // PRESYNAPTIC neuron (see NeurotransmitterPool.h's per-neuron-not-per-
+    // synapse scope note), initialized to each pool's own fresh size.
+    float* releaseScale = nullptr;
+    float* vesicleRrp = nullptr;
+    float* vesicleReserve = nullptr;
 
     float* v = nullptr;
     float* m = nullptr;

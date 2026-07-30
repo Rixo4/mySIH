@@ -215,6 +215,24 @@ __device__ float hillBlockDevice(float dose, float ic50, float hill) {
     return clamp01(dosePow / (dosePow + ic50Pow + 1.0e-12f));
 }
 
+// Phase 3c: vesicle pool release draw -- curand has no built-in binomial
+// generator, so this mirrors std::binomial_distribution<int>'s own
+// semantics exactly (n independent Bernoulli trials) rather than
+// approximating with a normal/Poisson curve. Cheap and exact for the small
+// n this is actually called with (RRP is realistically 5-20 vesicles per
+// NeurotransmitterPool.h's literature-informed defaults); capped at 128 to
+// bound the loop if a config is ever misconfigured far outside that range.
+__device__ int binomialDrawDevice(int n, float p, curandState* state) {
+    if (n <= 0 || p <= 0.0f) return 0;
+    if (p >= 1.0f) return n;
+    const int nClamped = min(n, 128);
+    int count = 0;
+    for (int k = 0; k < nClamped; ++k) {
+        if (curand_uniform(state) < p) ++count;
+    }
+    return count;
+}
+
 __device__ void integrateNeuronState(
     std::size_t i,
     float timeMs,
@@ -392,10 +410,18 @@ __global__ void fusedBatchedStepKernel(
             continue;
         }
 
+        // Phase 3c: vesicle pool release scale, 1.0 (no-op) unless
+        // launchInfo.vesiclePoolEnabled -- mirrors Synapse.cpp's
+        // accumulateReceptorConductances multiplying incomingWeight_[idx]
+        // by delayBuffer.getDelayedReleaseScale(...) exactly. Same ring
+        // buffer indexing (spikeIndex) as the spike bit above, since both
+        // represent the same (presynaptic neuron, delayed step) event.
+        const float releaseScale = devicePointers.releaseScale[spikeIndex];
+
         if (devicePointers.incomingSign[idx] > 0) {
-            iExcPulse += devicePointers.incomingWeight[idx];
+            iExcPulse += devicePointers.incomingWeight[idx] * releaseScale;
         } else {
-            iInhPulse += devicePointers.incomingWeight[idx];
+            iInhPulse += devicePointers.incomingWeight[idx] * releaseScale;
         }
     }
 
@@ -441,6 +467,29 @@ __global__ void fusedBatchedStepKernel(
 
     const float gNaEff = fmaxf(0.05f * safeGNa, safeGNa * fmaxf(0.0f, 1.0f - blockNa));
     const float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
+
+    // Phase 3c: vesicle pool continuous refill -- every thread, every step,
+    // regardless of whether it spikes this step, mirrors
+    // synapse::refillVesiclePools exactly (bounded relaxation toward each
+    // pool's own fresh size, RRP's rate additionally scaled by Reserve's
+    // fractional availability). No-op when vesiclePoolEnabled is false.
+    float vesicleRrp = devicePointers.vesicleRrp[i];
+    float vesicleReserve = devicePointers.vesicleReserve[i];
+    if (launchInfo.vesiclePoolEnabled != 0) {
+        const float reserveTau = fmaxf(1.0f, launchInfo.vesiclePoolReserveRefillTauMs);
+        vesicleReserve += (launchInfo.dtMs / reserveTau) * (launchInfo.vesiclePoolReserveSize - vesicleReserve);
+        vesicleReserve = clamp01(vesicleReserve / fmaxf(1.0e-6f, launchInfo.vesiclePoolReserveSize)) * launchInfo.vesiclePoolReserveSize;
+
+        const float rrpTau = fmaxf(1.0f, launchInfo.vesiclePoolRrpRefillTauMs);
+        const float reserveAvailability = (launchInfo.vesiclePoolReserveSize > 1.0e-6f)
+            ? clamp01(vesicleReserve / launchInfo.vesiclePoolReserveSize)
+            : 0.0f;
+        vesicleRrp += (launchInfo.dtMs / rrpTau) * (launchInfo.vesiclePoolRrpSize - vesicleRrp) * reserveAvailability;
+        vesicleRrp = clamp01(vesicleRrp / fmaxf(1.0e-6f, launchInfo.vesiclePoolRrpSize)) * launchInfo.vesiclePoolRrpSize;
+
+        devicePointers.vesicleReserve[i] = vesicleReserve;
+        devicePointers.vesicleRrp[i] = vesicleRrp;
+    }
 
     // Phase 3c: neuromodulator gain (D1/D2/5-HT1A/5-HT2A) -- mirrors
     // DrugModel::computeNeuromodulatorGainModifiers (CPU,
@@ -664,10 +713,41 @@ __global__ void fusedBatchedStepKernel(
         adapt = fminf(launchInfo.adaptationMaxCurrent, fmaxf(0.0f, adapt + adaptStep));
     }
 
+    // Phase 3c: spike-triggered vesicle release -- mirrors
+    // synapse::triggerVesicleRelease exactly, using this thread's own gCaEff
+    // (already computed above) as the Ca-dependent release-probability
+    // drive proxy, and this thread's own curandState (already loaded as
+    // localState, consumed here BEFORE the rngStates[i]=localState write-
+    // back below so the draw is properly seeded/advanced per thread per
+    // step). Returns 1.0 (no-op) whenever vesiclePoolEnabled is false or
+    // this neuron didn't spike -- see NeurotransmitterPool.h's baseline-
+    // preservation note (a fresh/undepleted pool returns ~1.0 in
+    // expectation, so every already-calibrated conductance ceiling keeps
+    // working unchanged the instant a run starts).
+    float releaseScaleOut = 1.0f;
+    if (launchInfo.vesiclePoolEnabled != 0 && spike != 0U) {
+        const float drive = fmaxf(0.0f, gCaEff);
+        const float releaseProb = clamp01(1.0f - expf(-fmaxf(0.0f, launchInfo.vesiclePoolCalciumFactor) * drive));
+        const float expectedFreshRelease = releaseProb * launchInfo.vesiclePoolRrpSize;
+
+        const int nAvailable = static_cast<int>(lroundf(fmaxf(0.0f, vesicleRrp)));
+        int released = 0;
+        if (nAvailable > 0 && releaseProb > 0.0f) {
+            released = binomialDrawDevice(nAvailable, releaseProb, &localState);
+        }
+        vesicleRrp = fminf(launchInfo.vesiclePoolRrpSize, fmaxf(0.0f, vesicleRrp - static_cast<float>(released)));
+        devicePointers.vesicleRrp[i] = vesicleRrp;
+
+        releaseScaleOut = (expectedFreshRelease > 1.0e-6f)
+            ? (static_cast<float>(released) / expectedFreshRelease)
+            : 1.0f;
+    }
+
     devicePointers.iExcState[i] = excState;
     devicePointers.iInhState[i] = inhState;
     devicePointers.adaptationCurrent[i] = adapt;
     devicePointers.delayBuffer[newHead * launchInfo.neuronCount + i] = spike;
+    devicePointers.releaseScale[newHead * launchInfo.neuronCount + i] = releaseScaleOut;
     devicePointers.spikeHistory[writeIndex] = spike;
 
     rngStates[i] = localState;
@@ -977,6 +1057,20 @@ struct CudaSimulator::DeviceBuffers {
     float batchedDatHill = 1.0f;
     float batchedDatMaxExtensionFold = 1.0f;
 
+    // Phase 3c: vesicle pool dynamics -- releaseScale is a parallel ring
+    // buffer to batchedDelayBuffer (same neuronCount_*delaySteps_ shape);
+    // vesicleRrp/vesicleReserve are persistent per-neuron state, same
+    // storage pattern as batchedGabaADesensitization above.
+    float* batchedReleaseScale = nullptr;
+    float* batchedVesicleRrp = nullptr;
+    float* batchedVesicleReserve = nullptr;
+    int batchedVesiclePoolEnabled = 0;
+    float batchedVesiclePoolRrpSize = 10.0f;
+    float batchedVesiclePoolReserveSize = 100.0f;
+    float batchedVesiclePoolRrpRefillTauMs = 1500.0f;
+    float batchedVesiclePoolReserveRefillTauMs = 20000.0f;
+    float batchedVesiclePoolCalciumFactor = 1.0f;
+
     std::size_t batchedDelaySteps = 0;
     std::uint32_t batchedDelayHead = 0;
     std::size_t batchedBatchWindowSteps = 0;
@@ -1079,6 +1173,9 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->batchedSpikeHistory);
             cudaFree(buffers_->batchedReceptorState);
             cudaFree(buffers_->batchedGabaADesensitization);
+            cudaFree(buffers_->batchedReleaseScale);
+            cudaFree(buffers_->batchedVesicleRrp);
+            cudaFree(buffers_->batchedVesicleReserve);
             if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
             if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
             delete buffers_;
@@ -1128,6 +1225,9 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
     cudaFree(buffers_->batchedGabaADesensitization);
+    cudaFree(buffers_->batchedReleaseScale);
+    cudaFree(buffers_->batchedVesicleRrp);
+    cudaFree(buffers_->batchedVesicleReserve);
 
     if (buffers_->pinnedInput != nullptr) cudaFreeHost(buffers_->pinnedInput);
     if (buffers_->pinnedSpikes != nullptr) cudaFreeHost(buffers_->pinnedSpikes);
@@ -1381,7 +1481,15 @@ void CudaSimulator::initializeBatchedSimulation(
     int datMechanism,
     float datKiUm,
     float datHill,
-    float datMaxExtensionFold
+    float datMaxExtensionFold,
+    // Phase 3c: vesicle pool dynamics -- see NeuronUpdate.h's
+    // BatchedStepLaunchInfo comment / NeurotransmitterPool.h for the design.
+    int vesiclePoolEnabled,
+    float vesiclePoolRrpSize,
+    float vesiclePoolReserveSize,
+    float vesiclePoolRrpRefillTauMs,
+    float vesiclePoolReserveRefillTauMs,
+    float vesiclePoolCalciumFactor
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1423,6 +1531,9 @@ void CudaSimulator::initializeBatchedSimulation(
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
     cudaFree(buffers_->batchedGabaADesensitization);
+    cudaFree(buffers_->batchedReleaseScale);
+    cudaFree(buffers_->batchedVesicleRrp);
+    cudaFree(buffers_->batchedVesicleReserve);
 
     checkCuda(cudaMalloc(&buffers_->incomingOffsets, offsetBytes), "cudaMalloc incomingOffsets");
     checkCuda(cudaMalloc(&buffers_->incomingPre, edgeBytes), "cudaMalloc incomingPre");
@@ -1494,6 +1605,12 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedDatKiUm = datKiUm;
     buffers_->batchedDatHill = datHill;
     buffers_->batchedDatMaxExtensionFold = datMaxExtensionFold;
+    buffers_->batchedVesiclePoolEnabled = vesiclePoolEnabled;
+    buffers_->batchedVesiclePoolRrpSize = vesiclePoolRrpSize;
+    buffers_->batchedVesiclePoolReserveSize = vesiclePoolReserveSize;
+    buffers_->batchedVesiclePoolRrpRefillTauMs = vesiclePoolRrpRefillTauMs;
+    buffers_->batchedVesiclePoolReserveRefillTauMs = vesiclePoolReserveRefillTauMs;
+    buffers_->batchedVesiclePoolCalciumFactor = vesiclePoolCalciumFactor;
 
     checkCuda(cudaMalloc(&buffers_->batchedDelayBuffer, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "cudaMalloc batchedDelayBuffer");
     checkCuda(cudaMalloc(&buffers_->batchedIExcState, floatBytes), "cudaMalloc batchedIExcState");
@@ -1528,6 +1645,28 @@ void CudaSimulator::initializeBatchedSimulation(
     // it's one value, not a decay/rise pair).
     checkCuda(cudaMalloc(&buffers_->batchedGabaADesensitization, floatBytes), "cudaMalloc batchedGabaADesensitization");
     checkCuda(cudaMemset(buffers_->batchedGabaADesensitization, 0, floatBytes), "memset batchedGabaADesensitization");
+
+    // Phase 3c: vesicle pool dynamics. releaseScale can't be zero-memset
+    // like the state above -- its no-op value is 1.0 (multiplicative
+    // passthrough, see NeurotransmitterPool.h's baseline-preservation
+    // note), and 1.0f's bit pattern isn't all-zero-bytes, so it's filled on
+    // the host and copied in. Same reasoning for vesicleRrp/vesicleReserve:
+    // their fresh/no-op value is each pool's own configured size, not zero.
+    // This only runs once per initializeBatchedSimulation call (not
+    // per-step), so a host-side fill + single H2D copy is cheap enough not
+    // to need an init kernel.
+    const std::size_t releaseScaleBytes = neuronCount_ * buffers_->batchedDelaySteps * sizeof(float);
+    checkCuda(cudaMalloc(&buffers_->batchedReleaseScale, releaseScaleBytes), "cudaMalloc batchedReleaseScale");
+    checkCuda(cudaMalloc(&buffers_->batchedVesicleRrp, floatBytes), "cudaMalloc batchedVesicleRrp");
+    checkCuda(cudaMalloc(&buffers_->batchedVesicleReserve, floatBytes), "cudaMalloc batchedVesicleReserve");
+    {
+        std::vector<float> releaseScaleInit(neuronCount_ * buffers_->batchedDelaySteps, 1.0f);
+        std::vector<float> vesicleRrpInit(neuronCount_, vesiclePoolRrpSize);
+        std::vector<float> vesicleReserveInit(neuronCount_, vesiclePoolReserveSize);
+        checkCuda(cudaMemcpy(buffers_->batchedReleaseScale, releaseScaleInit.data(), releaseScaleBytes, cudaMemcpyHostToDevice), "copy releaseScale init H2D");
+        checkCuda(cudaMemcpy(buffers_->batchedVesicleRrp, vesicleRrpInit.data(), floatBytes, cudaMemcpyHostToDevice), "copy vesicleRrp init H2D");
+        checkCuda(cudaMemcpy(buffers_->batchedVesicleReserve, vesicleReserveInit.data(), floatBytes, cudaMemcpyHostToDevice), "copy vesicleReserve init H2D");
+    }
 
     checkCuda(cudaMemset(buffers_->batchedDelayBuffer, 0, neuronCount_ * buffers_->batchedDelaySteps * sizeof(std::uint8_t)), "memset batchedDelayBuffer");
     checkCuda(cudaMemset(buffers_->batchedIExcState, 0, floatBytes), "memset batchedIExcState");
@@ -1630,6 +1769,12 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.datKiUm = buffers_->batchedDatKiUm;
     launchInfo.datHill = buffers_->batchedDatHill;
     launchInfo.datMaxExtensionFold = buffers_->batchedDatMaxExtensionFold;
+    launchInfo.vesiclePoolEnabled = buffers_->batchedVesiclePoolEnabled;
+    launchInfo.vesiclePoolRrpSize = buffers_->batchedVesiclePoolRrpSize;
+    launchInfo.vesiclePoolReserveSize = buffers_->batchedVesiclePoolReserveSize;
+    launchInfo.vesiclePoolRrpRefillTauMs = buffers_->batchedVesiclePoolRrpRefillTauMs;
+    launchInfo.vesiclePoolReserveRefillTauMs = buffers_->batchedVesiclePoolReserveRefillTauMs;
+    launchInfo.vesiclePoolCalciumFactor = buffers_->batchedVesiclePoolCalciumFactor;
 
     BatchedStepDevicePointers devicePointers;
     devicePointers.incomingOffsets = buffers_->incomingOffsets;
@@ -1668,6 +1813,9 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     devicePointers.receptorGabaBDecay = buffers_->batchedReceptorGabaBDecay;
     devicePointers.receptorGabaBRise = buffers_->batchedReceptorGabaBRise;
     devicePointers.gabaADesensitization = buffers_->batchedGabaADesensitization;
+    devicePointers.releaseScale = buffers_->batchedReleaseScale;
+    devicePointers.vesicleRrp = buffers_->batchedVesicleRrp;
+    devicePointers.vesicleReserve = buffers_->batchedVesicleReserve;
 
     launchBatchedStepKernel(launchInfo, devicePointers);
     checkCuda(cudaGetLastError(), "batched step kernel launch");

@@ -159,7 +159,19 @@ public:
         int datMechanism,
         float datKiUm,
         float datHill,
-        float datMaxExtensionFold
+        float datMaxExtensionFold,
+        // Phase 3c: vesicle pool dynamics -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment / NeurotransmitterPool.h for the
+        // design. No GPU kernel existed for this until now; main.cpp's
+        // validateConfig() used to hard-reject vesiclePoolEnabled &&
+        // use_cuda for exactly that reason -- that guard should be revisited
+        // once this path is verified on real hardware.
+        int vesiclePoolEnabled,
+        float vesiclePoolRrpSize,
+        float vesiclePoolReserveSize,
+        float vesiclePoolRrpRefillTauMs,
+        float vesiclePoolReserveRefillTauMs,
+        float vesiclePoolCalciumFactor
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

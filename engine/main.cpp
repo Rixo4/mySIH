@@ -180,7 +180,7 @@ struct SimulationConfig {
     double vesicle_pool_reserve_size       = 100.0;
     double vesicle_pool_rrp_refill_tau_ms     = 1500.0;
     double vesicle_pool_reserve_refill_tau_ms = 20000.0;
-    double vesicle_pool_calcium_factor     = 1.0;
+    double vesicle_pool_calcium_factor     = 0.3; // calibrated: Dobrunz 2002 release prob ~0.2-0.3
 
     // Phase 3c: neuromodulator gain system (D1/D2/5-HT1A/5-HT2A), see
     // engine/synapse/NeuromodulatorSystem.h for the full design/literature
@@ -398,23 +398,20 @@ void validateConfig(const SimulationConfig& cfg) {
     // confirms it matches the CPU path's numbers, same caveat already
     // documented for the rest of the receptor-conductance GPU mirror.
 
-    // Phase 3c: vesicle pools have NO GPU kernel yet at all (unlike
-    // desensitization above, which at least has an unverified GPU mirror to
-    // fall through to) -- the batched CUDA path in NeuronUpdate.cu doesn't
-    // know this feature exists. Silently running "Compute Backend: GPU"
-    // while vesicle pool effects are structurally absent from that run would
-    // be a real report-vs-reality inconsistency, exactly the kind of thing
-    // this project has caught and fixed before rather than shipped. Reject
-    // explicitly instead. NOTE: "use_cuda" is NOT a parsed JSON key anywhere
-    // in this file (use_cuda defaults to true and can only be forced off via
-    // the SPP_FORCE_CPU=1 environment variable) -- the error message below
-    // must say that, not point at a JSON key that doesn't exist.
-    if (cfg.vesicle_pool_enabled && cfg.use_cuda) {
-        throw std::runtime_error(
-            "Vesicle pool dynamics (Phase 3c) have no GPU kernel yet -- "
-            "rerun with the SPP_FORCE_CPU=1 environment variable set, or "
-            "disable vesicle_pool.");
-    }
+    // Phase 3c: vesicle pools are now mirrored to the GPU batched kernel
+    // (fusedBatchedStepKernel in NeuronUpdate.cu -- release-scale ring
+    // buffer parallel to the spike delay buffer, persistent per-neuron
+    // RRP/Reserve state, curand-based binomial release draw), same pattern
+    // as GAT1's and desensitization's GPU ports. The hard reject that used
+    // to live here (vesicle_pool_enabled && use_cuda) is removed now that
+    // there's a real GPU implementation to fall through to -- but exactly
+    // like desensitization's GPU mirror, treat this as implemented-but-
+    // UNVERIFIED until a real CUDA run confirms it matches the CPU path's
+    // numbers (SPP_FORCE_CPU=1 vs default, same drug config, compare
+    // Early-Half/Late-Half rate and any deterministic occupancy/scale
+    // values -- only genuinely stochastic firing-rate numbers should
+    // differ, same parity discipline used for every other Phase 3 GPU
+    // port this session).
 }
 
 std::uint32_t makeSeed() {
@@ -1283,8 +1280,19 @@ std::string buildDrugEvaluationReportText(
     const auto aLine=[&](const std::string& label, const std::string& value){
         out << std::left << std::setw(20) << label << " : " << value << "\n";
     };
+    // Display-precision fix: default kRuntimeOutputPrecision=2 silently
+    // rounds small dose/EC50 values (anything below 0.005) down to "0.00",
+    // and can also make two genuinely different doses on a fine step (e.g.
+    // 0.048 and 0.054 both print "0.05") look identical. Moved above fRange
+    // (was originally declared further down, just for the zone-list
+    // formatter) so every dose/potency-scale number in this report -- Tested
+    // Range, Step Size, EC50 echoes, per-dose table, onset/peak dose, zone
+    // lists -- uses the same fixed 4-decimal precision instead of drifting
+    // per call site. See individual BUG FIX comments below for the specific
+    // drugs (fluoxetine, DOI) that surfaced each case.
+    constexpr int kDoseListPrecision = 4;
     const auto fRange=[&](double a, double b){
-        return formatRuntimeNumber(a) + " - " + formatRuntimeNumber(b);
+        return formatRuntimeNumber(a, kDoseListPrecision) + " - " + formatRuntimeNumber(b, kDoseListPrecision);
     };
 
     const std::string stab = getStability(stabilityStats.stdRate, stabilityStats.stdSync);
@@ -1346,20 +1354,15 @@ std::string buildDrugEvaluationReportText(
         }
     }
 
-    // Display-precision fix: each dose in report.analyzedDoses lands in
-    // EXACTLY ONE of ineffDoses/exciDoses/overSuppDoses/therapeuticDoses
-    // (the switch/if-else above is mutually exclusive per dose) -- so the
-    // same VALUE can never legitimately appear in two zones. But a fine
-    // dose_range step (e.g. step=0.006) can put two adjacent, genuinely
-    // different doses on the same 2-decimal rounding boundary (0.048 and
-    // 0.054 both print "0.05" under kRuntimeOutputPrecision=2), so one
-    // dose correctly classified Ineffective and a DIFFERENT dose correctly
-    // classified Therapeutic can print the identical string in both zone
-    // lists, looking like a contradiction when it's a display collision
-    // only. Fixed by using a fixed 4-decimal precision for this dose-list
-    // formatter only (enough to separate any dose_range step used so far).
-    constexpr int kDoseListPrecision = 4;
-
+    // Zone-list formatter: reuses kDoseListPrecision declared above (near
+    // fRange) -- a fine dose_range step (e.g. step=0.006) can put two
+    // adjacent, genuinely different doses on the same 2-decimal rounding
+    // boundary (0.048 and 0.054 both print "0.05" under
+    // kRuntimeOutputPrecision=2), so one dose correctly classified
+    // Ineffective and a DIFFERENT dose correctly classified Therapeutic
+    // could print the identical string in both zone lists, looking like a
+    // contradiction when it's a display collision only (found validating
+    // fluoxetine).
     auto formatDoses=[&](const std::vector<double>& doses) -> std::string {
         if (doses.empty()) return "Not observed";
         std::ostringstream t;
@@ -1377,14 +1380,19 @@ std::string buildDrugEvaluationReportText(
         const float s = std::max({d.suppressionScore, d.excitabilityScore, d.stabilizationScore});
         if (s > static_cast<float>(maxEffect)){maxEffect=s; peakIdx=i;}
     }
+    // BUG FIX (Phase 3 10-drug validation, DOI): Onset/Peak/Saturation dose
+    // strings used default 2-decimal precision too -- DOI's real onset dose
+    // (0.001, the first tested nonzero dose) printed as "~0.00", reading as
+    // "onset at essentially zero dose" rather than the actual smallest
+    // tested step. Same fix as everywhere else above -- kDoseListPrecision.
     const std::string peakDoseStr = report.analyzedDoses.empty()
         ? "Not observed"
-        : "~" + formatRuntimeNumber(report.analyzedDoses[peakIdx].dose);
+        : "~" + formatRuntimeNumber(report.analyzedDoses[peakIdx].dose, kDoseListPrecision);
     const std::string onsetDoseStr = report.hasEffectiveDose
-        ? "~" + formatRuntimeNumber(report.effectiveMinDose) : "Not observed";
+        ? "~" + formatRuntimeNumber(report.effectiveMinDose, kDoseListPrecision) : "Not observed";
     const std::string saturationStr = (peakIdx+1 >= report.analyzedDoses.size())
         ? "Not observed within tested range"
-        : "Observed beyond " + formatRuntimeNumber(report.analyzedDoses[peakIdx].dose);
+        : "Observed beyond " + formatRuntimeNumber(report.analyzedDoses[peakIdx].dose, kDoseListPrecision);
     const std::string effRange = noResp || therapeuticDoses.empty()
         ? "Not observed"
         : fRange(therapeuticDoses.front(), therapeuticDoses.back());
@@ -1431,8 +1439,14 @@ std::string buildDrugEvaluationReportText(
     // Phase 3a: GAT1 reuptake block -- extends GABA-A/GABA-B decay tau
     // instead of touching their conductance/occupancy, so it's reported
     // separately from the receptor lines above rather than folded in.
+    // BUG FIX (Phase 3 10-drug held-out validation, atomoxetine): these Ki
+    // echo lines used default 2-decimal precision too -- atomoxetine's real
+    // NET Ki (0.005) rounded to "0.01", making it look like a 2x weaker
+    // (less potent) transporter block than what was actually configured.
+    // Same fix as the EC50/Step Size/per-dose-table fixes above --
+    // kDoseListPrecision.
     if (evalInput.config.ki_gat1 < kReceptorInertThreshold) {
-        aLine("GAT1 Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_gat1));
+        aLine("GAT1 Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_gat1, kDoseListPrecision));
         aLine("GAT1 Hill",                formatRuntimeNumber(evalInput.config.hill_gat1));
         aLine("GAT1 Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_gat1) + "x");
     }
@@ -1449,19 +1463,19 @@ std::string buildDrugEvaluationReportText(
         evalInput.config.ec50_d1 < kReceptorInertThreshold ||
         evalInput.config.ec50_d2 < kReceptorInertThreshold;
     if (evalInput.config.ki_sert < kReceptorInertThreshold) {
-        aLine("SERT Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_sert)
+        aLine("SERT Ki (Reuptake Block)", formatRuntimeNumber(evalInput.config.ki_sert, kDoseListPrecision)
               + (sertHasReceptor ? "" : " [report-only]"));
         aLine("SERT Hill",                formatRuntimeNumber(evalInput.config.hill_sert));
         aLine("SERT Max Extension",       formatRuntimeNumber(evalInput.config.max_extension_sert) + "x");
     }
     if (evalInput.config.ki_dat < kReceptorInertThreshold) {
-        aLine("DAT Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_dat)
+        aLine("DAT Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_dat, kDoseListPrecision)
               + (datHasReceptor ? "" : " [report-only]"));
         aLine("DAT Hill",                 formatRuntimeNumber(evalInput.config.hill_dat));
         aLine("DAT Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_dat) + "x");
     }
     if (evalInput.config.ki_net < kReceptorInertThreshold) {
-        aLine("NET Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_net) + " [report-only]");
+        aLine("NET Ki (Reuptake Block)",  formatRuntimeNumber(evalInput.config.ki_net, kDoseListPrecision) + " [report-only]");
         aLine("NET Hill",                 formatRuntimeNumber(evalInput.config.hill_net));
         aLine("NET Max Extension",        formatRuntimeNumber(evalInput.config.max_extension_net) + "x");
     }
@@ -1478,7 +1492,15 @@ std::string buildDrugEvaluationReportText(
     // see NeurotransmitterPool.h for why depletion is observable at default
     // sim_time but recovery is not.
     if (evalInput.config.vesicle_pool_enabled) {
-        aLine("Vesicle Pool Dynamics", "ENABLED (CPU only)");
+        // BUG FIX: this used to hardcode "(CPU only)" -- true when this
+        // section was written (no GPU kernel existed yet), stale the moment
+        // the GPU port landed. Reads the same usedGpu value "Compute
+        // Backend" above already reports, so this line can never disagree
+        // with what actually ran -- exactly the "displayed vs. decision-
+        // driving number must be the same value" discipline applied
+        // earlier this session to the Max Effect field.
+        aLine("Vesicle Pool Dynamics", std::string("ENABLED (") +
+              (usedGpu.has_value() ? (*usedGpu ? "GPU" : "CPU") : "Unknown") + ")");
         aLine("  RRP Size",            formatRuntimeNumber(evalInput.config.vesicle_pool_rrp_size) + " vesicles");
         aLine("  Reserve Size",        formatRuntimeNumber(evalInput.config.vesicle_pool_reserve_size) + " vesicles");
         aLine("  RRP Refill Tau",      formatRuntimeNumber(evalInput.config.vesicle_pool_rrp_refill_tau_ms) + " ms");
@@ -1495,24 +1517,31 @@ std::string buildDrugEvaluationReportText(
     // Phase 3c: neuromodulator gain config, only printed per-receptor when
     // that receptor is actually configured (kReceptorInertThreshold already
     // declared above in this function).
+    // BUG FIX (Phase 3 10-drug validation, DOI): EC50 (Gain) values were
+    // printed with the default kRuntimeOutputPrecision=2, which silently
+    // rounds any EC50 below 0.005 down to the string "0.00" -- looks like
+    // "no threshold configured" when it's actually a real, tiny, correctly-
+    // wired potency constant (DOI's 5-HT2A EC50 is 0.0026, driving a real
+    // 75% occupancy at peak dose). Same rounding-collision class of bug as
+    // the dose-zone list fix above; reusing kDoseListPrecision here too.
     if (evalInput.config.ec50_d1 < kReceptorInertThreshold) {
-        aLine("D1 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d1));
+        aLine("D1 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d1, kDoseListPrecision));
         aLine("D1 Hill",               formatRuntimeNumber(evalInput.config.hill_d1));
         aLine("D1 Max Adapt Reduction", formatRuntimeNumber(evalInput.config.max_adaptation_reduction_d1 * 100.0) + "%");
         aLine("D1 Max NMDA Gain",      formatRuntimeNumber(evalInput.config.max_nmda_gain_d1) + "x");
     }
     if (evalInput.config.ec50_d2 < kReceptorInertThreshold) {
-        aLine("D2 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d2));
+        aLine("D2 EC50 (Gain)",        formatRuntimeNumber(evalInput.config.ec50_d2, kDoseListPrecision));
         aLine("D2 Hill",               formatRuntimeNumber(evalInput.config.hill_d2));
         aLine("D2 Max Release Reduction", formatRuntimeNumber(evalInput.config.max_release_reduction_d2 * 100.0) + "%");
     }
     if (evalInput.config.ec50_ht1a < kReceptorInertThreshold) {
-        aLine("5-HT1A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht1a));
+        aLine("5-HT1A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht1a, kDoseListPrecision));
         aLine("5-HT1A Hill",           formatRuntimeNumber(evalInput.config.hill_ht1a));
         aLine("5-HT1A Max K+ Gain",    formatRuntimeNumber(evalInput.config.max_k_gain_ht1a) + "x");
     }
     if (evalInput.config.ec50_ht2a < kReceptorInertThreshold) {
-        aLine("5-HT2A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht2a));
+        aLine("5-HT2A EC50 (Gain)",    formatRuntimeNumber(evalInput.config.ec50_ht2a, kDoseListPrecision));
         aLine("5-HT2A Hill",           formatRuntimeNumber(evalInput.config.hill_ht2a));
         aLine("5-HT2A Max K+ Reduction", formatRuntimeNumber(evalInput.config.max_k_reduction_ht2a * 100.0) + "%");
         aLine("5-HT2A Max Adapt Reduction", formatRuntimeNumber(evalInput.config.max_adaptation_reduction_ht2a * 100.0) + "%");
@@ -1542,7 +1571,11 @@ std::string buildDrugEvaluationReportText(
 
     out << "[Dose Range]\n";
     aLine("Tested Range", fRange(report.minTestedDose, report.maxTestedDose));
-    aLine("Step Size",    formatRuntimeNumber(report.stepDose));
+    // BUG FIX (Phase 3 10-drug validation, DOI): same 2-decimal rounding-to-
+    // "0.00" issue as the EC50 fix above -- a fine dose_range step (DOI:
+    // 0.001) printed as "0.00", looking like a single-point sweep with no
+    // step at all even though 10 distinct doses were actually tested.
+    aLine("Step Size",    formatRuntimeNumber(report.stepDose, kDoseListPrecision));
     out << "\n--------------------------------------------------\n\n";
 
     // Phase 3a / Phase 3c retrofit: SERT and DAT now DO have a real receptor
@@ -1928,9 +1961,10 @@ std::string buildDrugEvaluationReportText(
     }
 
     out << "[Safety Analysis]\n";
+    // Same dose-scale precision fix as everywhere above.
     aLine("Toxic Threshold",
-          toxDet ? formatRuntimeNumber(report.toxicMinDose)
-                 : (">" + formatRuntimeNumber(report.maxTestedDose) + " (Not observed)"));
+          toxDet ? formatRuntimeNumber(report.toxicMinDose, kDoseListPrecision)
+                 : (">" + formatRuntimeNumber(report.maxTestedDose, kDoseListPrecision) + " (Not observed)"));
     aLine("Safety Observation",
           toxDet ? "Toxicity observed within tested range"
                  : "No toxicity within tested range");
@@ -1963,6 +1997,23 @@ std::string buildDrugEvaluationReportText(
                    : stabMode ? "Stabilization Saturation Zone"
                               : "Over-Suppression Zone",
           formatDoses(exciDoses));
+    // Clarifying note (Phase 3 10-drug validation, DOI): "Excitatory Zone"
+    // and "Severe Excitability Zone" measure two different things and can
+    // legitimately disagree with Per Dose Network State's Stable/
+    // MildInstability labels below -- "Excitatory Zone" only requires
+    // rateChangePct>5% while the network stayed Stable/MildInstability (see
+    // AnalyzedDose::isEffective); it is NOT a danger signal. The actual
+    // danger bucket is "Severe Excitability Zone" (Hyperexcitable/
+    // SeizureRisk/etc.). Label text itself is left unchanged --
+    // report_parser.py matches on it exactly (see backend/app/report_parser.py).
+    if (exciMode && !therapeuticDoses.empty() && exciDoses.empty()) {
+        aLine("Note", "\"Excitatory Zone\" doses rose >5% above baseline but the "
+              "network stayed Stable/MildInstability at every one of them (see "
+              "Per Dose Network State below) -- \"Severe Excitability Zone\" "
+              "being empty confirms none became structurally dangerous. See "
+              "FINAL DECISION for how the aggregate magnitude still drives the "
+              "safety verdict.");
+    }
     out << "\n--------------------------------------------------\n\n";
 
     if (stabMode) {
@@ -1974,8 +2025,15 @@ std::string buildDrugEvaluationReportText(
     }
 
     out << "[Per Dose Network State]\n";
+    // BUG FIX (Phase 3 10-drug validation, DOI): this table used the default
+    // 2-decimal precision, so a fine dose_range step (DOI: 0.001, 10 doses
+    // from 0.000-0.010) collapsed into just two visually-identical printed
+    // values ("0.00" x6, "0.01" x5) -- the table looked like it only had two
+    // distinct dose rows when it actually had ten. Same fix as the dose-zone
+    // lists and Step Size above -- kDoseListPrecision, not the setw(6) width
+    // (bumped alongside it so 4-decimal values still line up in columns).
     for (const auto& dose : report.analyzedDoses) {
-        out << "  Dose " << std::setw(6) << formatRuntimeNumber(dose.dose)
+        out << "  Dose " << std::setw(8) << formatRuntimeNumber(dose.dose, kDoseListPrecision)
             << " : " << PharmaDecisionEngine::toString(dose.networkState)
             << " | " << PharmaDecisionEngine::toString(dose.mechanismSignature) << "\n";
     }
@@ -2007,6 +2065,14 @@ std::string buildDrugEvaluationReportText(
     aLine("Risk Level",     report.riskLevel);
     aLine("Mechanism",      report.mechanismText);
     aLine("Reason",         report.reason);
+    if (report.excitatoryVerdictViaMagnitudeFloor) {
+        out << "Note                  : No individual dose crossed a structural instability\n"
+               "                        threshold (Hyperexcitable/SeizureRisk/etc. -- see Per\n"
+               "                        Dose Network State above, all Stable). This verdict is\n"
+               "                        driven by the aggregate rate-change magnitude exceeding\n"
+               "                        this engine's 10% safety floor for a categorical\n"
+               "                        excitatory response, not a per-dose danger signal.\n";
+    }
     aLine("Confidence",     report.confidence);
     out << "\n==================================================\n";
 
@@ -2369,6 +2435,23 @@ int main(int argc, char** argv) {
                 if(loadDrugConfigFromJsonFile(drugConfigPath, input, ro, mt, jsonDoseMin, jsonDoseMax, jsonDoseStep)) {
                     engineMode = "User Drug Config";
                     if(ro) userRuns = *ro;
+                } else {
+                    // BUG FIX: an explicitly-requested --drug-config file that
+                    // doesn't exist (or can't be read) used to silently fall
+                    // through to the hardcoded demo config below (engineMode
+                    // stayed "Default Internal Engine Config", no warning at
+                    // all) -- found when a typo'd filename
+                    // (test_vesicle_control.json instead of
+                    // test_vesicle_pool_control.json) silently ran an
+                    // unrelated full 11-dose/10-run demo sweep for 13 minutes
+                    // instead of erroring immediately. The user EXPLICITLY
+                    // named a file; silently substituting a different drug
+                    // is never the right behavior, so this is now a hard
+                    // error instead.
+                    throw std::runtime_error(
+                        "Could not read drug config file: \"" + drugConfigPath +
+                        "\" -- check the path/filename (this is a hard error, "
+                        "not falling back to the default demo config).");
                 }
             }
             validateConfig(input.config);

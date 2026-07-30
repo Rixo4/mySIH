@@ -1,13 +1,14 @@
 {
-  "drug_name": "Vesicle Pool Smoke Test CONTROL (pool disabled, same network)",
+  "_reference": "NET Ki approx 5nM (Kd study: 2nM; jnm.snmjournals.org/content/50/supplement_2/486). Weaker/less selective NET blocker than reboxetine (Ki 1.1nM already configured in test_reboxetine.json) -- atomoxetine also has meaningful SERT affinity in reality (~9nM) not modeled here, kept single-mechanism for a clean comparator. Real-world: FDA-approved ADHD drug, non-stimulant, considered to have a wide safety margin relative to stimulant DAT blockers.",
+  "drug_name": "Atomoxetine",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "vesicle_pool": {
-    "enabled": false
+  "transporters": {
+    "NET": { "ki": 0.005, "hill": 1.0, "max_extension": 2.0 }
   },
-  "dose_range": { "min": 0.0, "max": 0.0, "step": 1.0 },
-  "runs": 5
+  "dose_range": { "min": 0.0, "max": 0.05, "step": 0.005 },
+  "runs": 10
 }
