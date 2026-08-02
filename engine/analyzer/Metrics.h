@@ -28,7 +28,16 @@ struct NetworkMetrics {
     // Firing rate
     float meanFiringRateHz          = 0.0f;
     float firingRateStdHz           = 0.0f;
-    float silentNeuronPct           = 0.0f;  // % neurons < 2 Hz
+    float silentNeuronPct           = 0.0f;  // % neurons < 2 Hz, WHOLE-RUN average
+                                              // (see Metrics.cpp KNOWN LIMITATION
+                                              // comment: undercounts late-stage
+                                              // silencing for onset-ramped drugs)
+    float lateWindowSilentNeuronPct = 0.0f;  // Gap 1.3 fix: % neurons < 2 Hz computed
+                                              // from ONLY the late half of the run --
+                                              // this is what feeds the reported
+                                              // "Silent Neuron Delta", since it
+                                              // doesn't get masked by early-run
+                                              // activity the way silentNeuronPct does
     float earlyWindowRateHz         = 0.0f;
     float lateWindowRateHz          = 0.0f;
 

@@ -209,6 +209,7 @@ CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o : /home/ranjith/pro
     /usr/include/c++/12/bits/vector.tcc \
     /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/../neuron/NeuronModel.h \
     /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/NeuronUpdate.h \
+    /home/ranjith/projectubantu/Neuro_drug_testing/engine/cuda/../neuron/ReceptorModel.h \
     /usr/include/curand_kernel.h \
     /usr/include/nv/target \
     /usr/include/nv/detail/__target_macros \

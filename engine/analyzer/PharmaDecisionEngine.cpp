@@ -199,9 +199,12 @@ std::string buildNarrative(
     oss << std::fixed << std::setprecision(1);
 
     if (responseMode == "EXCITATORY_RESPONSE") {
-        oss << "Burst rate increased by "
-            << std::max(0.0f, peakDose.burstRateDelta) << " Hz from baseline. "
-            << "Irregularity index rose by "
+        // Gap 1.3 (PRECISION_GAP_CLOSURE_PLAN.md 1.3): "Burst rate increased by
+        // X Hz from baseline" removed -- burstRateDelta is permanently ~0 in
+        // this network's firing regime (see NetworkAnalyzer.cpp classifyState
+        // comment), so this clause always read "0.0 Hz" regardless of the
+        // real excitatory effect being described.
+        oss << "Irregularity index rose by "
             << std::max(0.0f, peakDose.irregularityDelta) << " units. ";
         if (peakDose.rateChangePct > 5.0f)
             oss << "Firing rate increased " << peakDose.rateChangePct << "% from baseline. ";
@@ -216,9 +219,9 @@ std::string buildNarrative(
             oss << "Effect magnitude was minimal and did not represent a safety concern.";
 
     } else if (responseMode == "STABILIZING_RESPONSE") {
+        // Gap 1.3: "Burst duration shortened by X ms" removed -- same dead-
+        // metric finding, meanBurstDurationMs is 0 whenever burstRateHz is 0.
         oss << "Synchronization reduced by " << peakDose.syncReductionPct << "% from baseline. "
-            << "Burst duration shortened by "
-            << std::max(0.0f, -peakDose.burstDurationDelta) << " ms. "
             << "Firing rate remained within viable range ("
             << (peakDose.rateChangePct >= 0 ? "+" : "")
             << peakDose.rateChangePct << "% from baseline).";
@@ -803,7 +806,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
                  "categorical excitatory response, across the tested dose range.";
             report.reason = r.str();
         } else if (excitatory)
-            report.reason = "Burst rate, irregularity, and excitability markers exceeded "
+            // Gap 1.3: "Burst rate" dropped from this sentence -- it's a
+            // permanently-dead signal in this network's firing regime (see
+            // classifyState comment in NetworkAnalyzer.cpp); irregularity and
+            // excitability markers are what actually drive this branch.
+            report.reason = "Irregularity and excitability markers exceeded "
                             "safe neural stability limits across the tested dose range.";
         else if (dangerous)
             report.reason = "Network activity collapsed or seizure-level instability "

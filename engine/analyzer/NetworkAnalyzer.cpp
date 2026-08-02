@@ -125,7 +125,14 @@ void NetworkAnalyzer::computeDeltas(
     dose.irregularityDelta = m.irregularityIndex - baseline.irregularityIndex;
 
     // Silent neurons
-    dose.silentNeuronDelta = m.silentNeuronPct - baseline.silentNeuronPct;
+    // Gap 1.3 fix (PRECISION_GAP_CLOSURE_PLAN.md 1.3): use the late-window-only
+    // percentage, not the whole-run average -- see Metrics.cpp's
+    // lateWindowSilentNeuronPct comment. The whole-run average masked
+    // late-stage silencing for any onset-ramped drug (confirmed on
+    // test_na_blocker.json: 88.5% peak rate suppression, Silent Neuron Delta
+    // still read 0.0% under the old computation).
+    dose.silentNeuronDelta =
+        m.lateWindowSilentNeuronPct - baseline.lateWindowSilentNeuronPct;
 }
 
 // ─── NII ─────────────────────────────────────────────────────────────────────

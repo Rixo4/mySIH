@@ -16,15 +16,23 @@ node_modules/
 
 # Build outputs
 build/
-build-cuda/
-build-vs-cuda/
+build-*/
 docs/
 backend/runs/
 output_*/
 outtmp_*/
 
-# Local build directory used during validation builds
-build-validate/
+# Compiled object files / binaries -- these were getting committed from the
+# repo root because no *.o pattern existed at all (found 12 loose .o files
+# and the cuda_probe binary tracked in the repo root during a gap-closure
+# session cleanup pass).
+*.o
+*.obj
+*.exe
+*.pdb
+*.out
+silicon_patient
+cuda_probe
 
 # Logs and generated artifacts
 *.log

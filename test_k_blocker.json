@@ -2,9 +2,9 @@
   "drug_name": "Tetraethylammonium (TEA)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
-    "K":  { "ic50": 5800.0, "hill": 1.0 },
+    "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "dose_range": { "min": 0.0, "max": 29000.0, "step": 2900.0 },
-  "runs": 8
+  "dose_range": { "min": 0.0, "max": 0.0, "step": 1.0 },
+  "runs": 3
 }

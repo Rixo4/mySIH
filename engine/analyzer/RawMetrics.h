@@ -8,6 +8,7 @@ struct RawMetrics {
     float meanFiringRateHz          = 0.0f;
     float firingRateStdHz           = 0.0f;
     float silentNeuronPct           = 0.0f;
+    float lateWindowSilentNeuronPct = 0.0f;  // Gap 1.3 fix -- see Metrics.h comment
     float earlyWindowRateHz         = 0.0f;
     float lateWindowRateHz          = 0.0f;
 

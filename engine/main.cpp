@@ -29,9 +29,21 @@
 #include "simulation/SimulationEngine.h"
 #include "simulation/BatchedSimulationEngine.h"
 
+#include "report/ReportTypes.h"
+#include "report/ReportFormatting.h"
+#include "report/LegacyLiabilityReport.h"
+
 namespace {
 
 using spp::analyzer::MetricsAnalyzer;
+using spp::report::SimulationConfig;
+using spp::report::RuntimeInput;
+using spp::report::AggregatedStats;
+using spp::report::kRuntimeOutputPrecision;
+using spp::report::formatRuntimeNumber;
+using spp::report::getStability;
+using spp::report::buildDrugEvaluationReportText;
+using spp::report::writeDrugEvaluationReport;
 using spp::analyzer::NetworkMetrics;
 using spp::analyzer::NetworkState;
 using spp::analyzer::MechanismSignature;
@@ -57,167 +69,6 @@ constexpr int kMinNeuronCount     = 1000;
 constexpr int kMaxNeuronCount     = 100000;
 constexpr double kMinConnectivity = 0.05;
 constexpr double kMaxConnectivity = 0.20;
-
-struct SimulationConfig {
-    int neuron_count    = 1500;
-    double sim_time     = 400.0;
-    double dt           = 0.01;
-    double dose         = 10.0;
-    double ic50_na      = 50.0;
-    double ic50_k       = 50.0;
-    double ic50_ca      = 120.0;
-    double hill         = 3.0;
-    double connectivity = 0.10;
-    double excitatory_ratio     = 0.8;
-    // NOTE (historical): the "fires once then goes silent" bug from an
-    // earlier session was NOT a drive problem -- it was calcium-driven
-    // depolarization block (see the gCa comment in neuron/NeuronModel.h),
-    // fixed by dropping gCa from 8 to 0.5. That fix is still correct and
-    // still in place.
-    //
-    // UPDATE (this session): a *different* collapse resurfaced at
-    // external_current=2.5 after the Phase 2 receptor work landed -- every
-    // neuron fired exactly once (from the shared initial-condition burst)
-    // then went permanently silent for the rest of the run (early_rate_hz
-    // 5.0, late_rate_hz 0.0 exactly, at neuron_count=1500/400ms). Bisected
-    // by individually zeroing every Phase 2 addition (gMaxGABAa,
-    // gabaBFraction, ampaFraction, nmdaFraction), the adaptation current,
-    // and even tripling recurrent excitatory weight strength -- none of it
-    // changed the outcome at all. Only external_current mattered:
-    //   2.5  -> dead (0 Hz after the first volley)
-    //   5.0  -> dead (still 0 Hz, no change at all)
-    //   6.6  -> 12.5 Hz, healthy (early 10.1 -> late 15.3, ramping up, no
-    //           collapse) -- lands right at the ~12 Hz this value always
-    //           targeted, so this is the new default.
-    //   7.0  -> 17.5 Hz, still healthy but past target
-    //   10.0 -> 41.3 Hz, overshooting
-    //   20.0 -> 87.8 Hz, badly overshooting
-    // Root cause not fully identified (why 2.5 stopped being enough is
-    // still open), but the fix is confirmed: 6.6 restores the documented
-    // ~9.8-12 Hz baseline with 0% silent and no collapse across the full
-    // 400ms run. If this needs re-tuning later, re-run this same sweep
-    // rather than assuming 2.5 (or any old value) still works.
-    double external_current     = 6.6;
-    double noise_level          = 0.35;
-    double excitatory_weight_scale = 1.0;
-    double inhibitory_weight_scale = 1.0;
-
-    // PHASE2_PLAN.md step 4: receptor pharmacology (block/potentiate/
-    // agonist), one config surface per receptor, same generic IC50/Hill-
-    // style pattern as ic50_na/k/ca above. Defaults are deliberately inert
-    // (huge ec50 / no-op ceiling), matching ReceptorDrugProfile.h's own
-    // stated default policy -- an unconfigured run has zero receptor drug
-    // effect, same as before this step existed. Mechanism per receptor is
-    // fixed by receptor identity (AMPA/NMDA always Block, GABA-A always
-    // Potentiate, GABA-B always Agonist) rather than user-selectable, since
-    // that's what the Phase 2 validation drug set (§5) actually needs --
-    // see ReceptorDrugProfile.h for why these three mechanism families
-    // exist and what a mismatched mechanism/receptor pairing would mean.
-    double ic50_ampa              = 1.0e9;
-    double hill_ampa              = 1.0;
-    double ic50_nmda              = 1.0e9;
-    double hill_nmda              = 1.0;
-    double ec50_gabaA             = 1.0e9;
-    double hill_gabaA             = 1.0;
-    double max_potentiation_gabaA = 1.0;
-    double ec50_gabaB             = 1.0e9;
-    double hill_gabaB             = 1.0;
-
-    // Phase 3a, step 1 of the drug set (GAT1/tiagabine only -- see
-    // ReuptakeTransporter.h design note): a transporter-blocking drug
-    // extends a receptor's decay time constant instead of touching its
-    // gMax/occupancy. GAT1 block is fixed Competitive by transporter
-    // identity (tiagabine's real mechanism), same "mechanism fixed by
-    // identity, JSON only supplies numbers" pattern as buildReceptorProfile
-    // above. Defaults are inert (huge Ki, no extension ceiling), so an
-    // unconfigured run is a bit-identical no-op, same policy as every other
-    // receptor field here.
-    double ki_gat1            = 1.0e9;
-    double hill_gat1          = 1.0;
-    double max_extension_gat1 = 1.0;
-
-    // Phase 3a, remaining 3 drugs (SSRI/cocaine/reboxetine): SERT/DAT/NET
-    // reuptake block. Serotonin/dopamine/norepinephrine have NO receptor
-    // current in this engine (that's Phase 3c's neuromodulator gain
-    // system, not built yet), so these three are REPORT-ONLY -- they
-    // produce real, literature-sourced occupancy/clearance-fold numbers in
-    // the Neurotransmitter Profile section, but deliberately no network/
-    // firing-rate effect, since there's no receptor for them to act on.
-    // Not wired into DoseObservation/AnalyzedDose/detectMechanism at all
-    // (unlike GAT1) -- they have no observable dynamics to attribute a
-    // mechanism signature to.
-    double ki_sert            = 1.0e9;
-    double hill_sert          = 1.0;
-    double max_extension_sert = 1.0;
-    double ki_dat             = 1.0e9;
-    double hill_dat           = 1.0;
-    double max_extension_dat  = 1.0;
-    double ki_net             = 1.0e9;
-    double hill_net           = 1.0;
-    double max_extension_net  = 1.0;
-
-    // Phase 3b: GABA-A desensitization ("receptor tiredness"). OFF by
-    // default -- see SimulationConfig::desensitizationEnabled in
-    // simulation/SimulationEngine.h for why this is safe to leave off for
-    // every existing (short-duration) drug config. sim_time above already
-    // exists as the run-duration knob -- a 3b desensitization test simply
-    // sets both desensitization_enabled and a much larger sim_time (tens of
-    // seconds, in ms) in the same JSON file.
-    bool desensitization_enabled          = false;
-    double desensitization_tau_desense_ms  = 30000.0;
-    double desensitization_tau_recovery_ms = 124000.0;
-    double desensitization_max_attenuation = 0.9;
-
-    // Phase 3c: vesicle pool dynamics ("synaptic fatigue"), see
-    // engine/synapse/NeurotransmitterPool.h for the full design (including
-    // why depletion is observable within a default-duration run but recovery
-    // is not -- same "sim_time is the knob for the slow dynamics" pattern as
-    // desensitization above). CPU-only until the GPU kernel is ported (see
-    // validateConfig()) -- OFF by default, zero behavior change unless a
-    // test deliberately opts in.
-    bool vesicle_pool_enabled              = false;
-    double vesicle_pool_rrp_size           = 10.0;
-    double vesicle_pool_reserve_size       = 100.0;
-    double vesicle_pool_rrp_refill_tau_ms     = 1500.0;
-    double vesicle_pool_reserve_refill_tau_ms = 20000.0;
-    double vesicle_pool_calcium_factor     = 0.3; // calibrated: Dobrunz 2002 release prob ~0.2-0.3
-
-    // Phase 3c: neuromodulator gain system (D1/D2/5-HT1A/5-HT2A), see
-    // engine/synapse/NeuromodulatorSystem.h for the full design/literature
-    // basis. Defaults are inert (ec50 huge, gain ceilings inert), matching
-    // every other Phase 1/2/3 mechanism's "unconfigured = bit-identical
-    // no-op" policy.
-    double ec50_d1                  = 1.0e9;
-    double hill_d1                  = 1.0;
-    double max_adaptation_reduction_d1 = 0.0; // 0..1 fraction
-    double max_nmda_gain_d1         = 1.0;    // fold, >=1
-
-    double ec50_d2                  = 1.0e9;
-    double hill_d2                  = 1.0;
-    double max_release_reduction_d2 = 0.0;    // 0..1 fraction
-
-    double ec50_ht1a                = 1.0e9;
-    double hill_ht1a                = 1.0;
-    double max_k_gain_ht1a          = 1.0;    // fold, >=1
-
-    double ec50_ht2a                = 1.0e9;
-    double hill_ht2a                = 1.0;
-    double max_k_reduction_ht2a          = 0.0; // 0..1 fraction
-    double max_adaptation_reduction_ht2a = 0.0; // 0..1 fraction
-
-    bool use_cuda    = true;
-    bool export_csv  = true;
-    std::string output_folder = "output_data";
-};
-
-struct RuntimeInput {
-    SimulationConfig config;
-    std::string drug_name = "GenericCompound";
-    bool run_dose_sweep   = false;
-    double sweep_start    = 0.0;
-    double sweep_end      = 100.0;
-    int sweep_points      = 10;
-};
 
 // SimulationSummary now carries only raw metrics — no NetworkState.
 // Classification is done by NetworkAnalyzer after all doses are collected.
@@ -258,31 +109,12 @@ struct RunResult {
     float meanBurstDurationMs = 0.0f;
     float firingRateStdHz     = 0.0f;
     float silentNeuronPct     = 0.0f;
+    float lateWindowSilentNeuronPct = 0.0f;  // Gap 1.3 fix
     float earlyWindowRateHz   = 0.0f;
     float lateWindowRateHz    = 0.0f;
     float firstThirdRateHz    = 0.0f;
     float middleThirdRateHz   = 0.0f;
     float lastThirdRateHz     = 0.0f;
-};
-
-struct AggregatedStats {
-    float meanRate      = 0.0f; float stdRate      = 0.0f;
-    float meanSync      = 0.0f; float stdSync      = 0.0f;
-    float meanBurst     = 0.0f; float stdBurst     = 0.0f;
-    float meanBurstRate = 0.0f;
-    float meanISI       = 0.0f; float stdISI       = 0.0f;
-    float meanPopVar    = 0.0f;
-    float stdRate2      = 0.0f;
-    float meanPeakSync            = 0.0f;
-    float meanBurstingNeuronPct   = 0.0f;
-    float meanBurstDurationMs     = 0.0f;
-    float meanFiringRateStdHz     = 0.0f;
-    float meanSilentNeuronPct     = 0.0f;
-    float meanEarlyWindowRateHz   = 0.0f;
-    float meanLateWindowRateHz    = 0.0f;
-    float meanFirstThirdRateHz    = 0.0f;
-    float meanMiddleThirdRateHz   = 0.0f;
-    float meanLastThirdRateHz     = 0.0f;
 };
 
 struct SigmoidFitResult {
@@ -334,15 +166,10 @@ std::optional<std::string> readEnvVar(const char* name) {
 }
 
 // ─── Console helpers ──────────────────────────────────────────────────────────
-constexpr int kRuntimeOutputPrecision = 2;
+// kRuntimeOutputPrecision / formatRuntimeNumber moved to report/ReportFormatting.h
+// (see using-declarations at top of file) as part of the report-layer extraction.
 constexpr int kRuntimeDividerWidth    = 50;
 constexpr int kRuntimeLabelWidth      = 22;
-
-std::string formatRuntimeNumber(double value, int precision = kRuntimeOutputPrecision) {
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(precision) << value;
-    return out.str();
-}
 
 void printDivider(char fill = '=') {
     std::cout << std::string(kRuntimeDividerWidth, fill) << "\n";
@@ -692,14 +519,15 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     AggregatedStats stats;
     if (results.empty()) return stats;
     std::vector<float> rates,syncs,bursts,burstRates,isis;
-    std::vector<float> peakSyncs, burstingPcts, burstDurs, rateStds, silentPcts, earlyRates, lateRates;
+    std::vector<float> peakSyncs, burstingPcts, burstDurs, rateStds, silentPcts, lateSilentPcts, earlyRates, lateRates;
     std::vector<float> firstThirdRates, middleThirdRates, lastThirdRates;
     rates.reserve(results.size());      syncs.reserve(results.size());
     bursts.reserve(results.size());     isis.reserve(results.size());
     burstRates.reserve(results.size());
     peakSyncs.reserve(results.size());  burstingPcts.reserve(results.size());
     burstDurs.reserve(results.size());  rateStds.reserve(results.size());
-    silentPcts.reserve(results.size()); earlyRates.reserve(results.size());
+    silentPcts.reserve(results.size()); lateSilentPcts.reserve(results.size());
+    earlyRates.reserve(results.size());
     lateRates.reserve(results.size());
     firstThirdRates.reserve(results.size());
     middleThirdRates.reserve(results.size());
@@ -716,6 +544,7 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
         burstDurs.push_back(r.meanBurstDurationMs);
         rateStds.push_back(r.firingRateStdHz);
         silentPcts.push_back(r.silentNeuronPct);
+        lateSilentPcts.push_back(r.lateWindowSilentNeuronPct);
         earlyRates.push_back(r.earlyWindowRateHz);
         lateRates.push_back(r.lateWindowRateHz);
         firstThirdRates.push_back(r.firstThirdRateHz);
@@ -735,6 +564,7 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     stats.meanBurstDurationMs   = computeMean(burstDurs);
     stats.meanFiringRateStdHz   = computeMean(rateStds);
     stats.meanSilentNeuronPct   = computeMean(silentPcts);
+    stats.meanLateWindowSilentNeuronPct = computeMean(lateSilentPcts);
     stats.meanEarlyWindowRateHz = computeMean(earlyRates);
     stats.meanLateWindowRateHz  = computeMean(lateRates);
     stats.meanFirstThirdRateHz  = computeMean(firstThirdRates);
@@ -744,11 +574,6 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     return stats;
 }
 
-std::string getStability(float stdRate, float stdSync) {
-    if (stdRate<1.0f&&stdSync<0.05f) return "HIGH";
-    if (stdRate<2.0f&&stdSync<0.10f) return "MEDIUM";
-    return "LOW";
-}
 
 // ─── Multi-run simulation ─────────────────────────────────────────────────────
 std::vector<RunResult> runMultipleSimulations(
@@ -781,6 +606,7 @@ std::vector<RunResult> runMultipleSimulations(
         r.meanBurstDurationMs = s.network_metrics.meanBurstDurationMs;
         r.firingRateStdHz     = s.network_metrics.firingRateStdHz;
         r.silentNeuronPct     = s.network_metrics.silentNeuronPct;
+        r.lateWindowSilentNeuronPct = s.network_metrics.lateWindowSilentNeuronPct;
         r.earlyWindowRateHz   = s.network_metrics.earlyWindowRateHz;
         r.lateWindowRateHz    = s.network_metrics.lateWindowRateHz;
         r.firstThirdRateHz    = s.network_metrics.firstThirdRateHz;
@@ -888,6 +714,7 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
             rr.meanBurstDurationMs = netm.meanBurstDurationMs;
             rr.firingRateStdHz     = netm.firingRateStdHz;
             rr.silentNeuronPct     = netm.silentNeuronPct;
+            rr.lateWindowSilentNeuronPct = netm.lateWindowSilentNeuronPct;
             rr.earlyWindowRateHz   = netm.earlyWindowRateHz;
             rr.lateWindowRateHz    = netm.lateWindowRateHz;
             rr.firstThirdRateHz    = netm.firstThirdRateHz;
@@ -915,6 +742,7 @@ NetworkMetrics buildAggregatedNetworkMetrics(const AggregatedStats& stats) {
     m.meanBurstDurationMs      = stats.meanBurstDurationMs;
     m.firingRateStdHz          = stats.meanFiringRateStdHz;
     m.silentNeuronPct          = stats.meanSilentNeuronPct;
+    m.lateWindowSilentNeuronPct = stats.meanLateWindowSilentNeuronPct;
     m.earlyWindowRateHz        = stats.meanEarlyWindowRateHz;
     m.lateWindowRateHz         = stats.meanLateWindowRateHz;
     return m;
@@ -993,6 +821,7 @@ DoseObservation buildDoseObservation(
     o.metrics.populationVariance       = metrics.populationVariance;
     o.metrics.firingRateStdHz          = metrics.firingRateStdHz;
     o.metrics.silentNeuronPct          = metrics.silentNeuronPct;
+    o.metrics.lateWindowSilentNeuronPct = metrics.lateWindowSilentNeuronPct;
     o.metrics.earlyWindowRateHz        = metrics.earlyWindowRateHz;
     o.metrics.lateWindowRateHz         = metrics.lateWindowRateHz;
     return o;
@@ -1268,6 +1097,14 @@ static bool loadDrugConfigFromJsonFile(
     return true;
 }
 // ─── Report text builder ──────────────────────────────────────────────────────
+// Moved to engine/report/LegacyLiabilityReport.cpp (spp::report namespace) --
+// see the using-declarations near the top of this file. Disabled here via
+// #if 0 rather than deleted by hand, since this block is ~850 lines and this
+// sandbox's bash tool was timing out on large in-place edits to this
+// OneDrive-synced file; #if 0 removes it from compilation just as cleanly
+// without needing a giant text-match delete. Safe to physically delete this
+// dead block in a later pass.
+#if 0
 std::string buildDrugEvaluationReportText(
     const PharmaDecisionReport& report,
     const AggregatedStats& stabilityStats,
@@ -1393,9 +1230,25 @@ std::string buildDrugEvaluationReportText(
     const std::string saturationStr = (peakIdx+1 >= report.analyzedDoses.size())
         ? "Not observed within tested range"
         : "Observed beyond " + formatRuntimeNumber(report.analyzedDoses[peakIdx].dose, kDoseListPrecision);
-    const std::string effRange = noResp || therapeuticDoses.empty()
+    // BUG FIX (Phase 3 10-drug held-out validation, pramipexole): this used
+    // to independently recompute the range as therapeuticDoses.front()/
+    // .back() -- the full span of EVERY therapeutic dose, ignoring gaps --
+    // instead of using report.effectiveRangeMin/effectiveRangeMax, which
+    // PharmaDecisionEngine.cpp already computes correctly as the WIDEST
+    // SINGLE CONTIGUOUS sub-range (the same value windowQuality's Continuous/
+    // Fragmented label and the Reason text are actually based on). For a
+    // Continuous window these coincide (only one contiguous block exists),
+    // which is why this was invisible until a Fragmented case with a big
+    // enough gap came along: pramipexole's therapeutic doses were {0.0062,
+    // 0.0078, 0.0140} -- the real widest contiguous range is {0.0062,
+    // 0.0078} (width 0.0016), but front()/back() printed "0.0062-0.0140",
+    // spanning straight across the 4-step gap to an isolated point that
+    // isn't part of any contiguous window at all. (Bromocriptine hit this
+    // too, but its buggy span happened to round to the same 2-decimal
+    // string as the correct answer, so it went unnoticed.)
+    const std::string effRange = (noResp || !report.hasTherapeuticWindow)
         ? "Not observed"
-        : fRange(therapeuticDoses.front(), therapeuticDoses.back());
+        : fRange(report.effectiveRangeMin, report.effectiveRangeMax);
 
     out << "==================================================\n";
     out << "SILICON PATIENT - DRUG EVALUATION REPORT\n";
@@ -1419,21 +1272,26 @@ std::string buildDrugEvaluationReportText(
     // this engine are still channel-only (Phase 1 style), so printing four
     // "1.00e+09" no-op lines on every report would just be noise.
     constexpr double kReceptorInertThreshold = 1.0e8;
+    // BUG FIX (Phase 3 10-drug held-out validation, alprazolam): same
+    // 2-decimal rounding-to-"0.00" issue as the D1/D2/5-HT1A/5-HT2A EC50 and
+    // transporter Ki fixes above, just never applied to AMPA/NMDA/GABA_A/
+    // GABA_B -- alprazolam's real GABA-A EC50 (0.0046) printed as "0.00",
+    // looking like no potentiation was configured at all. kDoseListPrecision.
     if (evalInput.config.ic50_ampa < kReceptorInertThreshold) {
-        aLine("AMPA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_ampa));
+        aLine("AMPA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_ampa, kDoseListPrecision));
         aLine("AMPA Hill",          formatRuntimeNumber(evalInput.config.hill_ampa));
     }
     if (evalInput.config.ic50_nmda < kReceptorInertThreshold) {
-        aLine("NMDA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_nmda));
+        aLine("NMDA EC50 (Block)",  formatRuntimeNumber(evalInput.config.ic50_nmda, kDoseListPrecision));
         aLine("NMDA Hill",          formatRuntimeNumber(evalInput.config.hill_nmda));
     }
     if (evalInput.config.ec50_gabaA < kReceptorInertThreshold) {
-        aLine("GABA-A EC50 (Potentiate)", formatRuntimeNumber(evalInput.config.ec50_gabaA));
+        aLine("GABA-A EC50 (Potentiate)", formatRuntimeNumber(evalInput.config.ec50_gabaA, kDoseListPrecision));
         aLine("GABA-A Hill",              formatRuntimeNumber(evalInput.config.hill_gabaA));
         aLine("GABA-A Max Potentiation",  formatRuntimeNumber(evalInput.config.max_potentiation_gabaA));
     }
     if (evalInput.config.ec50_gabaB < kReceptorInertThreshold) {
-        aLine("GABA-B EC50 (Agonist)", formatRuntimeNumber(evalInput.config.ec50_gabaB));
+        aLine("GABA-B EC50 (Agonist)", formatRuntimeNumber(evalInput.config.ec50_gabaB, kDoseListPrecision));
         aLine("GABA-B Hill",           formatRuntimeNumber(evalInput.config.hill_gabaB));
     }
     // Phase 3a: GAT1 reuptake block -- extends GABA-A/GABA-B decay tau
@@ -1718,7 +1576,15 @@ std::string buildDrugEvaluationReportText(
         // the network is firing at all.
         aLine("Absolute Rate",     formatRuntimeNumber(stabilityStats.meanRate, 2) + " Hz");
         aLine("Rate Change",       formatRuntimeNumber(pk.rateChangePct, 1) + " %");
-        aLine("Burst Rate Delta",  formatRuntimeNumber(pk.burstRateDelta, 2) + " Hz");
+        // Gap 1.3 (PRECISION_GAP_CLOSURE_PLAN.md 1.3): "Burst Rate Delta" removed.
+        // This network's burst detector requires ~150+ Hz local instantaneous
+        // firing (see Metrics.cpp kBurstWindowMsDefault); this network's peak
+        // mean rate under even a real convulsant (4-AP) is ~49 Hz, nowhere near
+        // burst-level clustering, so the field printed 0.00 Hz in every report
+        // ever generated -- not a real zero-effect measurement. Retired rather
+        // than relabeled: no evidence yet that genuine spike-clustering exists
+        // in this network's dynamics at any tested drive level (see
+        // NetworkAnalyzer.cpp's classifyState comment for the same finding).
         aLine("Sync Delta",        formatRuntimeNumber(pk.syncDelta, 3));
         aLine("Irregularity Delta",formatRuntimeNumber(pk.irregularityDelta, 3));
         aLine("Silent Neuron Δ",   formatRuntimeNumber(pk.silentNeuronDelta, 1) + " %");
@@ -2019,7 +1885,9 @@ std::string buildDrugEvaluationReportText(
     if (stabMode) {
         out << "[Network Stabilization Metrics]\n";
         aLine("Sync Reduction",    formatRuntimeNumber(report.syncReductionPct, 1) + " %");
-        aLine("Burst Reduction",   formatRuntimeNumber(report.burstReductionPct, 2) + " Hz");
+        // Gap 1.3: "Burst Reduction" removed -- same dead-metric finding as
+        // "Burst Rate Delta" above, this field is derived from the same
+        // permanently-~0 burstRateHz.
         aLine("Effect Magnitude",  formatRuntimeNumber(report.calciumEffectMagnitude, 1) + " %");
         out << "\n--------------------------------------------------\n\n";
     }
@@ -2089,6 +1957,7 @@ void writeDrugEvaluationReport(
     if (!out.is_open()) throw std::runtime_error("Cannot open: " + path);
     out << buildDrugEvaluationReportText(report, stats, runs, input, mode, usedGpu);
 }
+#endif // moved to engine/report/LegacyLiabilityReport.cpp
 
 // ─── Single run report ────────────────────────────────────────────────────────
 void printSingleRunReport(
@@ -2115,7 +1984,8 @@ void printSingleRunReport(
     out << "[Raw Metrics]\n";
     aLine("Firing Rate",     formatRuntimeNumber(summary.network_metrics.meanFiringRateHz) + " Hz");
     aLine("Sync Index",      formatRuntimeNumber(summary.network_metrics.synchronizationIndex));
-    aLine("Burst Rate",      formatRuntimeNumber(summary.network_metrics.burstRateHz) + " Hz");
+    // Gap 1.3: "Burst Rate" removed here too -- same dead metric as the
+    // dose-eval report (see PRECISION_GAP_CLOSURE_PLAN.md 1.3).
     aLine("Irregularity",    formatRuntimeNumber(summary.network_metrics.irregularityIndex));
     aLine("Silent Neurons",  formatRuntimeNumber(summary.network_metrics.silentNeuronPct) + " %");
     out << "\n--------------------------------------------------\n";
@@ -2126,7 +1996,7 @@ void printSingleRunReport(
     aLine("NII",             formatRuntimeNumber(analyzed.nii));
     aLine("Seizure Prob",    formatRuntimeNumber(analyzed.seizureProbability * 100.0f) + " %");
     aLine("Rate Change",     formatRuntimeNumber(analyzed.rateChangePct) + " %");
-    aLine("Burst Rate Δ",    formatRuntimeNumber(analyzed.burstRateDelta) + " Hz");
+    // Gap 1.3: "Burst Rate Δ" removed -- same dead metric.
     aLine("Sync Δ",          formatRuntimeNumber(analyzed.syncDelta));
     out << "--------------------------------------------------\n";
 

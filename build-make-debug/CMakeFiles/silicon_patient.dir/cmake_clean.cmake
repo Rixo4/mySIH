@@ -21,6 +21,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/silicon_patient.dir/engine/neuron/ReceptorModel.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o"
   "CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o.d"
+  "CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.o"
+  "CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o"
   "CMakeFiles/silicon_patient.dir/engine/simulation/BatchedSimulationEngine.cpp.o.d"
   "CMakeFiles/silicon_patient.dir/engine/simulation/SimulationEngine.cpp.o"

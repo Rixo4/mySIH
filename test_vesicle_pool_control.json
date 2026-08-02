@@ -1,14 +1,14 @@
 {
-  "_reference": "NET Ki approx 5nM (Kd study: 2nM; jnm.snmjournals.org/content/50/supplement_2/486). Weaker/less selective NET blocker than reboxetine (Ki 1.1nM already configured in test_reboxetine.json) -- atomoxetine also has meaningful SERT affinity in reality (~9nM) not modeled here, kept single-mechanism for a clean comparator. Real-world: FDA-approved ADHD drug, non-stimulant, considered to have a wide safety margin relative to stimulant DAT blockers.",
-  "drug_name": "Atomoxetine",
+  "_reference": "D2 Ki=3.9nM (D3 Ki=0.5nM, higher, not modeled -- this engine only has a D2 pathway; pmc/articles/PMC3052387). Very close order of magnitude to bromocriptine's configured ec50_d2=0.005 in test_bromocriptine.json -- both real D2-family agonists, good same-mechanism/similar-realworld-tier comparator. Real-world: pramipexole carries a well-documented impulse-control-disorder risk at clinical doses (not something this engine can model), otherwise considered to have a moderate/manageable safety margin.",
+  "drug_name": "Pramipexole",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "transporters": {
-    "NET": { "ki": 0.005, "hill": 1.0, "max_extension": 2.0 }
+  "neuromodulators": {
+    "D2": { "ec50": 0.0039, "hill": 1.0, "max_release_reduction": 0.5 }
   },
-  "dose_range": { "min": 0.0, "max": 0.05, "step": 0.005 },
-  "runs": 10
+  "dose_range": { "min": 0.0, "max": 0.0156, "step": 0.00156 },
+  "runs": 5
 }

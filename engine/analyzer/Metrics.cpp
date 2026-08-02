@@ -461,6 +461,36 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
         net.silentNeuronPct = (100.0f * static_cast<float>(silentCount)) / neuronCount;
     }
 
+    // lateWindowSilentNeuronPct (Gap 1.3 fix, PRECISION_GAP_CLOSURE_PLAN.md
+    // 1.3): the "future work" fix named in the KNOWN LIMITATION comment above
+    // -- computed per-neuron from ONLY the late half of the run, so a neuron
+    // that fired near-normally early and went silent late is correctly
+    // counted, instead of averaging out above the 2 Hz cutoff over the whole
+    // run. Mirrors the early/late population-level split below (section 8),
+    // but per-neuron, since "silent" is a per-neuron classification -- and
+    // built from result.spikeTimes directly (same source the burst detector
+    // above uses) rather than result.populationSpikesPerStep, which is only
+    // a population-wide aggregate and can't tell which individual neurons
+    // went quiet. This is the field that now feeds the reported "Silent
+    // Neuron Delta" (see NetworkAnalyzer::computeDeltas) -- silentNeuronPct
+    // itself is left untouched above for any other existing caller relying
+    // on its current whole-run-average behavior.
+    {
+        const float halfMs  = result.durationMs * 0.5f;
+        const float halfSec = std::max(1.0e-6f, halfMs / 1000.0f);
+        std::size_t lateSilentCount = 0U;
+        for (const auto& spikes : result.spikeTimes) {
+            std::size_t lateCount = 0U;
+            for (float t : spikes) {
+                if (t >= halfMs) ++lateCount;
+            }
+            const float lateRate = static_cast<float>(lateCount) / halfSec;
+            if (lateRate < 2.0f) ++lateSilentCount;
+        }
+        net.lateWindowSilentNeuronPct =
+            (100.0f * static_cast<float>(lateSilentCount)) / neuronCount;
+    }
+
     // -----------------------------------------------------------------------
     // 4. Population firing rate variance
     // -----------------------------------------------------------------------
@@ -605,6 +635,7 @@ NetworkMetrics MetricsAnalyzer::computeNetworkMetrics(
     net.lastThirdRateHz      = sanitize(net.lastThirdRateHz,      0.0f);
     net.firingRateStdHz      = sanitize(net.firingRateStdHz,      0.0f);
     net.silentNeuronPct      = sanitize(net.silentNeuronPct,      0.0f);
+    net.lateWindowSilentNeuronPct = sanitize(net.lateWindowSilentNeuronPct, 0.0f);
     net.peakSynchronizationIndex = sanitize(net.peakSynchronizationIndex, 0.0f);
     net.meanBurstDurationMs  = sanitize(net.meanBurstDurationMs,  0.0f);
     return net;

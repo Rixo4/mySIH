@@ -393,6 +393,30 @@ engine/output/CsvWriter.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.s
 .PHONY : engine/output/CsvWriter.cpp.s
 
+engine/report/LegacyLiabilityReport.o: engine/report/LegacyLiabilityReport.cpp.o
+.PHONY : engine/report/LegacyLiabilityReport.o
+
+# target to build an object file
+engine/report/LegacyLiabilityReport.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.o
+.PHONY : engine/report/LegacyLiabilityReport.cpp.o
+
+engine/report/LegacyLiabilityReport.i: engine/report/LegacyLiabilityReport.cpp.i
+.PHONY : engine/report/LegacyLiabilityReport.i
+
+# target to preprocess a source file
+engine/report/LegacyLiabilityReport.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.i
+.PHONY : engine/report/LegacyLiabilityReport.cpp.i
+
+engine/report/LegacyLiabilityReport.s: engine/report/LegacyLiabilityReport.cpp.s
+.PHONY : engine/report/LegacyLiabilityReport.s
+
+# target to generate assembly for a file
+engine/report/LegacyLiabilityReport.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/silicon_patient.dir/build.make CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.s
+.PHONY : engine/report/LegacyLiabilityReport.cpp.s
+
 engine/simulation/BatchedSimulationEngine.o: engine/simulation/BatchedSimulationEngine.cpp.o
 .PHONY : engine/simulation/BatchedSimulationEngine.o
 
@@ -579,6 +603,9 @@ help:
 	@echo "... engine/output/CsvWriter.o"
 	@echo "... engine/output/CsvWriter.i"
 	@echo "... engine/output/CsvWriter.s"
+	@echo "... engine/report/LegacyLiabilityReport.o"
+	@echo "... engine/report/LegacyLiabilityReport.i"
+	@echo "... engine/report/LegacyLiabilityReport.s"
 	@echo "... engine/simulation/BatchedSimulationEngine.o"
 	@echo "... engine/simulation/BatchedSimulationEngine.i"
 	@echo "... engine/simulation/BatchedSimulationEngine.s"

@@ -85,6 +85,12 @@
 },
 {
   "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
+  "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/report/LegacyLiabilityReport.cpp",
+  "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/report/LegacyLiabilityReport.cpp",
+  "output": "CMakeFiles/silicon_patient.dir/engine/report/LegacyLiabilityReport.cpp.o"
+},
+{
+  "directory": "/home/ranjith/projectubantu/Neuro_drug_testing/build-make-debug",
   "command": "/usr/bin/g++ -DSPP_USE_CUDA -I/home/ranjith/projectubantu/Neuro_drug_testing/engine -g -std=c++20 -Wall -Wextra -O3 -o CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o -c /home/ranjith/projectubantu/Neuro_drug_testing/engine/output/CsvWriter.cpp",
   "file": "/home/ranjith/projectubantu/Neuro_drug_testing/engine/output/CsvWriter.cpp",
   "output": "CMakeFiles/silicon_patient.dir/engine/output/CsvWriter.cpp.o"
