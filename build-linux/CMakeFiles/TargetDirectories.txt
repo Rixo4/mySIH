@@ -1,4 +1,0 @@
-/home/ranjith/projectubantu/Neuro_drug_testing/build-linux/CMakeFiles/silicon_patient.dir
-/home/ranjith/projectubantu/Neuro_drug_testing/build-linux/CMakeFiles/ontology_regression.dir
-/home/ranjith/projectubantu/Neuro_drug_testing/build-linux/CMakeFiles/edit_cache.dir
-/home/ranjith/projectubantu/Neuro_drug_testing/build-linux/CMakeFiles/rebuild_cache.dir
