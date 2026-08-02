@@ -27,6 +27,7 @@ set(SPP_SOURCES
     engine/analyzer/NetworkAnalyzer.cpp
     engine/analyzer/PharmaDecisionEngine.cpp
     engine/report/LegacyLiabilityReport.cpp
+    engine/report/LiabilityReport.cpp
     engine/output/CsvWriter.cpp
     engine/cuda/CudaSimulator.cpp
 )
@@ -65,9 +66,7 @@ if(SPP_CAN_ENABLE_CUDA)
     endif()
 endif()
 
-add_executable(silicon_patient ${SPP_SOURCES}
-    engine/report/ReportTypes.h
-    engine/report/ReportFormatting.h)
+add_executable(silicon_patient ${SPP_SOURCES})
 
 target_include_directories(silicon_patient PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/engine
