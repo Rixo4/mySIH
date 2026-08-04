@@ -218,12 +218,42 @@ std::string buildLiabilityReportText(
 
     // ── [Quantitative Findings] ────────────────────────────────────────────
     out << "[Quantitative Findings]\n";
-    aLine("Dose-response fit", report.curveType + ", R^2 = " + formatRuntimeNumber(report.sigmoidR2, 2));
+    // Gap 1.2 audit fix (4-Aminopyridine): computeBestSigmoidR2 deliberately
+    // clamps its return value to [-1.0, 1.0] (see PharmaDecisionEngine.cpp) --
+    // a negative value is real, not an error/sentinel, meaning NO logistic
+    // curve in the whole grid search fit this drug's dose-response better
+    // than a flat mean line. Printed with no context this looks like a
+    // broken value to anyone assuming R^2 lives in [0,1], so add a plain-
+    // language note whenever it prints negative.
+    aLine("Dose-response fit", report.curveType + ", R^2 = " + formatRuntimeNumber(report.sigmoidR2, 2)
+          + (report.sigmoidR2 < 0.0 ? " (worse than a flat baseline -- no sigmoid shape fit this data)" : ""));
     if (!report.analyzedDoses.empty()) {
-        const auto& pk = report.analyzedDoses[peakIdx];
-        aLine("Max observed effect",
+        // Gap 1.1 audit fix (cocaine): pair decisionMaxEffectPct with the
+        // dose that actually produced it (decisionMaxEffectDoseIdx), NOT
+        // this file's own peakIdx (highest composite suppression/
+        // excitability/stabilization score, used below for Network state
+        // context) -- the two can legitimately be different doses, and
+        // pairing them incorrectly produced a false "54.2% change at dose
+        // 2.7000" for cocaine when dose 2.7's own rate change was 49.0%.
+        const auto& maxEffectDose = report.analyzedDoses[report.decisionMaxEffectDoseIdx];
+        std::string maxEffectLine =
               formatRuntimeNumber(report.decisionMaxEffectPct, 1) + "% change at dose "
-              + formatRuntimeNumber(pk.dose, kDoseListPrecision));
+              + formatRuntimeNumber(maxEffectDose.dose, kDoseListPrecision);
+        // Gap 1.2 audit fix (4-Aminopyridine): decisionMaxEffectPct is
+        // clamped to 100% (see PharmaDecisionEngine.cpp's effMag clamp,
+        // which exists because this same value also drives the excitatory-
+        // verdict gate elsewhere, not just display) -- so a dose with a real
+        // +184.1% rate change reports identically to one with +105%, losing
+        // real magnitude information for strongly excitatory drugs where the
+        // size of the effect is the whole point. Surface the true, unclamped
+        // rateChangePct alongside it whenever the clamp is actually engaged,
+        // without touching the clamped value itself (that one still needs to
+        // stay clamped -- it's wired into decision logic elsewhere).
+        if (std::fabs(maxEffectDose.rateChangePct) > 100.05f) {
+            maxEffectLine += " (raw rate change " + formatRuntimeNumber(maxEffectDose.rateChangePct, 1)
+                  + "% -- reported effect magnitude above is clamped at 100%)";
+        }
+        aLine("Max observed effect", maxEffectLine);
     } else {
         aLine("Max observed effect", "Not observed");
     }
@@ -237,15 +267,81 @@ std::string buildLiabilityReportText(
     }
     out << "\n  Per-Dose Network State:\n";
     for (const auto& dose : report.analyzedDoses) {
+        // Gap 1.1 audit fix (buspirone/bromocriptine): this table used to
+        // print only NetworkState | MechanismSignature, so notes elsewhere
+        // in this report that point here to verify a claim -- the
+        // fragmented-window note ("see Per-Dose Network State below for
+        // doses outside this block that still showed a real effect") and
+        // the single-point-noise note above (buspirone's dose 0.0420) --
+        // referenced information this table didn't actually contain. Every
+        // dose printed identically regardless of whether it was classified
+        // effective or not, since AnalyzedDose::isEffective (the single
+        // source of truth per AnalyzedDose.h) was never surfaced here. The
+        // legacy report used to expose this via a separate Dose
+        // Classification Summary zone-list section, which this report
+        // format intentionally doesn't have -- so it needs to be visible
+        // per-dose instead.
+        // Gap 1.2 audit fix (4-Aminopyridine): AnalyzedDose::isEffective is
+        // ONLY ever true when networkState is Stable or MildInstability
+        // (see PharmaDecisionEngine.cpp's isEffective computation) -- any
+        // dose that crossed into a genuinely dangerous state (Hyperexcitable/
+        // SeizureRisk/SeizureActive/DepolarizationBlock/NeuralSuppression) is
+        // "Ineffective" by construction, regardless of how large its actual
+        // effect was. For 4-AP this printed "Hyperexcitable | Ineffective"
+        // side by side for doses 425-850 -- exactly the Severe Excitability
+        // Zone doses, i.e. the MOST affected doses in the whole run, labeled
+        // as if they showed no real effect. Distinguishing "no real
+        // response" from "response so large it's structurally dangerous"
+        // instead of collapsing both into one Ineffective label.
+        const bool isDangerState =
+            dose.networkState == NetworkState::Hyperexcitable ||
+            dose.networkState == NetworkState::SeizureRisk ||
+            dose.networkState == NetworkState::SeizureActive ||
+            dose.networkState == NetworkState::DepolarizationBlock ||
+            dose.networkState == NetworkState::NeuralSuppression;
+        const std::string doseEffectLabel = isDangerState ? "Dangerous"
+            : (dose.isEffective ? "Effective" : "Ineffective");
         out << "    Dose " << std::setw(8) << formatRuntimeNumber(dose.dose, kDoseListPrecision)
             << " : " << PharmaDecisionEngine::toString(dose.networkState)
-            << " | " << PharmaDecisionEngine::toString(dose.mechanismSignature) << "\n";
+            << " | " << PharmaDecisionEngine::toString(dose.mechanismSignature)
+            << " | " << doseEffectLabel << "\n";
     }
     out << "\n";
     aLine("Inter-run variability",
           "Rate " + formatRuntimeNumber(stabilityStats.stdRate, 2)
           + ", Sync " + formatRuntimeNumber(stabilityStats.stdSync, 3)
           + ", Stability Score " + stab);
+    // Gap 1.1 audit fix (diazepam_desensitization): the legacy report's
+    // Phase 3b [Adaptation Profile] section (Short/Medium/Long-term firing
+    // rate tiers + Tolerance Risk banding) was never ported to this report
+    // format -- found via a real desensitization-config run where this
+    // entire section, arguably the only informative content for a
+    // single-dose desensitization test, was silently missing. Folded in
+    // here as extra Quantitative Findings lines rather than as a new
+    // top-level section, since the locked template doesn't define one and
+    // this only applies to the subset of configs with desensitization
+    // enabled. Same first/middle/last-third rate split and Tolerance Risk
+    // banding logic as LegacyLiabilityReport.cpp -- see that file's comment
+    // for why this is a first-pass illustrative scale, not a literature-
+    // sourced threshold.
+    if (evalInput.config.desensitization_enabled) {
+        const double firstHz  = stabilityStats.meanFirstThirdRateHz;
+        const double middleHz = stabilityStats.meanMiddleThirdRateHz;
+        const double lastHz   = stabilityStats.meanLastThirdRateHz;
+        const double midPct  = (firstHz > 1.0e-6) ? ((middleHz - firstHz) / firstHz * 100.0) : 0.0;
+        const double lastPct = (firstHz > 1.0e-6) ? ((lastHz  - firstHz) / firstHz * 100.0) : 0.0;
+        const double thirdMs = evalInput.config.sim_time / 3.0;
+        aLine("Short-term rate",  formatRuntimeNumber(firstHz)  + " Hz (0-" + formatRuntimeNumber(thirdMs/1000.0) + "s)");
+        aLine("Medium-term rate", formatRuntimeNumber(middleHz) + " Hz (" + formatRuntimeNumber(midPct) + "% vs short-term)");
+        aLine("Long-term rate",   formatRuntimeNumber(lastHz)   + " Hz (" + formatRuntimeNumber(lastPct) + "% vs short-term)");
+        const double absSwing = std::fabs(lastPct);
+        const std::string toleranceRisk =
+            (absSwing < 2.0) ? "LOW" : (absSwing < 5.0) ? "MODERATE" : "HIGH";
+        aLine("Tolerance risk", toleranceRisk +
+              (lastPct > 0.05 ? " (rate rising -- classic tolerance signature)" :
+               lastPct < -0.05 ? " (rate falling -- not the expected tolerance direction)" :
+               " (no measurable drift)"));
+    }
     out << "\n--------------------------------------------------\n\n";
 
     // ── [Benchmark Context] ────────────────────────────────────────────────

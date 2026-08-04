@@ -43,8 +43,11 @@ using spp::report::AggregatedStats;
 using spp::report::kRuntimeOutputPrecision;
 using spp::report::formatRuntimeNumber;
 using spp::report::getStability;
-using spp::report::buildDrugEvaluationReportText;
-using spp::report::writeDrugEvaluationReport;
+// buildDrugEvaluationReportText/writeDrugEvaluationReport (legacy
+// verdict-style report) are no longer called from the dose-eval path --
+// see the Gap 10 retirement note near the print/export block below.
+// LegacyLiabilityReport.h is still included above so the declarations
+// remain available if a future side-by-side diff is ever needed again.
 using spp::report::buildLiabilityReportText;
 using spp::report::writeLiabilityReport;
 using spp::analyzer::NetworkMetrics;
@@ -1326,11 +1329,16 @@ void runDoseEvaluationMode(
         PharmaDecisionEngine::evaluate(analyzedDoses, si);
 
     // ── Print and export ──────────────────────────────────────────────────────
-    std::cout << buildDrugEvaluationReportText(
-        report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
-    // Gap 10: print the new locked evidence-format report to the terminal
-    // too, directly after the legacy one, so both are visible in one run
-    // without needing to separately cat the output file.
+    // Gap 10 (PRECISION_GAP_CLOSURE_PLAN.md 1.4): the legacy verdict-style
+    // report (buildDrugEvaluationReportText/writeDrugEvaluationReport, the
+    // "SILICON PATIENT - DRUG EVALUATION REPORT" format) has been retired
+    // from stdout and CSV export as of the Gap 1.1/1.2 audit completing
+    // across Phases 1-3. It was kept side-by-side with the new evidence
+    // format specifically so the two could be diffed during that audit;
+    // that audit is now done and the new format is the only one printed.
+    // LegacyLiabilityReport.cpp/.h are left in the tree (not deleted) in
+    // case a future diff is ever needed again, but are no longer called
+    // from the normal dose-eval path below.
     std::cout << buildLiabilityReportText(
         report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
 
@@ -1342,13 +1350,6 @@ void runDoseEvaluationMode(
             evalInput.config.output_folder + "/network_metrics.csv", networkRecords);
         CsvWriter::writeNeuronStats(
             evalInput.config.output_folder + "/neuron_stats.csv", finalNM);
-        writeDrugEvaluationReport(
-            evalInput.config.output_folder + "/drug_evaluation_report.txt",
-            report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
-        // Gap 10 (PRECISION_GAP_CLOSURE_PLAN.md 1.4): the new locked
-        // evidence-format report, written alongside the legacy one (not
-        // replacing stdout output yet) specifically so the two can be
-        // diffed side-by-side during the gap 1.1/1.2 audit.
         writeLiabilityReport(
             evalInput.config.output_folder + "/liability_screening_report.txt",
             report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);

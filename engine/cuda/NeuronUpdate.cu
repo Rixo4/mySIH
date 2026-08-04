@@ -465,6 +465,21 @@ __global__ void fusedBatchedStepKernel(
     const float blockK = hillBlockDevice(dose, drug[1], drug[4]);
     const float blockCa = hillBlockDevice(dose, drug[2], drug[5]);
 
+    // SYNC WARNING: 0.05f (Na) / 0.02f (Ca) here, and the gKEff 0.05f floor
+    // a little further down in this same kernel, are hand-duplicated copies
+    // of DrugModel::kNaConductanceFloor / kKConductanceFloor /
+    // kCaConductanceFloor and the conductanceFloor() formula in
+    // engine/drug/DrugModel.h/.cpp. This kernel is compiled by nvcc in its
+    // own translation unit and cannot call that C++ function directly, so
+    // the math is re-typed here by hand instead. GPU is this project's
+    // default compute backend -- if you change the floor constants or
+    // formula on the host side and forget this copy, GPU runs will silently
+    // keep the OLD behavior while CPU runs pick up the new one. This exact
+    // silent divergence cost real debugging time during the Gap 1.2
+    // Ca-blocker calibration investigation (two rounds of "confirmed
+    // rebuild, still bit-for-bit identical output" before this independent
+    // copy was found) -- see PRECISION_GAP_CLOSURE_PLAN.md. If you touch
+    // either side, touch both.
     const float gNaEff = fmaxf(0.05f * safeGNa, safeGNa * fmaxf(0.0f, 1.0f - blockNa));
     const float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
 
@@ -548,6 +563,9 @@ __global__ void fusedBatchedStepKernel(
         nmodAdaptationScale *= (1.0f - ht2aAdaptFrac * ht2aOcc);
     }
 
+    // 0.05f floor here is the K counterpart to the SYNC WARNING above this
+    // function's gNaEff/gCaEff lines -- same DrugModel::kKConductanceFloor
+    // duplication, same rule: keep in sync with engine/drug/DrugModel.h.
     const float gKEff = fmaxf(0.05f * safeGK, safeGK * (1.0f - blockK)) * nmodGKEffScale;
 
     // PHASE2_PLAN.md step 6: per-receptor conductance accumulation, mirrors

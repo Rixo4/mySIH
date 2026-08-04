@@ -123,6 +123,21 @@ struct PharmaDecisionReport {
     // was silently deciding on instead of recomputing an unrelated one.
     float decisionMaxEffectPct      = 0.0f;
 
+    // Index into analyzedDoses of whichever dose actually produced
+    // decisionMaxEffectPct above (Gap 1.1 audit fix, found via cocaine).
+    // IMPORTANT: this is a DIFFERENT dose selection than report/
+    // LiabilityReport.cpp's and LegacyLiabilityReport.cpp's own locally
+    // computed "peakIdx" (highest composite max(suppressionScore,
+    // excitabilityScore, stabilizationScore), used for Network Impact /
+    // Neuromodulator Gain Profile / Peak Efficiency). That composite score
+    // and this raw rateChangePct-derived max can legitimately peak at
+    // different doses -- cocaine's own audit found decisionMaxEffectPct
+    // paired with the composite peakIdx's dose printed "54.2% change at
+    // dose 2.7000" while dose 2.7's own Rate Change field read 49.0%, i.e.
+    // the 54.2% actually happened at a different dose. Reports must pair
+    // decisionMaxEffectPct with THIS index, not the composite peakIdx.
+    std::size_t decisionMaxEffectDoseIdx = 0;
+
     // Stabilization metrics (Ca-block)
     double syncReductionPct       = 0.0;
     double seizureReductionPct    = 0.0;
@@ -149,6 +164,17 @@ struct PharmaDecisionReport {
     std::string riskLevel      = "LOW";
     DrugRiskTier overallTier   = DrugRiskTier::Safe;
 
+    // True when NOT RECOMMENDED/HIGH RISK was reached via the categorical
+    // EXCITATORY_RESPONSE + maxEffectPct>10 magnitude-floor path (see the
+    // `excitatory` comment in the .cpp -- 4-AP precedent: real per-dose
+    // danger states are the primary signal, this is the fallback for a drug
+    // whose aggregate rate swing is large enough to be dangerous even though
+    // no single dose crossed a structural instability threshold). Found
+    // worth flagging explicitly (Phase 3 10-drug validation, DOI: every
+    // dose classified Stable, yet still NOT RECOMMENDED) -- without this,
+    // the report looks self-contradictory: "Per Dose Network State" all
+    // Stable next to "NOT RECOMMENDED / HIGH RISK" with no visible link
+    // between them. main.cpp prints an explanatory note when this is true.
     bool excitatoryVerdictViaMagnitudeFloor = false;
 
     // Deprecated — kept so report_parser.py still finds these fields

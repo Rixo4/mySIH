@@ -118,17 +118,19 @@ ConductanceResult DrugModel::applyWithDoseScale(
     const float safeGK = sanitizeConductance(gK);
     const float safeGCa = sanitizeConductance(gCa);
 
-    const float naResidual = std::max(0.0f, 1.0f - blockNa);
-    const float caResidual = std::max(0.0f, 1.0f - blockCa);
-
     ConductanceResult result;
     result.blockNa = blockNa;
     result.blockK = blockK;
     result.blockCa = blockCa;
-    result.gNaEff = std::max(0.05f * safeGNa, safeGNa * naResidual);
-    result.gKEff = std::max(0.05f * safeGK, safeGK * (1.0f - blockK));
-    result.gCaEff = std::max(0.02f * safeGCa, safeGCa * caResidual);
+    result.gNaEff = conductanceFloor(safeGNa, blockNa, kNaConductanceFloor);
+    result.gKEff  = conductanceFloor(safeGK,  blockK,  kKConductanceFloor);
+    result.gCaEff = conductanceFloor(safeGCa, blockCa, kCaConductanceFloor);
     return result;
+}
+
+float DrugModel::conductanceFloor(float safeG, float blockFraction, float floorFraction) {
+    const float residual = std::max(0.0f, 1.0f - blockFraction);
+    return std::max(floorFraction * safeG, safeG * residual);
 }
 
 float DrugModel::hillBlock(float dose, float ic50, float hill) {

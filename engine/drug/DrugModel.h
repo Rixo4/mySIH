@@ -159,6 +159,38 @@ public:
 
     static float hillBlock(float dose, float ic50, float hill);
 
+    // Minimum fraction of a channel's original conductance retained even at
+    // 100% Hill-block occupancy (channels are modeled as never fully
+    // closing). Na and K share one floor; Ca has its own, lower floor.
+    //
+    // IMPORTANT -- these three constants, and the conductanceFloor() formula
+    // right below, are duplicated by hand in engine/cuda/NeuronUpdate.cu
+    // (search that file for "0.05f" / "0.02f" near hillBlockDevice). The
+    // CUDA kernel runs in its own translation unit compiled by nvcc and
+    // cannot call this C++ function directly, so it re-implements the same
+    // math independently. If you change any of these three values or the
+    // conductanceFloor() formula, you MUST make the matching edit in
+    // NeuronUpdate.cu -- otherwise GPU-backend runs (the default backend)
+    // will silently keep the old behavior while CPU runs pick up the change.
+    // This exact silent divergence cost real debugging time during the
+    // Gap 1.2 Ca-blocker calibration investigation (see
+    // PRECISION_GAP_CLOSURE_PLAN.md) -- a host-only diagnostic patch
+    // produced bit-for-bit identical GPU output across two "confirmed
+    // rebuild" rounds before the independent device-side copy was found.
+    static constexpr float kNaConductanceFloor = 0.05f;
+    static constexpr float kKConductanceFloor  = 0.05f;
+    static constexpr float kCaConductanceFloor = 0.02f;
+
+    // Shared floor formula: max(floorFraction * safeG, safeG * residual)
+    // where residual = max(0, 1 - blockFraction). Extracted here so every
+    // host-side caller -- this class's own apply()/applyWithDoseScale() AND
+    // BatchedSimulationEngine.cpp, which previously carried its own
+    // hand-typed copy of this exact formula -- are guaranteed to compute it
+    // identically instead of three independently-maintained copies drifting
+    // apart on the host side too. See the constants comment above for the
+    // one duplication (CUDA) that can't be closed this way.
+    static float conductanceFloor(float safeG, float blockFraction, float floorFraction);
+
     // Multiplicative potentiation factor, >= 1.0, saturating toward
     // maxPotentiationFactor as dose rises. Reuses hillBlock's sigmoid shape
     // as the underlying occupancy fraction (0..1) -- see PHASE2_PLAN.md §3.

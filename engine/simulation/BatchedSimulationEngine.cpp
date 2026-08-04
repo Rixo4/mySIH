@@ -634,13 +634,20 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             const float safeGK  = (std::isfinite(population_.gK[i])  && population_.gK[i]  > 0.0f) ? population_.gK[i]  : 0.0f;
             const float safeGCa = (std::isfinite(population_.gCa[i]) && population_.gCa[i] > 0.0f) ? population_.gCa[i] : 0.0f;
 
-            gNaEff[i] = std::max(0.05f * safeGNa, safeGNa * std::max(0.0f, 1.0f - blockNa));
+            // Gap: this used to be its own hand-typed copy of the floor
+            // formula (0.05f/0.02f), a second host-side copy independent of
+            // DrugModel::apply()'s. Now routed through the same
+            // DrugModel::conductanceFloor() both places use, so the two
+            // host paths can no longer drift apart -- see the long comment
+            // on DrugModel.h's kNaConductanceFloor for the one duplication
+            // (the CUDA kernel) that still can't be closed this way.
+            gNaEff[i] = drug::DrugModel::conductanceFloor(safeGNa, blockNa, drug::DrugModel::kNaConductanceFloor);
             // Phase 3c: 5-HT1A increases / 5-HT2A decreases intrinsic K+
             // conductance -- applied AFTER the existing Phase 1 channel-
             // block reduction, as an independent multiplicative factor
             // (nMods.gKEffScale == 1.0 when unconfigured, exact no-op).
-            gKEff[i]  = std::max(0.05f * safeGK,  safeGK  * (1.0f - blockK)) * nMods.gKEffScale;
-            gCaEff[i] = std::max(0.02f * safeGCa, safeGCa * std::max(0.0f, 1.0f - blockCa));
+            gKEff[i]  = drug::DrugModel::conductanceFloor(safeGK, blockK, drug::DrugModel::kKConductanceFloor) * nMods.gKEffScale;
+            gCaEff[i] = drug::DrugModel::conductanceFloor(safeGCa, blockCa, drug::DrugModel::kCaConductanceFloor);
         }
 
         if (runOnGpu) {

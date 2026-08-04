@@ -1,13 +1,10 @@
 {
-  "drug_name": "Tiagabine",
+  "drug_name": "Nimodipine",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
-    "Ca": { "ic50": 1000000.0 }
+    "Ca": { "ic50": 0.057, "hill": 1.0, "subtype_fraction": 0.35 }
   },
-  "transporters": {
-    "GAT1": { "ki": 0.7, "hill": 1.0, "max_extension": 2.0 }
-  },
-  "dose_range": { "min": 0.0, "max": 3.5, "step": 0.35 },
-  "runs": 8
+  "dose_range": { "min": 0.0, "max": 0.057, "step": 0.0057 },
+  "runs": 15
 }

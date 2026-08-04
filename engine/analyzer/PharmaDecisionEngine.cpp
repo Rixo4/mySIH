@@ -356,6 +356,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     double cumulativeStabilization  = 0.0;
     double cumulativeToxicity       = 0.0;
     double maxEffectPct             = 0.0;
+    // Gap 1.1 audit fix (cocaine): tracks WHICH dose produced maxEffectPct,
+    // so the report can pair the percentage with the dose that actually
+    // caused it instead of an unrelated composite-score peak dose. See
+    // PharmaDecisionEngine.h's decisionMaxEffectDoseIdx comment.
+    std::size_t maxEffectDoseIdx    = 0;
 
     std::vector<double> xDose;
     std::vector<double> suppressionCurve;
@@ -386,7 +391,10 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         const double exciEff  = std::max(0.0,  static_cast<double>(dose.rateChangePct) / 100.0);
         const double stabilEff= static_cast<double>(dose.stabilizationScore);
         const double effMag   = std::clamp(std::max({suppEff, exciEff, stabilEff}), 0.0, 1.0);
-        maxEffectPct = std::max(maxEffectPct, effMag * 100.0);
+        if (effMag * 100.0 > maxEffectPct) {
+            maxEffectPct = effMag * 100.0;
+            maxEffectDoseIdx = i;
+        }
 
         xDose.push_back(static_cast<double>(dose.dose));
         suppressionCurve.push_back(suppEff);
@@ -729,6 +737,7 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     // differently-formulated "Max Effect" that can silently disagree with
     // it (see PharmaDecisionEngine.h's decisionMaxEffectPct comment).
     report.decisionMaxEffectPct = static_cast<float>(maxEffectPct);
+    report.decisionMaxEffectDoseIdx = maxEffectDoseIdx;
 
     // The narrow-margin carve-out only applies to the suppression/"dangerous"
     // path, not to excitatory or before-therapy toxicity -- those never have
