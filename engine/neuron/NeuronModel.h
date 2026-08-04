@@ -59,12 +59,64 @@ struct HHParameters {
     // +560% on Ca block; gAHP=3.0 -> +371%; gAHP=2.0 -> +175%; gAHP=1.0 ->
     // +18%; gAHP=0.5 -> +3%. Real L-type-specific Ca-blockers (verapamil,
     // diltiazem, nimodipine) are clinically safe, not seizurogenic, so a
-    // ~500%+ single-neuron swing was never plausible. 1.0 targets a modest,
-    // realistic AHP contribution to a Ca-block's excitatory bias. Network
-    // amplification may differ from this single-neuron estimate (as it did
-    // for external_current) -- re-measure against a Ca-blocker after tuning
-    // and adjust if the resulting swing still looks too large or too small.
-    float gAHP  = 1.0f;          // Ca-activated K conductance mS/cm²
+    // ~500%+ single-neuron swing was never plausible. 1.0 was picked to
+    // target that modest single-neuron estimate.
+    //
+    // GAP 1.2 RECALIBRATION -- COMMITTED (PRECISION_GAP_CLOSURE_PLAN.md /
+    // PHASE1_BIOLOGY_BRIEFING.md). The comment above warned network
+    // amplification might differ from the single-neuron estimate and told
+    // whoever touched this next to re-measure -- that re-measurement found
+    // the network-level swing (+42-48% at ~83-84% Ca-channel occupancy) was
+    // far larger than the single-neuron target this value was tuned for,
+    // and large enough to misclassify three real, clinically safe Ca-
+    // blockers (nimodipine, verapamil, diltiazem) as NOT RECOMMENDED / HIGH
+    // RISK. gAHP was swept down (1.0 -> 0.5 -> 0.25 -> 0.2) and re-measured
+    // against all three each time; at 0.2 (runs=20, to rule out noise --
+    // several intermediate readings were noise, not signal), all three
+    // clear the engine's internal excitatory-risk gate with real margin
+    // (nimodipine +9.9%, verapamil +8.9%, diltiazem +9.3%, vs. the original
+    // +42-48%).
+    //
+    // Regression-checked against 3 already-audited non-Ca-blocker drugs
+    // before committing (gAHP is a SHARED parameter -- it sets baseline
+    // spike-frequency adaptation for every neuron in every config, not just
+    // Ca-blockers), using clean low/moderate-occupancy dose ranges rather
+    // than each drug's coarse 5x-IC50 template (that template has its own
+    // pre-existing sharp-collapse-threshold artifact, unrelated to gAHP,
+    // that produced a false "regression" reading on lidocaine on the first
+    // attempt -- corrected by re-testing on a fair, fine-grained range):
+    //   Lidocaine (Na-channel block):  clean, no regression -- R^2/magnitude
+    //     essentially unchanged, modest noise increase.
+    //   TEA (K-channel block):        clean, no regression -- onset of
+    //     Hyperexcitable moved one dose-step earlier (biologically sensible:
+    //     weaker AHP brake, slightly more convulsant-prone), magnitude/noise
+    //     if anything slightly better.
+    //   Diazepam (GABA-A potentiation): NOT clean -- max effect rose from
+    //     19.3% to 29.8% (+54% relative, same safe/suppressive direction),
+    //     Rate Variability roughly doubled, Stability/Evidence Quality
+    //     downgraded MEDIUM -> LOW. Plausible mechanism: this is a SYNAPTIC
+    //     receptor pathway, not intrinsic channel block, and a weaker AHP
+    //     brake leaves less counter-excitation to offset GABA-A's own
+    //     suppression. NMDA and GABA-B mechanisms were not tested.
+    //
+    // DECISION (deliberate tradeoff, not an oversight): accept this. Three
+    // confidently-wrong verdicts on decades-established, clinically safe
+    // drugs is a worse error than one receptor-pathway drug's magnitude
+    // shifting by an amount we can't yet independently verify either way
+    // (no real validation data exists for diazepam's true suppression
+    // magnitude any more than for the Ca-blockers). IMPORTANT CAVEAT for
+    // anyone citing this: gAHP=0.2 is CALIBRATED to match three known-safe
+    // drugs' expected direction, not independently VALIDATED against real
+    // experimental/clinical data -- that distinction matters, see
+    // PRECISION_GAP_CLOSURE_PLAN.md Tier 3. Do not describe this as "the
+    // engine now correctly models Ca-channel blockers" -- describe it as
+    // "recalibrated to match known real-world safety direction for the
+    // three tested Ca-blockers; not yet independently validated, and the
+    // diazepam/GABA-A number should be treated as provisional pending real
+    // validation data for that mechanism too." If NMDA or GABA-B mechanisms
+    // are later found to have a similar undesirable shift, that would be
+    // grounds to revisit this value again.
+    float gAHP  = 0.2f;          // Ca-activated K conductance mS/cm² -- COMMITTED (Gap 1.2), see above
     float tauCa = 80.0f;         // Ca decay time constant ms
     float kCa  = 0.0005f;        // calcium accumulation rate per unit Ca current
     // Set to 0: this was added while chasing the collapse bug from the wrong
