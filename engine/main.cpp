@@ -406,6 +406,9 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.neuromod.ht1a.ec50 = static_cast<float>(cfg.ec50_ht1a);
     profile.neuromod.ht1a.hill = static_cast<float>(cfg.hill_ht1a);
     profile.neuromod.ht1a.maxKGainFold = static_cast<float>(cfg.max_k_gain_ht1a);
+    profile.neuromod.ht1a.autoreceptorEc50 = static_cast<float>(cfg.autoreceptor_ec50_ht1a);
+    profile.neuromod.ht1a.autoreceptorHill = static_cast<float>(cfg.autoreceptor_hill_ht1a);
+    profile.neuromod.ht1a.maxAutoreceptorSuppressionFrac = static_cast<float>(cfg.max_autoreceptor_suppression_ht1a);
 
     profile.neuromod.ht2a.ec50 = static_cast<float>(cfg.ec50_ht2a);
     profile.neuromod.ht2a.hill = static_cast<float>(cfg.hill_ht2a);
@@ -1050,6 +1053,11 @@ static bool loadDrugConfigFromJsonFile(
             if(auto n=extractJsonNumber(c,"ec50",ht1aP);n) out.config.ec50_ht1a=*n;
             if(auto h=extractJsonNumber(c,"hill",ht1aP);h) out.config.hill_ht1a=*h;
             if(auto m=extractJsonNumber(c,"max_k_gain",ht1aP);m) out.config.max_k_gain_ht1a=*m;
+            // Tier 2.1: presynaptic autoreceptor pathway, same nested-object
+            // pattern as the postsynaptic fields above.
+            if(auto n=extractJsonNumber(c,"autoreceptor_ec50",ht1aP);n) out.config.autoreceptor_ec50_ht1a=*n;
+            if(auto h=extractJsonNumber(c,"autoreceptor_hill",ht1aP);h) out.config.autoreceptor_hill_ht1a=*h;
+            if(auto m=extractJsonNumber(c,"max_autoreceptor_suppression",ht1aP);m) out.config.max_autoreceptor_suppression_ht1a=*m;
         }
         const auto ht2aP=c.find("\"5HT2A\"",nmPos);
         if(ht2aP!=c.npos){
