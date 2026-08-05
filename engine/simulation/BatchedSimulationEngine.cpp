@@ -257,6 +257,11 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.ht1a.ec50,
             receptorProfile_.neuromod.ht1a.hill,
             receptorProfile_.neuromod.ht1a.maxKGainFold,
+            // Tier 2.1: presynaptic autoreceptor pathway -- same
+            // shared-profile passthrough as the postsynaptic fields above.
+            receptorProfile_.neuromod.ht1a.autoreceptorEc50,
+            receptorProfile_.neuromod.ht1a.autoreceptorHill,
+            receptorProfile_.neuromod.ht1a.maxAutoreceptorSuppressionFrac,
             receptorProfile_.neuromod.ht2a.ec50,
             receptorProfile_.neuromod.ht2a.hill,
             receptorProfile_.neuromod.ht2a.maxKReductionFrac,

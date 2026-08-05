@@ -121,6 +121,14 @@ struct BatchedStepLaunchInfo {
     float ht1aEc50 = 1.0e9f;
     float ht1aHill = 1.0f;
     float ht1aMaxKGainFold = 1.0f;
+    // Tier 2.1 (PRECISION_GAP_CLOSURE_PLAN.md): presynaptic autoreceptor
+    // pathway -- see NeuromodulatorSystem.h's Serotonin5HT1AAction comment.
+    // SYNC WARNING: this is a separate copy from the host struct, same
+    // manual-sync duplication as every other field in this section --
+    // keep in sync with NeuromodulatorSystem.h if either changes.
+    float ht1aAutoreceptorEc50 = 1.0e9f;
+    float ht1aAutoreceptorHill = 1.0f;
+    float ht1aMaxAutoreceptorSuppressionFrac = 0.0f;
     float ht2aEc50 = 1.0e9f;
     float ht2aHill = 1.0f;
     float ht2aMaxKReductionFrac = 0.0f;
