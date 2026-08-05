@@ -1459,6 +1459,22 @@ int main(int argc, char** argv) {
             std::optional<int> userRuns;
             std::optional<double> jsonDoseMin, jsonDoseMax, jsonDoseStep;
             if(!drugConfigPath.empty()) {
+                // BUG FIX (found auditing test_amlodipine.json): input.config.hill
+                // was left at 3.2 from the "Default Internal Engine Config" preset
+                // above. loadDrugConfigFromJsonFile only overwrites config.hill if
+                // a channel's JSON block explicitly includes its own "hill" key
+                // (see the naP/kP/caP extraction inside that function) -- any user
+                // drug config that omits "hill" entirely (legal, and the documented
+                // default per ChannelDrugProfile::hillNa/hillK/hillCa is 1.0) was
+                // silently getting hill=3.2 instead, with no warning and a report
+                // that looked plausible rather than obviously broken. Every
+                // channel-blocker config audited earlier this session happened to
+                // set "hill":1.0 explicitly, which is why this was never caught
+                // until a config that omits it was tested. Reset to the correct
+                // documented default here, right before parsing, so an omitted
+                // "hill" in the JSON falls back to 1.0 as intended instead of
+                // inheriting an unrelated demo preset value.
+                input.config.hill = 1.0;
                 std::optional<int> ro; std::string mt;
                 if(loadDrugConfigFromJsonFile(drugConfigPath, input, ro, mt, jsonDoseMin, jsonDoseMax, jsonDoseStep)) {
                     engineMode = "User Drug Config";

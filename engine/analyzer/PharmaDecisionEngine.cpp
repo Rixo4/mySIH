@@ -466,11 +466,29 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
         // that existing 10% "notable effect" threshold, i.e. deliberately
         // more permissive for what counts as a real signal worth reporting
         // than what counts as dangerous.
+        //
+        // Gap 1.1 audit fix (found via zolpidem): the excitatory floor above
+        // was never mirrored for suppression. suppressionScore is a
+        // corroborated composite (0.65*rateSuppression + 0.35*silentNeuron
+        // corroboration, see NetworkAnalyzer::computeSuppressionScore) --
+        // for a mild, real suppression with no silent-neuron corroboration
+        // (e.g. zolpidem's real, clean 9.9% rate decrease at gAHP=0.2,
+        // R^2=0.98 Sigmoidal, Stable throughout), that composite comes out
+        // to ~0.09, under the 0.15 bar, so every dose read "Ineffective"
+        // despite a real, reproducible effect -- the exact same failure
+        // mode the D1-agonist fix above was written to close, just on the
+        // suppressive side instead of the excitatory side. Added the
+        // symmetric floor: rateChangePct < -5.0f. Same reasoning applies:
+        // the state gate and Step 9's NOT RECOMMENDED path for genuinely
+        // dangerous suppression (e.g. NeuralSuppression state) are
+        // untouched by this, since those are gated on NetworkState, not on
+        // isEffective -- this only surfaces the safe, mild-magnitude
+        // (5-10%) suppressive case that was previously invisible.
         const bool isEffective =
             (dose.networkState == NetworkState::MildInstability ||
              dose.networkState == NetworkState::Stable) &&
             (dose.suppressionScore > 0.15f || dose.stabilizationScore > 0.10f ||
-             dose.rateChangePct > 5.0f);
+             dose.rateChangePct > 5.0f || dose.rateChangePct < -5.0f);
         // Publish the single source of truth onto the report's copy of this
         // dose (see AnalyzedDose.h's isEffective comment) so main.cpp's
         // Dose Classification Summary doesn't re-derive its own threshold.

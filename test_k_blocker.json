@@ -1,5 +1,5 @@
 {
-  "drug_name": "Diazepam",
+  "drug_name": "Diazepam (60s control, desensitization OFF)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
@@ -8,6 +8,10 @@
   "receptors": {
     "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
   },
-  "dose_range": { "min": 0.0, "max": 0.03, "step": 0.003 },
-  "runs": 10
+  "desensitization": {
+    "enabled": false
+  },
+  "sim_time_ms": 60000,
+  "dose_range": { "min": 0.0, "max": 0.05, "step": 0.05 },
+  "runs": 3
 }
