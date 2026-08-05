@@ -55,6 +55,28 @@
 //     channel-block mechanism (Phase 1), just increasing instead of
 //     decreasing.
 //
+//     Tier 2.1 addition (PRECISION_GAP_CLOSURE_PLAN.md): 5-HT1A also has a
+//     well-documented presynaptic (somatodendritic) autoreceptor role on
+//     raphe serotonin neurons, distinct from the postsynaptic gKEff action
+//     above -- this is the textbook mechanism behind SSRIs' delayed
+//     (2-4 week) clinical onset: early on, autoreceptor activation
+//     suppresses serotonergic tone; the autoreceptor desensitizes over
+//     time, letting the postsynaptic effect emerge (el Mansari et al 2005,
+//     J Neurosci 21:8188; Blier & de Montigny, review). No new neuron
+//     population needed to represent this -- modeled as a SECOND
+//     Hill-occupancy curve on the same dose, with its own (typically
+//     lower, i.e. more sensitive) EC50, that ATTENUATES the postsynaptic
+//     gKEff effect rather than acting independently. This reproduces the
+//     qualitative early-suppression-then-emerging-effect pattern without
+//     modeling actual raphe neuron firing or endogenous serotonin release/
+//     clearance -- see maxAutoreceptorSuppressionFrac field comment below
+//     for the exact combination formula. Representative literature ratio:
+//     autoreceptor-preferring vs postsynaptic-preferring 5-HT1A ligands
+//     (F13714 vs F15599) differ in binding affinity by roughly 30x (Ki=0.1nM
+//     vs 3.4nM respectively) -- used as a rough order-of-magnitude anchor
+//     for autoreceptorEc50, not a drug-specific measured value. Same "one
+//     representative value" policy as the rest of this file.
+//
 //   5-HT2A: confirmed to reduce K+ leak conductance (opposite direction from
 //     5-HT1A) and inhibit the post-burst afterhyperpolarization current,
 //     depolarizing and increasing excitability/firing (computational model
@@ -91,11 +113,19 @@ struct DopamineD2Action {
 };
 
 // Serotonin 5-HT1A -- see header note. maxKGainFold is the ceiling fold-
-// increase in gKEff at saturating occupancy (>=1).
+// increase in gKEff at saturating occupancy (>=1). autoreceptorEc50/Hill
+// and maxAutoreceptorSuppressionFrac model the presynaptic autoreceptor
+// pathway (Tier 2.1) -- a second, independent occupancy curve on the same
+// dose that attenuates (does not replace) the postsynaptic gKEff effect
+// above. All three default to fully inert (huge EC50 / 0 suppression),
+// same zero-drift-when-unconfigured guarantee as every other field here.
 struct Serotonin5HT1AAction {
     float ec50 = 1.0e9f;
     float hill = 1.0f;
     float maxKGainFold = 1.0f;
+    float autoreceptorEc50 = 1.0e9f;
+    float autoreceptorHill = 1.0f;
+    float maxAutoreceptorSuppressionFrac = 0.0f;
 };
 
 // Serotonin 5-HT2A -- see header note. maxKReductionFrac is the fraction of
