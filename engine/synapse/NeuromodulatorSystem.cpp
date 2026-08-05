@@ -50,10 +50,31 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
 
     // 5-HT1A (serotonin): boosts gKEff (GIRK-mediated hyperpolarization).
     // Uses doseForSerotonin (SERT reuptake-block-amplified).
+    //
+    // Tier 2.1: autoreceptor occupancy is a SECOND Hill curve on the same
+    // dose, typically saturating at a lower EC50 (more sensitive) than the
+    // postsynaptic curve above. It attenuates how much of the postsynaptic
+    // gain gets expressed -- attenuation = 1.0 at zero autoreceptor
+    // occupancy, shrinking toward (1 - maxAutoreceptorSuppressionFrac) as
+    // the autoreceptor saturates. Net effect: at low dose, the
+    // (already-saturating) autoreceptor curve suppresses most of the
+    // (still-small) postsynaptic occupancy's expression -- weak net gKEff
+    // change. At high dose, the autoreceptor curve is already saturated
+    // (attenuation floored) while postsynaptic occupancy keeps climbing --
+    // the full gKEff gain effect emerges. This reproduces the qualitative
+    // early-suppression-then-emerging-effect pattern without any new
+    // neuron population or endogenous release/clearance model. Inert
+    // (attenuation == 1.0 always) when maxAutoreceptorSuppressionFrac == 0,
+    // so any config that doesn't set the new fields is a bit-identical
+    // no-op -- same guarantee as every other mechanism in this file.
     {
         const float occ = neuromodulatorOccupancy(doseForSerotonin, profile.ht1a.ec50, profile.ht1a.hill);
         const float kCeiling = std::max(1.0f, profile.ht1a.maxKGainFold);
-        out.gKEffScale *= (1.0f + (kCeiling - 1.0f) * occ);
+        const float autoOcc = neuromodulatorOccupancy(
+            doseForSerotonin, profile.ht1a.autoreceptorEc50, profile.ht1a.autoreceptorHill);
+        const float autoSuppressFrac = std::clamp(profile.ht1a.maxAutoreceptorSuppressionFrac, 0.0f, 1.0f);
+        const float attenuation = 1.0f - autoSuppressFrac * autoOcc;
+        out.gKEffScale *= (1.0f + (kCeiling - 1.0f) * occ * attenuation);
     }
 
     // 5-HT2A (serotonin): shrinks gKEff (reduced K+ leak) AND shrinks
