@@ -156,6 +156,11 @@ struct SimulationConfig {
     double ec50_ht1a                = 1.0e9;
     double hill_ht1a                = 1.0;
     double max_k_gain_ht1a          = 1.0;    // fold, >=1
+    // Tier 2.1: 5-HT1A presynaptic autoreceptor pathway -- see
+    // NeuromodulatorSystem.h's Serotonin5HT1AAction comment.
+    double autoreceptor_ec50_ht1a           = 1.0e9;
+    double autoreceptor_hill_ht1a           = 1.0;
+    double max_autoreceptor_suppression_ht1a = 0.0;  // 0..1 fraction
 
     double ec50_ht2a                = 1.0e9;
     double hill_ht2a                = 1.0;
