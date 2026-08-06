@@ -129,6 +129,12 @@ struct BatchedStepLaunchInfo {
     float ht1aAutoreceptorEc50 = 1.0e9f;
     float ht1aAutoreceptorHill = 1.0f;
     float ht1aMaxAutoreceptorSuppressionFrac = 0.0f;
+    // Tier 2.1 correction: time-dependent desensitization of the
+    // autoreceptor above -- uses this struct's EXISTING `timeMs` field
+    // (see below), no new time field needed. Huge/inert defaults = never
+    // desensitizes, same backward-compat guarantee as every other field.
+    float ht1aAutoreceptorTauDesenseMs = 1.0e12f;
+    float ht1aAutoreceptorTauRecoveryMs = 1.0e9f;
     float ht2aEc50 = 1.0e9f;
     float ht2aHill = 1.0f;
     float ht2aMaxKReductionFrac = 0.0f;

@@ -125,8 +125,12 @@ public:
     // level math, kept here so callers (BatchedSimulationEngine) go through
     // the same DrugModel entry point as every other mechanism family rather
     // than reaching into engine/synapse directly.
+    // Tier 2.1: currentTimeMs threads through to 5-HT1A's autoreceptor
+    // desensitization term only -- see NeuromodulatorSystem.h's comment.
+    // Default 0.0f preserves this function's prior time-independent
+    // behavior for any caller that doesn't pass it explicitly.
     static spp::synapse::NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
-        const ReceptorDrugProfile& profile, float dose);
+        const ReceptorDrugProfile& profile, float dose, float currentTimeMs = 0.0f);
 
     // Phase 3c retrofit: SERT/DAT reuptake block amplifies the effective
     // dose the dopamine (D1/D2) or serotonin (5-HT1A/5-HT2A) receptors see

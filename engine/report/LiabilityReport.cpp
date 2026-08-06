@@ -170,6 +170,12 @@ std::string buildLiabilityReportText(
     if (evalInput.config.ec50_d1   < kReceptorInertThreshold) addTarget("D1 EC50",     evalInput.config.ec50_d1);
     if (evalInput.config.ec50_d2   < kReceptorInertThreshold) addTarget("D2 EC50",     evalInput.config.ec50_d2);
     if (evalInput.config.ec50_ht1a < kReceptorInertThreshold) addTarget("5-HT1A EC50", evalInput.config.ec50_ht1a);
+    // Tier 2.1: presynaptic autoreceptor pathway -- was silently missing
+    // from this header (found via test_5ht1a_autoreceptor.json's own first
+    // run, which showed the postsynaptic EC50 but nothing about the new
+    // autoreceptor fields even though they were configured and active).
+    if (evalInput.config.autoreceptor_ec50_ht1a < kReceptorInertThreshold)
+        addTarget("5-HT1A Autoreceptor EC50", evalInput.config.autoreceptor_ec50_ht1a);
     if (evalInput.config.ec50_ht2a < kReceptorInertThreshold) addTarget("5-HT2A EC50", evalInput.config.ec50_ht2a);
     aLine("Configured Targets", firstTarget ? "None (unconfigured/inert profile)" : targets.str());
     aLine("Hill Coefficient(s)", formatRuntimeNumber(evalInput.config.hill, 2));
@@ -374,7 +380,40 @@ std::string buildLiabilityReportText(
            "  ~150+ Hz threshold) -- danger states are still caught by sync/irregularity/rate\n"
            "  branches, but any burst-specific signal cannot register\n"
            "  (PRECISION_GAP_CLOSURE_PLAN.md 1.3).\n";
-    if (hasNeuromodEffect) {
+    // Tier 2.1 update, second correction: this message went through two
+    // wrong states before this one -- first a blanket "no split at all"
+    // claim (wrong once the autoreceptor pathway was added), then a
+    // "dose-only, not time-dependent" claim (wrong again once the
+    // closed-form time-dependent desensitization was added, and found
+    // stale by rereading THIS SAME report during that mechanism's own
+    // early/late validation run). Now keyed off whether the tau fields are
+    // actually configured (finite), not just whether the autoreceptor
+    // EC50 is set, so an old dose-only config (if one still exists) gets
+    // the accurate middle message instead of silently claiming time-
+    // dependence it doesn't have.
+    constexpr double kTauInertThreshold = 1.0e10;
+    const bool ht1aAutoreceptorConfigured =
+        evalInput.config.autoreceptor_ec50_ht1a < kReceptorInertThreshold;
+    const bool ht1aTimeDependent =
+        ht1aAutoreceptorConfigured &&
+        evalInput.config.autoreceptor_tau_desense_ms_ht1a < kTauInertThreshold;
+    if (ht1aTimeDependent) {
+        out << "- 5-HT1A has a time-dependent presynaptic autoreceptor pathway configured\n"
+               "  alongside its postsynaptic effect -- the autoreceptor desensitizes over\n"
+               "  continued exposure at this fixed dose (same qualitative mechanism as real\n"
+               "  SSRIs' delayed clinical onset), using a compressed/illustrative timescale\n"
+               "  unless the config's tau values were sourced from real literature. Still a\n"
+               "  first-pass model: no real experimental timecourse has been used to validate\n"
+               "  the desensitization rate itself (PRECISION_GAP_CLOSURE_PLAN.md 2.1).\n";
+    } else if (ht1aAutoreceptorConfigured) {
+        out << "- 5-HT1A has a second (presynaptic autoreceptor) pathway configured\n"
+               "  alongside its postsynaptic effect -- but this config leaves the\n"
+               "  autoreceptor's desensitization tau at its inert default, so the split is\n"
+               "  DOSE-dependent only (evaluated at a single instant), not the TIME-dependent\n"
+               "  desensitization that produces real SSRIs' delayed clinical onset. Do not\n"
+               "  read this run as reproducing that phenomenon (PRECISION_GAP_CLOSURE_PLAN.md\n"
+               "  2.1).\n";
+    } else if (hasNeuromodEffect) {
         out << "- D1/D2/5-HT1A/5-HT2A pathways in this engine are single monotonic curves\n"
                "  with no presynaptic-autoreceptor-vs-postsynaptic-receptor split -- genuinely\n"
                "  biphasic dopaminergic/serotonergic response (real for some compounds at this\n"

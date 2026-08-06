@@ -161,6 +161,11 @@ struct SimulationConfig {
     double autoreceptor_ec50_ht1a           = 1.0e9;
     double autoreceptor_hill_ht1a           = 1.0;
     double max_autoreceptor_suppression_ht1a = 0.0;  // 0..1 fraction
+    // Tier 2.1 correction: time-dependent desensitization of the
+    // autoreceptor above (huge/inert defaults = never desensitizes,
+    // reproduces the old dose-only behavior).
+    double autoreceptor_tau_desense_ms_ht1a  = 1.0e12;
+    double autoreceptor_tau_recovery_ms_ht1a = 1.0e9;
 
     double ec50_ht2a                = 1.0e9;
     double hill_ht2a                = 1.0;

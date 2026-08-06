@@ -559,7 +559,20 @@ __global__ void fusedBatchedStepKernel(
         const float ht1aAutoOcc = hillBlockDevice(
             doseForSerotonin, launchInfo.ht1aAutoreceptorEc50, launchInfo.ht1aAutoreceptorHill);
         const float ht1aAutoSuppressFrac = clamp01(launchInfo.ht1aMaxAutoreceptorSuppressionFrac);
-        const float ht1aAttenuation = 1.0f - ht1aAutoSuppressFrac * ht1aAutoOcc;
+        // Tier 2.1 correction: closed-form time-dependent desensitization,
+        // exact mirror of NeuromodulatorSystem.cpp's CPU-path math -- see
+        // that file's comment for the derivation. launchInfo.timeMs is the
+        // same per-step elapsed time already used for the refractory-period
+        // check elsewhere in this kernel.
+        const float ht1aTauDesense  = fmaxf(1.0f, launchInfo.ht1aAutoreceptorTauDesenseMs);
+        const float ht1aTauRecovery = fmaxf(1.0f, launchInfo.ht1aAutoreceptorTauRecoveryMs);
+        const float ht1aKDesense  = 1.0f / ht1aTauDesense;
+        const float ht1aKRecovery = 1.0f / ht1aTauRecovery;
+        const float ht1aRate = ht1aKDesense * ht1aAutoOcc + ht1aKRecovery;
+        const float ht1aDSteadyState = (ht1aRate > 1.0e-12f) ? (ht1aKDesense * ht1aAutoOcc / ht1aRate) : 0.0f;
+        const float ht1aDNow = ht1aDSteadyState * (1.0f - expf(-ht1aRate * fmaxf(0.0f, launchInfo.timeMs)));
+        const float ht1aEffectiveSuppressFrac = ht1aAutoSuppressFrac * (1.0f - ht1aDNow);
+        const float ht1aAttenuation = 1.0f - ht1aEffectiveSuppressFrac * ht1aAutoOcc;
         nmodGKEffScale *= (1.0f + (ht1aKCeiling - 1.0f) * ht1aOcc * ht1aAttenuation);
 
         // 5-HT2A: shrinks gKEff (reduced K+ leak) AND shrinks adaptation
@@ -1069,6 +1082,8 @@ struct CudaSimulator::DeviceBuffers {
     float batchedHt1aAutoreceptorEc50 = 1.0e9f;
     float batchedHt1aAutoreceptorHill = 1.0f;
     float batchedHt1aMaxAutoreceptorSuppressionFrac = 0.0f;
+    float batchedHt1aAutoreceptorTauDesenseMs = 1.0e12f;
+    float batchedHt1aAutoreceptorTauRecoveryMs = 1.0e9f;
     float batchedHt2aEc50 = 1.0e9f;
     float batchedHt2aHill = 1.0f;
     float batchedHt2aMaxKReductionFrac = 0.0f;
@@ -1500,6 +1515,8 @@ void CudaSimulator::initializeBatchedSimulation(
     float ht1aAutoreceptorEc50,
     float ht1aAutoreceptorHill,
     float ht1aMaxAutoreceptorSuppressionFrac,
+    float ht1aAutoreceptorTauDesenseMs,
+    float ht1aAutoreceptorTauRecoveryMs,
     float ht2aEc50,
     float ht2aHill,
     float ht2aMaxKReductionFrac,
@@ -1628,6 +1645,8 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedHt1aAutoreceptorEc50 = ht1aAutoreceptorEc50;
     buffers_->batchedHt1aAutoreceptorHill = ht1aAutoreceptorHill;
     buffers_->batchedHt1aMaxAutoreceptorSuppressionFrac = ht1aMaxAutoreceptorSuppressionFrac;
+    buffers_->batchedHt1aAutoreceptorTauDesenseMs = ht1aAutoreceptorTauDesenseMs;
+    buffers_->batchedHt1aAutoreceptorTauRecoveryMs = ht1aAutoreceptorTauRecoveryMs;
     buffers_->batchedHt2aEc50 = ht2aEc50;
     buffers_->batchedHt2aHill = ht2aHill;
     buffers_->batchedHt2aMaxKReductionFrac = ht2aMaxKReductionFrac;
@@ -1795,6 +1814,8 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.ht1aAutoreceptorEc50 = buffers_->batchedHt1aAutoreceptorEc50;
     launchInfo.ht1aAutoreceptorHill = buffers_->batchedHt1aAutoreceptorHill;
     launchInfo.ht1aMaxAutoreceptorSuppressionFrac = buffers_->batchedHt1aMaxAutoreceptorSuppressionFrac;
+    launchInfo.ht1aAutoreceptorTauDesenseMs = buffers_->batchedHt1aAutoreceptorTauDesenseMs;
+    launchInfo.ht1aAutoreceptorTauRecoveryMs = buffers_->batchedHt1aAutoreceptorTauRecoveryMs;
     launchInfo.ht2aEc50 = buffers_->batchedHt2aEc50;
     launchInfo.ht2aHill = buffers_->batchedHt2aHill;
     launchInfo.ht2aMaxKReductionFrac = buffers_->batchedHt2aMaxKReductionFrac;

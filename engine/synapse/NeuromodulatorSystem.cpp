@@ -22,7 +22,8 @@ float neuromodulatorOccupancy(float dose, float ec50, float hill) {
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     float doseForDopamine,
     float doseForSerotonin,
-    const NeuromodulatorProfile& profile
+    const NeuromodulatorProfile& profile,
+    float currentTimeMs
 ) {
     NeuromodulatorGainModifiers out;
 
@@ -73,7 +74,30 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
         const float autoOcc = neuromodulatorOccupancy(
             doseForSerotonin, profile.ht1a.autoreceptorEc50, profile.ht1a.autoreceptorHill);
         const float autoSuppressFrac = std::clamp(profile.ht1a.maxAutoreceptorSuppressionFrac, 0.0f, 1.0f);
-        const float attenuation = 1.0f - autoSuppressFrac * autoOcc;
+
+        // Tier 2.1 correction: D(t) is the closed-form solution of
+        // dD/dt = kDesense*autoOcc*(1-D) - kRecover*D for CONSTANT autoOcc
+        // (valid because dose, hence occupancy, does not change during a
+        // fixed-dose run). D(0)=0 (fresh receptor). As t grows, D climbs
+        // toward its steady state Dss = kDesense*autoOcc / (kDesense*autoOcc
+        // + kRecover), and the autoreceptor's effective suppression ceiling
+        // shrinks toward autoSuppressFrac*(1-Dss) -- i.e. the receptor
+        // desensitizes and lets more of the postsynaptic effect through
+        // over time, at a FIXED dose. tauDesenseMs at its inert default
+        // (huge) makes kDesense~0, so Dss~0 and D(t)~0 for any realistic
+        // t -- exactly reproduces the old dose-only behavior when the new
+        // fields are left unconfigured.
+        const float tauDesense  = std::max(1.0f, profile.ht1a.autoreceptorTauDesenseMs);
+        const float tauRecovery = std::max(1.0f, profile.ht1a.autoreceptorTauRecoveryMs);
+        const float kDesense  = 1.0f / tauDesense;
+        const float kRecovery = 1.0f / tauRecovery;
+        const float rate = kDesense * autoOcc + kRecovery;
+        const float dSteadyState = (rate > 1.0e-12f) ? (kDesense * autoOcc / rate) : 0.0f;
+        const float t = std::max(0.0f, currentTimeMs);
+        const float dNow = dSteadyState * (1.0f - std::exp(-rate * t));
+
+        const float effectiveSuppressFrac = autoSuppressFrac * (1.0f - dNow);
+        const float attenuation = 1.0f - effectiveSuppressFrac * autoOcc;
         out.gKEffScale *= (1.0f + (kCeiling - 1.0f) * occ * attenuation);
     }
 

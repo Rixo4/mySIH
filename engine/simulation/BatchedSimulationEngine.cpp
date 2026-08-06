@@ -262,6 +262,8 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.ht1a.autoreceptorEc50,
             receptorProfile_.neuromod.ht1a.autoreceptorHill,
             receptorProfile_.neuromod.ht1a.maxAutoreceptorSuppressionFrac,
+            receptorProfile_.neuromod.ht1a.autoreceptorTauDesenseMs,
+            receptorProfile_.neuromod.ht1a.autoreceptorTauRecoveryMs,
             receptorProfile_.neuromod.ht2a.ec50,
             receptorProfile_.neuromod.ht2a.hill,
             receptorProfile_.neuromod.ht2a.maxKReductionFrac,
@@ -573,7 +575,13 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 };
             }
             blockReceptorMods[b] = drug::DrugModel::computeReceptorModifiers(receptorProfile_, effDose);
-            blockNeuromodMods[b] = drug::DrugModel::computeNeuromodulatorGainModifiers(receptorProfile_, effDose);
+            // Tier 2.1: timeMs (already computed at the top of this step
+            // loop) drives 5-HT1A's autoreceptor desensitization term --
+            // every other lever in this call ignores it, so recomputing
+            // this every step (rather than once per run) costs one extra
+            // Hill+exp evaluation per block per step, negligible next to
+            // the rest of this loop.
+            blockNeuromodMods[b] = drug::DrugModel::computeNeuromodulatorGainModifiers(receptorProfile_, effDose, timeMs);
         }
 
         for (std::size_t i = 0; i < totalNeurons_; ++i) {

@@ -1,17 +1,25 @@
 {
-  "drug_name": "Diazepam (60s control, desensitization OFF)",
+  "_status": "REALISTIC-MAGNITUDE Tier 2.1 test -- first application of the validated 5-HT1A time-dependent autoreceptor mechanism to a real, already-audited drug config, now that the mechanism's SHAPE was confirmed reproducible on real hardware (see PRECISION_GAP_CLOSURE_PLAN.md 2.1, 2026-08-06 validation note). Does NOT replace test_buspirone.json -- that file stays as the clean, already-passed baseline without this mechanism, for comparison.",
+  "_reference": "Postsynaptic ec50/hill/max_k_gain identical to test_buspirone.json (unchanged, already real-world-anchored). autoreceptor_ec50=0.0005 keeps the same ~30x-more-sensitive anchor sourced from F13714/F15599 5-HT1A ligand data (see PRECISION_GAP_CLOSURE_PLAN.md 2.1). max_autoreceptor_suppression=0.7 and the tau values remain ILLUSTRATIVE PLACEHOLDERS, not literature-sourced for buspirone specifically -- real autoreceptor_tau_desense_ms should be on the order of DAYS-TO-WEEKS for a genuine SSRI/buspirone-like delayed-onset story (clinical onset ~2-4 weeks), not the ~20s compressed timescale used here, which exists purely for practical sim_time_ms/wall-clock runtime on this hardware. Treat this config as demonstrating that the mechanism composes correctly with a real, already-validated drug's existing parameters -- not as a calibrated claim about buspirone's actual autoreceptor kinetics.",
+  "drug_name": "Buspirone (5-HT1A partial agonist, with autoreceptor pathway)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "receptors": {
-    "GABA_A": { "ec50": 0.03, "hill": 1.0, "max_potentiation": 5.5 }
+  "neuromodulators": {
+    "5HT1A": {
+      "ec50": 0.015,
+      "hill": 1.0,
+      "max_k_gain": 1.05,
+      "autoreceptor_ec50": 0.0005,
+      "autoreceptor_hill": 1.0,
+      "max_autoreceptor_suppression": 0.7,
+      "autoreceptor_tau_desense_ms": 20000,
+      "autoreceptor_tau_recovery_ms": 80000
+    }
   },
-  "desensitization": {
-    "enabled": false
-  },
-  "sim_time_ms": 60000,
-  "dose_range": { "min": 0.0, "max": 0.05, "step": 0.05 },
+  "sim_time_ms": 20000,
+  "dose_range": { "min": 0.0, "max": 0.06, "step": 0.006 },
   "runs": 3
 }

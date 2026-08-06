@@ -126,6 +126,8 @@ struct Serotonin5HT1AAction {
     float autoreceptorEc50 = 1.0e9f;
     float autoreceptorHill = 1.0f;
     float maxAutoreceptorSuppressionFrac = 0.0f;
+    float autoreceptorTauDesenseMs = 1.0e12f;
+    float autoreceptorTauRecoveryMs = 1.0e9f;
 };
 
 // Serotonin 5-HT2A -- see header note. maxKReductionFrac is the fraction of
@@ -181,7 +183,8 @@ float neuromodulatorOccupancy(float dose, float ec50, float hill);
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     float doseForDopamine,
     float doseForSerotonin,
-    const NeuromodulatorProfile& profile
+    const NeuromodulatorProfile& profile,
+    float currentTimeMs
 );
 
 } // namespace spp::synapse

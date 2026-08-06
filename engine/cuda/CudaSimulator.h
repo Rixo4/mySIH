@@ -146,6 +146,8 @@ public:
         float ht1aAutoreceptorEc50,
         float ht1aAutoreceptorHill,
         float ht1aMaxAutoreceptorSuppressionFrac,
+        float ht1aAutoreceptorTauDesenseMs,
+        float ht1aAutoreceptorTauRecoveryMs,
         float ht2aEc50,
         float ht2aHill,
         float ht2aMaxKReductionFrac,

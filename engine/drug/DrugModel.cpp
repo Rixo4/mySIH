@@ -260,7 +260,7 @@ float DrugModel::amplifiedDoseForSerotonin(const ReceptorDrugProfile& profile, f
 }
 
 spp::synapse::NeuromodulatorGainModifiers DrugModel::computeNeuromodulatorGainModifiers(
-    const ReceptorDrugProfile& profile, float dose) {
+    const ReceptorDrugProfile& profile, float dose, float currentTimeMs) {
     // Phase 3c retrofit: DAT reuptake block amplifies the dose D1/D2 see;
     // SERT reuptake block amplifies the dose 5-HT1A/5-HT2A see. Both are
     // exact no-ops (return `dose` unchanged) when profile.dat/profile.sert
@@ -272,7 +272,7 @@ spp::synapse::NeuromodulatorGainModifiers DrugModel::computeNeuromodulatorGainMo
     const float doseForDopamine  = amplifiedDoseForDopamine(profile, dose);
     const float doseForSerotonin = amplifiedDoseForSerotonin(profile, dose);
     return spp::synapse::computeNeuromodulatorGainModifiers(
-        doseForDopamine, doseForSerotonin, profile.neuromod);
+        doseForDopamine, doseForSerotonin, profile.neuromod, currentTimeMs);
 }
 
 } // namespace spp::drug
