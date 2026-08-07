@@ -1,0 +1,15 @@
+{
+  "_status": "PROFILING-ONLY config, not a real drug test. Small enough (single dose, runs=4, sim_time_ms=2000 -> 50,000 steps) to finish in well under a minute so nsys's own overhead doesn't dominate, but long enough (thousands of steps) to give a representative kernel-time distribution for fusedBatchedStepKernel. Uses the same neuron_count/connectivity/receptor stack as every other --dose-eval run, so whatever nsys shows here generalizes to the real sweeps.",
+  "drug_name": "GPU Profiling Probe",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "neuromodulators": {
+    "5HT1A": { "ec50": 0.015, "hill": 1.0, "max_k_gain": 1.05 }
+  },
+  "sim_time_ms": 2000,
+  "dose_range": { "min": 0.0, "max": 0.015, "step": 0.015 },
+  "runs": 4
+}

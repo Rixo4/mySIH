@@ -1,0 +1,3 @@
+[  5%] Building CUDA object CMakeFiles/silicon_patient.dir/engine/cuda/NeuronUpdate.cu.o
+[ 10%] Linking CXX executable silicon_patient
+[100%] Built target silicon_patient

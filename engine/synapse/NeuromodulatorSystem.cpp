@@ -93,7 +93,13 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
         const float kRecovery = 1.0f / tauRecovery;
         const float rate = kDesense * autoOcc + kRecovery;
         const float dSteadyState = (rate > 1.0e-12f) ? (kDesense * autoOcc / rate) : 0.0f;
-        const float t = std::max(0.0f, currentTimeMs);
+        // autoreceptorExposureOffsetMs (see header comment) decouples the
+        // desensitization state's elapsed time from the run's own simulated
+        // duration, so a short/cheap probe run can evaluate D(t) at a real
+        // literature timescale (days-to-weeks) without simulating that much
+        // network time. Defaults to 0.0f, so t == currentTimeMs exactly
+        // when unconfigured -- no behavior change for any existing config.
+        const float t = std::max(0.0f, currentTimeMs + profile.ht1a.autoreceptorExposureOffsetMs);
         const float dNow = dSteadyState * (1.0f - std::exp(-rate * t));
 
         const float effectiveSuppressFrac = autoSuppressFrac * (1.0f - dNow);

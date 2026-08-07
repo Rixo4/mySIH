@@ -411,6 +411,7 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.neuromod.ht1a.maxAutoreceptorSuppressionFrac = static_cast<float>(cfg.max_autoreceptor_suppression_ht1a);
     profile.neuromod.ht1a.autoreceptorTauDesenseMs = static_cast<float>(cfg.autoreceptor_tau_desense_ms_ht1a);
     profile.neuromod.ht1a.autoreceptorTauRecoveryMs = static_cast<float>(cfg.autoreceptor_tau_recovery_ms_ht1a);
+    profile.neuromod.ht1a.autoreceptorExposureOffsetMs = static_cast<float>(cfg.autoreceptor_exposure_offset_ms_ht1a);
 
     profile.neuromod.ht2a.ec50 = static_cast<float>(cfg.ec50_ht2a);
     profile.neuromod.ht2a.hill = static_cast<float>(cfg.hill_ht2a);
@@ -1062,6 +1063,7 @@ static bool loadDrugConfigFromJsonFile(
             if(auto m=extractJsonNumber(c,"max_autoreceptor_suppression",ht1aP);m) out.config.max_autoreceptor_suppression_ht1a=*m;
             if(auto t=extractJsonNumber(c,"autoreceptor_tau_desense_ms",ht1aP);t) out.config.autoreceptor_tau_desense_ms_ht1a=*t;
             if(auto t=extractJsonNumber(c,"autoreceptor_tau_recovery_ms",ht1aP);t) out.config.autoreceptor_tau_recovery_ms_ht1a=*t;
+            if(auto o=extractJsonNumber(c,"autoreceptor_exposure_offset_ms",ht1aP);o) out.config.autoreceptor_exposure_offset_ms_ht1a=*o;
         }
         const auto ht2aP=c.find("\"5HT2A\"",nmPos);
         if(ht2aP!=c.npos){

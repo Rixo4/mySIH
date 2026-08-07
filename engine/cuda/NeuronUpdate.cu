@@ -381,6 +381,23 @@ __global__ void initCurandStatesKernel(std::size_t neuronCount, std::uint32_t se
     curand_init(static_cast<unsigned long long>(seed) + static_cast<unsigned long long>(i), 0, 0, &states[i]);
 }
 
+// GPU performance investigation (2026-08-06, ncu SpeedOfLight/Occupancy
+// profiling on RTX 3050 Laptop): this kernel runs latency-bound at ~32%
+// occupancy, capped by register pressure (Block Limit Registers: 2/SM).
+// Tried __launch_bounds__(256, 4) to force 4 resident blocks/SM (67%
+// theoretical occupancy) -- measured result on a small profiling grid (45
+// blocks) was a 9% REGRESSION (555us -> 605us/step), because that grid was
+// too small to fill the higher per-SM capacity ("only 0.6 full waves"
+// warning) while register spill still cost extra memory traffic (L1 hit
+// rate dropped 53%->44%). Reverted here since it was never validated as a
+// net win at realistic sweep grid sizes (real sweeps run ~150-600+ grid
+// blocks, not 45) -- GPU kernel optimization work paused at user's request
+// before that follow-up test ran. If resuming: profile with
+// test_gpu_profile_bigblock.json (dose x run grid sized closer to real
+// sweeps) before re-adding this attribute, and if it's still not a clear
+// win, pursue kernel-splitting instead (breaking this monolithic per-neuron
+// step into a lighter-weight synaptic/receptor-conductance kernel followed
+// by a HH-integration+spike kernel, each with lower register pressure).
 __global__ void fusedBatchedStepKernel(
     BatchedStepLaunchInfo launchInfo,
     BatchedStepDevicePointers devicePointers
@@ -570,7 +587,10 @@ __global__ void fusedBatchedStepKernel(
         const float ht1aKRecovery = 1.0f / ht1aTauRecovery;
         const float ht1aRate = ht1aKDesense * ht1aAutoOcc + ht1aKRecovery;
         const float ht1aDSteadyState = (ht1aRate > 1.0e-12f) ? (ht1aKDesense * ht1aAutoOcc / ht1aRate) : 0.0f;
-        const float ht1aDNow = ht1aDSteadyState * (1.0f - expf(-ht1aRate * fmaxf(0.0f, launchInfo.timeMs)));
+        // Real-timescale fix: mirrors the CPU path's exposure-offset add --
+        // see NeuromodulatorSystem.h's Serotonin5HT1AAction comment.
+        const float ht1aExposureT = fmaxf(0.0f, launchInfo.timeMs + launchInfo.ht1aAutoreceptorExposureOffsetMs);
+        const float ht1aDNow = ht1aDSteadyState * (1.0f - expf(-ht1aRate * ht1aExposureT));
         const float ht1aEffectiveSuppressFrac = ht1aAutoSuppressFrac * (1.0f - ht1aDNow);
         const float ht1aAttenuation = 1.0f - ht1aEffectiveSuppressFrac * ht1aAutoOcc;
         nmodGKEffScale *= (1.0f + (ht1aKCeiling - 1.0f) * ht1aOcc * ht1aAttenuation);
@@ -1084,6 +1104,7 @@ struct CudaSimulator::DeviceBuffers {
     float batchedHt1aMaxAutoreceptorSuppressionFrac = 0.0f;
     float batchedHt1aAutoreceptorTauDesenseMs = 1.0e12f;
     float batchedHt1aAutoreceptorTauRecoveryMs = 1.0e9f;
+    float batchedHt1aAutoreceptorExposureOffsetMs = 0.0f;
     float batchedHt2aEc50 = 1.0e9f;
     float batchedHt2aHill = 1.0f;
     float batchedHt2aMaxKReductionFrac = 0.0f;
@@ -1517,6 +1538,7 @@ void CudaSimulator::initializeBatchedSimulation(
     float ht1aMaxAutoreceptorSuppressionFrac,
     float ht1aAutoreceptorTauDesenseMs,
     float ht1aAutoreceptorTauRecoveryMs,
+    float ht1aAutoreceptorExposureOffsetMs,
     float ht2aEc50,
     float ht2aHill,
     float ht2aMaxKReductionFrac,
@@ -1647,6 +1669,7 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedHt1aMaxAutoreceptorSuppressionFrac = ht1aMaxAutoreceptorSuppressionFrac;
     buffers_->batchedHt1aAutoreceptorTauDesenseMs = ht1aAutoreceptorTauDesenseMs;
     buffers_->batchedHt1aAutoreceptorTauRecoveryMs = ht1aAutoreceptorTauRecoveryMs;
+    buffers_->batchedHt1aAutoreceptorExposureOffsetMs = ht1aAutoreceptorExposureOffsetMs;
     buffers_->batchedHt2aEc50 = ht2aEc50;
     buffers_->batchedHt2aHill = ht2aHill;
     buffers_->batchedHt2aMaxKReductionFrac = ht2aMaxKReductionFrac;
@@ -1816,6 +1839,7 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.ht1aMaxAutoreceptorSuppressionFrac = buffers_->batchedHt1aMaxAutoreceptorSuppressionFrac;
     launchInfo.ht1aAutoreceptorTauDesenseMs = buffers_->batchedHt1aAutoreceptorTauDesenseMs;
     launchInfo.ht1aAutoreceptorTauRecoveryMs = buffers_->batchedHt1aAutoreceptorTauRecoveryMs;
+    launchInfo.ht1aAutoreceptorExposureOffsetMs = buffers_->batchedHt1aAutoreceptorExposureOffsetMs;
     launchInfo.ht2aEc50 = buffers_->batchedHt2aEc50;
     launchInfo.ht2aHill = buffers_->batchedHt2aHill;
     launchInfo.ht2aMaxKReductionFrac = buffers_->batchedHt2aMaxKReductionFrac;

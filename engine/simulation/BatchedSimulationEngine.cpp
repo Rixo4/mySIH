@@ -264,6 +264,7 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.ht1a.maxAutoreceptorSuppressionFrac,
             receptorProfile_.neuromod.ht1a.autoreceptorTauDesenseMs,
             receptorProfile_.neuromod.ht1a.autoreceptorTauRecoveryMs,
+            receptorProfile_.neuromod.ht1a.autoreceptorExposureOffsetMs,
             receptorProfile_.neuromod.ht2a.ec50,
             receptorProfile_.neuromod.ht2a.hill,
             receptorProfile_.neuromod.ht2a.maxKReductionFrac,

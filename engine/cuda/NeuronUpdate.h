@@ -135,6 +135,10 @@ struct BatchedStepLaunchInfo {
     // desensitizes, same backward-compat guarantee as every other field.
     float ht1aAutoreceptorTauDesenseMs = 1.0e12f;
     float ht1aAutoreceptorTauRecoveryMs = 1.0e9f;
+    // Real-timescale fix: decouples autoreceptor exposure time from this
+    // struct's own `timeMs` -- see NeuromodulatorSystem.h's
+    // Serotonin5HT1AAction comment. 0 = inert (old behavior).
+    float ht1aAutoreceptorExposureOffsetMs = 0.0f;
     float ht2aEc50 = 1.0e9f;
     float ht2aHill = 1.0f;
     float ht2aMaxKReductionFrac = 0.0f;

@@ -117,8 +117,59 @@ struct DopamineD2Action {
 // and maxAutoreceptorSuppressionFrac model the presynaptic autoreceptor
 // pathway (Tier 2.1) -- a second, independent occupancy curve on the same
 // dose that attenuates (does not replace) the postsynaptic gKEff effect
-// above. All three default to fully inert (huge EC50 / 0 suppression),
+// above. All fields default to fully inert (huge EC50 / 0 suppression),
 // same zero-drift-when-unconfigured guarantee as every other field here.
+//
+// Tier 2.1 correction: an earlier version of this struct only had the
+// three fields above, making the autoreceptor's suppression purely
+// DOSE-dependent (evaluated fresh each instant from occupancy alone). That
+// does not reproduce real SSRIs' delayed clinical onset, which is a
+// TIME-dependent phenomenon: the autoreceptor desensitizes over continued
+// exposure at a FIXED dose (el Mansari et al 2005, J Neurosci 21:8188;
+// Blier & de Montigny). autoreceptorTauDesenseMs/autoreceptorTauRecoveryMs
+// add that time dependence using the exact same desensitization ODE
+// already validated for GABA-A (see Synapse.h's DesensitizationConfig):
+//   dD/dt = kDesense * drive * (1-D) - kRecover * D
+// but solved in CLOSED FORM rather than stepped numerically, because
+// `drive` here (the autoreceptor's own Hill occupancy) is constant for the
+// whole duration of any fixed-dose run -- unlike GABA-A's drive, which is
+// a genuinely time-varying per-neuron synaptic conductance and therefore
+// needs real per-neuron persistent state. For constant drive, the ODE has
+// an exact analytic solution (see computeNeuromodulatorGainModifiers),
+// which avoids needing any new per-neuron GPU memory allocation.
+// autoreceptorTauDesenseMs default (huge/inert) means "never desensitizes"
+// -- backward compatible with the dose-only behavior when unconfigured.
+//
+// Tier 2.1 real-timescale fix (PRECISION_GAP_CLOSURE_PLAN.md, 2026-08-06):
+// literature gives a real, citable time course for this desensitization --
+// Blier & de Montigny's chronic 5-HT1A-agonist electrophysiology (dorsal
+// raphe firing-rate recovery): ~2 days treatment = firing still markedly
+// suppressed (autoreceptor essentially undesensitized), 7 days = partial
+// recovery, 14 days = complete recovery. Fitting the same closed-form
+// D(t)=Dss*(1-exp(-rate*t)) to those three anchor points gives
+// autoreceptorTauDesenseMs ~= 7 days (604,800,000 ms) as the default real
+// value (1 tau at the 7-day "partial recovery" point, ~86% recovered by
+// 14 days, consistent with "complete" given the papers' qualitative
+// resolution). autoreceptorTauRecoveryMs (resensitization after the drug
+// is stopped) has NO equivalent literature value found this session --
+// still an illustrative/unsourced placeholder, flagged as such wherever
+// it's used, same as buspirone's max_autoreceptor_suppression magnitude.
+//
+// Problem this real tau creates: at dt=0.04ms, actually SIMULATING 7-14
+// days of network dynamics end-to-end is computationally impossible
+// (~1.5e13 timesteps). But the fast network dynamics (ms-scale HH/spiking)
+// and the slow autoreceptor state (day/week-scale, already closed-form,
+// doesn't need per-step integration) don't need to share a clock.
+// autoreceptorExposureOffsetMs decouples them: it's ADDED to the run's own
+// elapsed sim time only when evaluating the autoreceptor's D(t) term, so a
+// short, cheap "probe" simulation (seconds of network dynamics, enough for
+// stable firing-rate metrics) can measure "what does the network look like
+// after N days of continuous exposure" by setting this offset to N days,
+// mirroring real chronic-dosing-then-brief-recording electrophysiology
+// protocols exactly (the Blier & de Montigny papers above ARE brief
+// recordings taken after N days of chronic dosing, not N-day-long
+// recordings). Defaults to 0.0f (fully inert, matches this run's own
+// elapsed time exactly, same behavior as before this field existed).
 struct Serotonin5HT1AAction {
     float ec50 = 1.0e9f;
     float hill = 1.0f;
@@ -128,6 +179,7 @@ struct Serotonin5HT1AAction {
     float maxAutoreceptorSuppressionFrac = 0.0f;
     float autoreceptorTauDesenseMs = 1.0e12f;
     float autoreceptorTauRecoveryMs = 1.0e9f;
+    float autoreceptorExposureOffsetMs = 0.0f;
 };
 
 // Serotonin 5-HT2A -- see header note. maxKReductionFrac is the fraction of
@@ -180,11 +232,17 @@ float neuromodulatorOccupancy(float dose, float ec50, float hill);
 // configured -- see DrugModel::computeNeuromodulatorGainModifiers for where
 // the amplification is actually computed. Dose=0 or a fully-inert profile
 // returns NeuromodulatorGainModifiers{} (all 1.0) exactly.
+// Tier 2.1: currentTimeMs is the elapsed simulation time (0 at the start
+// of a run), needed only for 5-HT1A's autoreceptor desensitization term --
+// every other receptor/lever in this function ignores it completely.
+// Passing 0.0f exactly reproduces this function's pre-time-dependence
+// behavior (D(0) = 0, i.e. freshly-undesensitized), so any caller that
+// doesn't care about time-dependence can pass 0.0f safely.
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     float doseForDopamine,
     float doseForSerotonin,
     const NeuromodulatorProfile& profile,
-    float currentTimeMs
+    float currentTimeMs = 0.0f
 );
 
 } // namespace spp::synapse

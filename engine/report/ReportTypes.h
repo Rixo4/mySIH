@@ -166,6 +166,11 @@ struct SimulationConfig {
     // reproduces the old dose-only behavior).
     double autoreceptor_tau_desense_ms_ht1a  = 1.0e12;
     double autoreceptor_tau_recovery_ms_ht1a = 1.0e9;
+    // Real-timescale fix: decouples the autoreceptor's elapsed exposure
+    // time from this run's own simulated duration -- see
+    // NeuromodulatorSystem.h's Serotonin5HT1AAction comment. 0 = inert
+    // (exposure time == this run's own elapsed sim time, old behavior).
+    double autoreceptor_exposure_offset_ms_ht1a = 0.0;
 
     double ec50_ht2a                = 1.0e9;
     double hill_ht2a                = 1.0;
