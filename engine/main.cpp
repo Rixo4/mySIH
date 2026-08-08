@@ -421,6 +421,13 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.neuromod.ht2a.maxKReductionFrac = static_cast<float>(cfg.max_k_reduction_ht2a);
     profile.neuromod.ht2a.maxAdaptationReductionFrac = static_cast<float>(cfg.max_adaptation_reduction_ht2a);
 
+    profile.neuromod.alpha2.presynapticEc50 = static_cast<float>(cfg.presynaptic_ec50_alpha2);
+    profile.neuromod.alpha2.presynapticHill = static_cast<float>(cfg.presynaptic_hill_alpha2);
+    profile.neuromod.alpha2.maxPresynapticReleaseReductionFrac = static_cast<float>(cfg.max_presynaptic_release_reduction_alpha2);
+    profile.neuromod.alpha2.postsynapticEc50 = static_cast<float>(cfg.postsynaptic_ec50_alpha2);
+    profile.neuromod.alpha2.postsynapticHill = static_cast<float>(cfg.postsynaptic_hill_alpha2);
+    profile.neuromod.alpha2.maxPostsynapticAdaptationReductionFrac = static_cast<float>(cfg.max_postsynaptic_adaptation_reduction_alpha2);
+
     return profile;
 }
 
@@ -1079,6 +1086,18 @@ static bool loadDrugConfigFromJsonFile(
             if(auto h=extractJsonNumber(c,"hill",ht2aP);h) out.config.hill_ht2a=*h;
             if(auto m=extractJsonNumber(c,"max_k_reduction",ht2aP);m) out.config.max_k_reduction_ht2a=*m;
             if(auto m=extractJsonNumber(c,"max_adaptation_reduction",ht2aP);m) out.config.max_adaptation_reduction_ht2a=*m;
+        }
+        // Tier 2.2: alpha-2, both presynaptic autoreceptor and postsynaptic
+        // PFC pathways built in the same pass -- same nested-object pattern
+        // as D2/5-HT1A above.
+        const auto a2P=c.find("\"Alpha2\"",nmPos);
+        if(a2P!=c.npos){
+            if(auto n=extractJsonNumber(c,"presynaptic_ec50",a2P);n) out.config.presynaptic_ec50_alpha2=*n;
+            if(auto h=extractJsonNumber(c,"presynaptic_hill",a2P);h) out.config.presynaptic_hill_alpha2=*h;
+            if(auto m=extractJsonNumber(c,"max_presynaptic_release_reduction",a2P);m) out.config.max_presynaptic_release_reduction_alpha2=*m;
+            if(auto n=extractJsonNumber(c,"postsynaptic_ec50",a2P);n) out.config.postsynaptic_ec50_alpha2=*n;
+            if(auto h=extractJsonNumber(c,"postsynaptic_hill",a2P);h) out.config.postsynaptic_hill_alpha2=*h;
+            if(auto m=extractJsonNumber(c,"max_postsynaptic_adaptation_reduction",a2P);m) out.config.max_postsynaptic_adaptation_reduction_alpha2=*m;
         }
     }
     const auto drP=c.find("\"dose_range\"");
