@@ -575,8 +575,11 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     // DoseObservation.h, NetworkAnalyzer.cpp's candidate list, and this
     // array all needed the same addition) -- same reactive-fix-on-first-run
     // pattern as 5-HT1A's and D2's report-honesty gaps, just in the
-    // classification path instead of the disclaimer text.
-    std::array<int, 15> counts{};
+    // classification path instead of the disclaimer text. Tier 2.2
+    // completion added BetaGain/Alpha1Gain, bumped 15 -> 17 -- this time
+    // done proactively alongside the enum addition (all five layers in one
+    // pass), not found reactively via a first run.
+    std::array<int, 17> counts{};
     auto indexOf = [](MechanismSignature s) -> std::size_t {
         return static_cast<std::size_t>(s);
     };
@@ -971,6 +974,8 @@ std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
         case MechanismSignature::Ht1aGain:        return "5-HT1A Neuromodulator Gain";
         case MechanismSignature::Ht2aGain:        return "5-HT2A Neuromodulator Gain";
         case MechanismSignature::Alpha2Gain:      return "Alpha-2 Neuromodulator Gain";
+        case MechanismSignature::BetaGain:        return "Beta Neuromodulator Gain";
+        case MechanismSignature::Alpha1Gain:      return "Alpha-1 Neuromodulator Gain";
         default:                                  return "Unknown";
     }
 }

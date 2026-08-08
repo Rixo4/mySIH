@@ -32,6 +32,9 @@ struct DoseObservation {
     // occupancy, same scale/purpose as d1Gain/d2Gain/ht1aGain/ht2aGain
     // above. See AnalyzedDose.h.
     float alpha2Gain = 0.0f;
+    // Tier 2.2 completion: beta and alpha-1 occupancy, same scale/purpose.
+    float betaGain   = 0.0f;
+    float alpha1Gain = 0.0f;
 
     RawMetrics metrics;
 };

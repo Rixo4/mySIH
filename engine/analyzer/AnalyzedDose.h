@@ -49,7 +49,11 @@ enum class MechanismSignature {
     // above (which also only tracks its presynaptic curve, not its
     // postsynaptic addition) -- one classification signature per receptor
     // family, not one per curve.
-    Alpha2Gain
+    Alpha2Gain,
+    // Tier 2.2 completion: beta and alpha-1 neuromodulator gain -- same
+    // flat-candidate treatment as every mechanism above.
+    BetaGain,
+    Alpha1Gain
 };
 
 struct AnalyzedDose {
@@ -75,8 +79,10 @@ struct AnalyzedDose {
     float d2Gain   = 0.0f;
     float ht1aGain = 0.0f;
     float ht2aGain = 0.0f;
-    // Tier 2.2: mirrors DoseObservation's alpha2Gain.
+    // Tier 2.2: mirrors DoseObservation's alpha2Gain/betaGain/alpha1Gain.
     float alpha2Gain = 0.0f;
+    float betaGain   = 0.0f;
+    float alpha1Gain = 0.0f;
 
     RawMetrics metrics;
 
