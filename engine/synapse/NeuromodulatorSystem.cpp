@@ -42,11 +42,29 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     }
 
     // D2 (dopamine): shrinks excitatory synaptic weight (release-probability
-    // proxy). Uses doseForDopamine, same reasoning as D1 above.
+    // proxy, PRESYNAPTIC autoreceptor pathway). Uses doseForDopamine, same
+    // reasoning as D1 above.
     {
         const float occ = neuromodulatorOccupancy(doseForDopamine, profile.d2.ec50, profile.d2.hill);
         const float releaseFrac = std::clamp(profile.d2.maxReleaseReductionFrac, 0.0f, 1.0f);
         out.excitatoryWeightScale *= (1.0f - releaseFrac * occ);
+    }
+
+    // D2 POSTSYNAPTIC (Tier 2.1): a second, independent Hill curve on the
+    // same dose (own EC50/Hill -- genuinely different signaling route from
+    // the presynaptic curve above, not a relabeled copy) that shrinks
+    // gCaEff -- striatal D2 suppresses L-type Ca2+ currents via a
+    // PLCbeta1-IP3-calcineurin cascade, confirmed NOT mediated by the
+    // classical Gi/cAMP pathway the presynaptic release-probability lever
+    // uses (Hernandez-Lopez et al 2000, J Neurosci 20:8987). Inert
+    // (gCaEffScale stays 1.0) when maxPostsynapticCaReductionFrac == 0, so
+    // any config that doesn't set these three new fields is a bit-identical
+    // no-op -- same guarantee as every other mechanism in this file.
+    {
+        const float occ = neuromodulatorOccupancy(
+            doseForDopamine, profile.d2.postsynapticEc50, profile.d2.postsynapticHill);
+        const float caReductionFrac = std::clamp(profile.d2.maxPostsynapticCaReductionFrac, 0.0f, 1.0f);
+        out.gCaEffScale *= (1.0f - caReductionFrac * occ);
     }
 
     // 5-HT1A (serotonin): boosts gKEff (GIRK-mediated hyperpolarization).

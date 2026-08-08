@@ -152,6 +152,11 @@ struct SimulationConfig {
     double ec50_d2                  = 1.0e9;
     double hill_d2                  = 1.0;
     double max_release_reduction_d2 = 0.0;    // 0..1 fraction
+    // Tier 2.1 D2 postsynaptic split -- see NeuromodulatorSystem.h's
+    // DopamineD2Action comment. Second independent curve, own EC50/Hill.
+    double postsynaptic_ec50_d2               = 1.0e9;
+    double postsynaptic_hill_d2               = 1.0;
+    double max_postsynaptic_ca_reduction_d2   = 0.0;  // 0..1 fraction
 
     double ec50_ht1a                = 1.0e9;
     double hill_ht1a                = 1.0;

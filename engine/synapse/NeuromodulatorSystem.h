@@ -105,11 +105,32 @@ struct DopamineD1Action {
 
 // Dopamine D2 -- see header note. maxReleaseReductionFrac is the fraction of
 // excitatory synaptic weight removed at saturating occupancy (release-
-// probability proxy).
+// probability proxy) -- this is the PRESYNAPTIC autoreceptor pathway
+// (classical Gi/cAMP signaling, inhibits presynaptic Ca2+ channels and the
+// secretory machinery).
+//
+// Tier 2.1 D2 postsynaptic split (PRECISION_GAP_CLOSURE_PLAN.md): D2 also
+// has a real, distinct POSTSYNAPTIC role on striatal medium spiny neurons --
+// suppresses L-type Ca2+ currents and excitability via a PLCbeta1-IP3-
+// calcineurin cascade, EXPLICITLY NOT the classical Gi/cAMP pathway the
+// presynaptic fields above use (Hernandez-Lopez et al 2000, J Neurosci
+// 20:8987 -- confirmed the suppression is not mediated by adenylyl cyclase
+// inhibition, ruling out a shared-mechanism shortcut). Modeled as a SECOND,
+// independent Hill-occupancy curve on the same dose (own EC50/Hill, since
+// it's a genuinely different signaling route, not just a relabeled version
+// of the presynaptic one) that scales DOWN gCaEff -- the mirror image of
+// 5-HT1A's postsynaptic gKEff-boost lever, same "second curve, own struct
+// fields" pattern as 5-HT1A's autoreceptor addition. postsynapticEc50/Hill
+// default to fully inert (huge EC50), maxPostsynapticCaReductionFrac
+// defaults to 0 -- any config that doesn't set these three fields is a
+// bit-identical no-op, same guarantee as every other field in this file.
 struct DopamineD2Action {
     float ec50 = 1.0e9f;
     float hill = 1.0f;
     float maxReleaseReductionFrac = 0.0f;
+    float postsynapticEc50 = 1.0e9f;
+    float postsynapticHill = 1.0f;
+    float maxPostsynapticCaReductionFrac = 0.0f;
 };
 
 // Serotonin 5-HT1A -- see header note. maxKGainFold is the ceiling fold-
@@ -209,6 +230,7 @@ struct NeuromodulatorProfile {
 // guaranteeing zero drift for any caller that doesn't opt in.
 struct NeuromodulatorGainModifiers {
     float gKEffScale             = 1.0f; // multiplies intrinsic K+ conductance
+    float gCaEffScale            = 1.0f; // multiplies intrinsic Ca2+ conductance (D2 postsynaptic, Tier 2.1)
     float gMaxNmdaScale          = 1.0f; // multiplies NMDA peak conductance
     float adaptationScale        = 1.0f; // multiplies adaptation-current constants
     float excitatoryWeightScale  = 1.0f; // multiplies excitatory synaptic weight

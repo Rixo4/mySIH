@@ -118,6 +118,12 @@ struct BatchedStepLaunchInfo {
     float d2Ec50 = 1.0e9f;
     float d2Hill = 1.0f;
     float d2MaxReleaseReductionFrac = 0.0f;
+    // Tier 2.1 D2 postsynaptic split -- see NeuromodulatorSystem.h's
+    // DopamineD2Action comment. SYNC WARNING: manual-sync duplication, keep
+    // in sync with the host struct.
+    float d2PostsynapticEc50 = 1.0e9f;
+    float d2PostsynapticHill = 1.0f;
+    float d2MaxPostsynapticCaReductionFrac = 0.0f;
     float ht1aEc50 = 1.0e9f;
     float ht1aHill = 1.0f;
     float ht1aMaxKGainFold = 1.0f;

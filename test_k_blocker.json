@@ -1,25 +1,22 @@
 {
-  "_status": "REAL-TIMESCALE probe, 14-day exposure -- see test_5ht1a_autoreceptor_probe_2d.json for the full rationale. Identical to that file except autoreceptor_exposure_offset_ms. At 2 tau (14 days = 2x autoreceptor_tau_desense_ms), D(t) should be at 1-1/e^2 ~= 86% of its steady-state value -- the literature anchor Blier & de Montigny describe as 'complete recovery' by 14 days (86% is consistent with 'complete' given their qualitative measurement resolution, not a precise 100% match -- flagged honestly in NeuromodulatorSystem.h's comment).",
-  "drug_name": "5-HT1A Autoreceptor Real-Timescale Probe (14 days exposure)",
+  "_status": "NEW MECHANISM shape-validation test (Tier 2.1 D2 postsynaptic split, PRECISION_GAP_CLOSURE_PLAN.md, 2026-08-06) -- first run of the D2 postsynaptic gCaEff-suppression pathway, isolated from any real drug's already-audited config (same discipline as test_5ht1a_autoreceptor.json validating the 5-HT1A autoreceptor mechanism before it was applied to buspirone). Not yet run.",
+  "_reference": "postsynaptic_ec50/hill set EQUAL to the presynaptic ec50/hill -- deliberate modeling choice, not a placeholder guess: unlike 5-HT1A's autoreceptor vs postsynaptic split (two anatomically distinct receptor pools with literature-sourced differential ligand affinity, F13714 vs F15599), D2's presynaptic and postsynaptic pathways are the SAME receptor subtype (D2) expressed at different synaptic locations -- no literature basis found this session for a large affinity difference between the two pools, so the same dose-occupancy curve drives both, differing only in which downstream lever it scales (release-probability reduction vs Ca2+-conductance reduction) and each pathway's own effect ceiling. max_postsynaptic_ca_reduction=0.5 mirrors max_release_reduction's magnitude for a symmetric first-pass shape check -- both are illustrative, not literature-calibrated magnitudes (same caveat class as 5-HT1A's max_autoreceptor_suppression).",
+  "drug_name": "D2 Postsynaptic Pathway Shape-Validation Test",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
   "neuromodulators": {
-    "5HT1A": {
-      "ec50": 0.015,
+    "D2": {
+      "ec50": 0.0039,
       "hill": 1.0,
-      "max_k_gain": 1.05,
-      "autoreceptor_ec50": 0.0005,
-      "autoreceptor_hill": 1.0,
-      "max_autoreceptor_suppression": 0.9,
-      "autoreceptor_tau_desense_ms": 604800000,
-      "autoreceptor_tau_recovery_ms": 2497824000,
-      "autoreceptor_exposure_offset_ms": 1209600000
+      "max_release_reduction": 0.5,
+      "postsynaptic_ec50": 0.0039,
+      "postsynaptic_hill": 1.0,
+      "max_postsynaptic_ca_reduction": 0.5
     }
   },
-  "sim_time_ms": 3000,
-  "dose_range": { "min": 0.0, "max": 0.015, "step": 0.015 },
+  "dose_range": { "min": 0.0, "max": 0.0156, "step": 0.00156 },
   "runs": 8
 }

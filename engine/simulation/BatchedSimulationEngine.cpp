@@ -254,6 +254,11 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.d2.ec50,
             receptorProfile_.neuromod.d2.hill,
             receptorProfile_.neuromod.d2.maxReleaseReductionFrac,
+            // Tier 2.1: D2 postsynaptic pathway -- same shared-profile
+            // passthrough as the presynaptic fields above.
+            receptorProfile_.neuromod.d2.postsynapticEc50,
+            receptorProfile_.neuromod.d2.postsynapticHill,
+            receptorProfile_.neuromod.d2.maxPostsynapticCaReductionFrac,
             receptorProfile_.neuromod.ht1a.ec50,
             receptorProfile_.neuromod.ht1a.hill,
             receptorProfile_.neuromod.ht1a.maxKGainFold,
@@ -661,7 +666,10 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             // block reduction, as an independent multiplicative factor
             // (nMods.gKEffScale == 1.0 when unconfigured, exact no-op).
             gKEff[i]  = drug::DrugModel::conductanceFloor(safeGK, blockK, drug::DrugModel::kKConductanceFloor) * nMods.gKEffScale;
-            gCaEff[i] = drug::DrugModel::conductanceFloor(safeGCa, blockCa, drug::DrugModel::kCaConductanceFloor);
+            // Tier 2.1: D2 postsynaptic pathway scales gCaEff the same way
+            // 5-HT1A scales gKEff above (nMods.gCaEffScale == 1.0 when
+            // unconfigured, exact no-op).
+            gCaEff[i] = drug::DrugModel::conductanceFloor(safeGCa, blockCa, drug::DrugModel::kCaConductanceFloor) * nMods.gCaEffScale;
         }
 
         if (runOnGpu) {

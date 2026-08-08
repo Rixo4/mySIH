@@ -498,7 +498,10 @@ __global__ void fusedBatchedStepKernel(
     // copy was found) -- see PRECISION_GAP_CLOSURE_PLAN.md. If you touch
     // either side, touch both.
     const float gNaEff = fmaxf(0.05f * safeGNa, safeGNa * fmaxf(0.0f, 1.0f - blockNa));
-    const float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
+    // Tier 2.1: not const anymore -- D2's postsynaptic pathway (below)
+    // scales this the same way 5-HT1A scales gKEff. Floor/block value
+    // computed first, neuromodulator scale applied after that block runs.
+    float gCaEff = fmaxf(0.02f * safeGCa, safeGCa * fmaxf(0.0f, 1.0f - blockCa));
 
     // Phase 3c: vesicle pool continuous refill -- every thread, every step,
     // regardless of whether it spikes this step, mirrors
@@ -531,6 +534,7 @@ __global__ void fusedBatchedStepKernel(
     // ceilings inert), same bit-identical-no-op-by-construction discipline
     // as every other Phase 1/2/3 mechanism.
     float nmodGKEffScale = 1.0f;
+    float nmodGCaEffScale = 1.0f;
     float nmodGMaxNmdaScale = 1.0f;
     float nmodAdaptationScale = 1.0f;
     float nmodExcitatoryWeightScale = 1.0f;
@@ -565,6 +569,13 @@ __global__ void fusedBatchedStepKernel(
         const float d2Occ = hillBlockDevice(doseForDopamine, launchInfo.d2Ec50, launchInfo.d2Hill);
         const float d2ReleaseFrac = clamp01(launchInfo.d2MaxReleaseReductionFrac);
         nmodExcitatoryWeightScale *= (1.0f - d2ReleaseFrac * d2Occ);
+
+        // D2 POSTSYNAPTIC (Tier 2.1): second, independent Hill curve on the
+        // same dose (own EC50/Hill), scales gCaEff -- mirrors
+        // NeuromodulatorSystem.cpp's D2-postsynaptic block exactly.
+        const float d2PostOcc = hillBlockDevice(doseForDopamine, launchInfo.d2PostsynapticEc50, launchInfo.d2PostsynapticHill);
+        const float d2CaReductionFrac = clamp01(launchInfo.d2MaxPostsynapticCaReductionFrac);
+        nmodGCaEffScale *= (1.0f - d2CaReductionFrac * d2PostOcc);
 
         // 5-HT1A: boosts gKEff (GIRK-mediated hyperpolarization). Tier 2.1:
         // second occupancy curve (autoreceptor) attenuates the postsynaptic
@@ -603,6 +614,11 @@ __global__ void fusedBatchedStepKernel(
         nmodGKEffScale      *= (1.0f - ht2aKReductionFrac * ht2aOcc);
         nmodAdaptationScale *= (1.0f - ht2aAdaptFrac * ht2aOcc);
     }
+
+    // Tier 2.1: apply D2's postsynaptic scale to the gCaEff computed
+    // earlier (before this block ran) -- mirrors
+    // BatchedSimulationEngine.cpp's CPU-path gCaEff[i] *= nMods.gCaEffScale.
+    gCaEff *= nmodGCaEffScale;
 
     // 0.05f floor here is the K counterpart to the SYNC WARNING above this
     // function's gNaEff/gCaEff lines -- same DrugModel::kKConductanceFloor
@@ -1096,6 +1112,9 @@ struct CudaSimulator::DeviceBuffers {
     float batchedD2Ec50 = 1.0e9f;
     float batchedD2Hill = 1.0f;
     float batchedD2MaxReleaseReductionFrac = 0.0f;
+    float batchedD2PostsynapticEc50 = 1.0e9f;
+    float batchedD2PostsynapticHill = 1.0f;
+    float batchedD2MaxPostsynapticCaReductionFrac = 0.0f;
     float batchedHt1aEc50 = 1.0e9f;
     float batchedHt1aHill = 1.0f;
     float batchedHt1aMaxKGainFold = 1.0f;
@@ -1530,6 +1549,9 @@ void CudaSimulator::initializeBatchedSimulation(
     float d2Ec50,
     float d2Hill,
     float d2MaxReleaseReductionFrac,
+    float d2PostsynapticEc50,
+    float d2PostsynapticHill,
+    float d2MaxPostsynapticCaReductionFrac,
     float ht1aEc50,
     float ht1aHill,
     float ht1aMaxKGainFold,
@@ -1661,6 +1683,9 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedD2Ec50 = d2Ec50;
     buffers_->batchedD2Hill = d2Hill;
     buffers_->batchedD2MaxReleaseReductionFrac = d2MaxReleaseReductionFrac;
+    buffers_->batchedD2PostsynapticEc50 = d2PostsynapticEc50;
+    buffers_->batchedD2PostsynapticHill = d2PostsynapticHill;
+    buffers_->batchedD2MaxPostsynapticCaReductionFrac = d2MaxPostsynapticCaReductionFrac;
     buffers_->batchedHt1aEc50 = ht1aEc50;
     buffers_->batchedHt1aHill = ht1aHill;
     buffers_->batchedHt1aMaxKGainFold = ht1aMaxKGainFold;
@@ -1831,6 +1856,9 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.d2Ec50 = buffers_->batchedD2Ec50;
     launchInfo.d2Hill = buffers_->batchedD2Hill;
     launchInfo.d2MaxReleaseReductionFrac = buffers_->batchedD2MaxReleaseReductionFrac;
+    launchInfo.d2PostsynapticEc50 = buffers_->batchedD2PostsynapticEc50;
+    launchInfo.d2PostsynapticHill = buffers_->batchedD2PostsynapticHill;
+    launchInfo.d2MaxPostsynapticCaReductionFrac = buffers_->batchedD2MaxPostsynapticCaReductionFrac;
     launchInfo.ht1aEc50 = buffers_->batchedHt1aEc50;
     launchInfo.ht1aHill = buffers_->batchedHt1aHill;
     launchInfo.ht1aMaxKGainFold = buffers_->batchedHt1aMaxKGainFold;

@@ -169,6 +169,11 @@ std::string buildLiabilityReportText(
     if (evalInput.config.ki_net  < kReceptorInertThreshold) addTarget("NET Ki",  evalInput.config.ki_net);
     if (evalInput.config.ec50_d1   < kReceptorInertThreshold) addTarget("D1 EC50",     evalInput.config.ec50_d1);
     if (evalInput.config.ec50_d2   < kReceptorInertThreshold) addTarget("D2 EC50",     evalInput.config.ec50_d2);
+    // Tier 2.1: D2 postsynaptic pathway -- same header-visibility fix as
+    // 5-HT1A's autoreceptor addition above, applied proactively this time
+    // rather than found via a first-run gap.
+    if (evalInput.config.postsynaptic_ec50_d2 < kReceptorInertThreshold)
+        addTarget("D2 Postsynaptic EC50", evalInput.config.postsynaptic_ec50_d2);
     if (evalInput.config.ec50_ht1a < kReceptorInertThreshold) addTarget("5-HT1A EC50", evalInput.config.ec50_ht1a);
     // Tier 2.1: presynaptic autoreceptor pathway -- was silently missing
     // from this header (found via test_5ht1a_autoreceptor.json's own first
@@ -413,11 +418,28 @@ std::string buildLiabilityReportText(
                "  desensitization that produces real SSRIs' delayed clinical onset. Do not\n"
                "  read this run as reproducing that phenomenon (PRECISION_GAP_CLOSURE_PLAN.md\n"
                "  2.1).\n";
-    } else if (hasNeuromodEffect) {
-        out << "- D1/D2/5-HT1A/5-HT2A pathways in this engine are single monotonic curves\n"
-               "  with no presynaptic-autoreceptor-vs-postsynaptic-receptor split -- genuinely\n"
-               "  biphasic dopaminergic/serotonergic response (real for some compounds at this\n"
-               "  mechanism) cannot be reproduced regardless of tuning\n"
+    }
+    // Tier 2.1 D2 postsynaptic split: independent of the 5-HT1A branches
+    // above (a config could have either, both, or neither configured), so
+    // this is a separate check rather than another else-if link in that
+    // chain -- otherwise a drug with D2's split but not 5-HT1A's would
+    // silently fall through to the generic "no split" message below, wrong
+    // in exactly the way the 5-HT1A disclaimer was wrong twice already.
+    const bool d2PostsynapticConfigured =
+        evalInput.config.postsynaptic_ec50_d2 < kReceptorInertThreshold;
+    if (d2PostsynapticConfigured) {
+        out << "- D2 has a second (postsynaptic) pathway configured alongside its\n"
+               "  presynaptic release-probability effect -- these are two independent Hill\n"
+               "  curves on the same dose (own EC50/Hill each), not a time-dependent\n"
+               "  desensitization like 5-HT1A's autoreceptor -- both pathways respond\n"
+               "  instantly to dose, with no chronic-exposure/onset-delay behavior modeled\n"
+               "  for D2 (PRECISION_GAP_CLOSURE_PLAN.md 2.1).\n";
+    }
+    if (!ht1aTimeDependent && !ht1aAutoreceptorConfigured && !d2PostsynapticConfigured && hasNeuromodEffect) {
+        out << "- D1/D2/5-HT1A/5-HT2A pathways configured in this run are single monotonic\n"
+               "  curves with no presynaptic-autoreceptor-vs-postsynaptic-receptor split --\n"
+               "  genuinely biphasic dopaminergic/serotonergic response (real for some\n"
+               "  compounds at this mechanism) cannot be reproduced regardless of tuning\n"
                "  (PRECISION_GAP_CLOSURE_PLAN.md 2.1).\n";
     }
     if (evalInput.config.ki_net < kReceptorInertThreshold) {
