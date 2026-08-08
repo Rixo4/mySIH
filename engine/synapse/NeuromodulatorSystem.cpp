@@ -22,6 +22,7 @@ float neuromodulatorOccupancy(float dose, float ec50, float hill) {
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     float doseForDopamine,
     float doseForSerotonin,
+    float doseForNorepinephrine,
     const NeuromodulatorProfile& profile,
     float currentTimeMs
 ) {
@@ -135,6 +136,36 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
         const float kReductionFrac = std::clamp(profile.ht2a.maxKReductionFrac, 0.0f, 1.0f);
         const float adaptFrac = std::clamp(profile.ht2a.maxAdaptationReductionFrac, 0.0f, 1.0f);
         out.gKEffScale      *= (1.0f - kReductionFrac * occ);
+        out.adaptationScale *= (1.0f - adaptFrac * occ);
+    }
+
+    // ALPHA-2 PRESYNAPTIC (norepinephrine, Tier 2.2): shrinks excitatory
+    // synaptic weight (release-probability proxy) -- same Gi-coupled
+    // presynaptic-autoreceptor lever as D2's presynaptic pathway above, just
+    // driven by doseForNorepinephrine (NET reuptake-block-amplified, see
+    // ReuptakeTransporter.h's amplifiedDoseUm) instead of dopamine's dose.
+    // Composes multiplicatively with D2's presynaptic contribution to
+    // excitatoryWeightScale -- a drug hitting both release-probability
+    // pathways combines correctly.
+    {
+        const float occ = neuromodulatorOccupancy(
+            doseForNorepinephrine, profile.alpha2.presynapticEc50, profile.alpha2.presynapticHill);
+        const float releaseFrac = std::clamp(profile.alpha2.maxPresynapticReleaseReductionFrac, 0.0f, 1.0f);
+        out.excitatoryWeightScale *= (1.0f - releaseFrac * occ);
+    }
+
+    // ALPHA-2 POSTSYNAPTIC (norepinephrine, Tier 2.2): a second, independent
+    // Hill curve on the same dose (own EC50/Hill -- a genuinely distinct PFC
+    // pyramidal-spine cAMP-HCN-channel pathway, not a relabeled copy of the
+    // presynaptic autoreceptor) that shrinks adaptationScale -- guanfacine's
+    // real clinical mechanism (Wang et al 2007, Cell 129:397), same net
+    // "less braking" lever as D1's adaptation-reduction above. Composes
+    // multiplicatively with D1's and 5-HT2A's contributions to
+    // adaptationScale.
+    {
+        const float occ = neuromodulatorOccupancy(
+            doseForNorepinephrine, profile.alpha2.postsynapticEc50, profile.alpha2.postsynapticHill);
+        const float adaptFrac = std::clamp(profile.alpha2.maxPostsynapticAdaptationReductionFrac, 0.0f, 1.0f);
         out.adaptationScale *= (1.0f - adaptFrac * occ);
     }
 

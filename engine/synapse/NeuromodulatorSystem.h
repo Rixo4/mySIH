@@ -213,6 +213,53 @@ struct Serotonin5HT2AAction {
     float maxAdaptationReductionFrac = 0.0f;
 };
 
+// Norepinephrine alpha-2 -- Tier 2.2 (PRECISION_GAP_CLOSURE_PLAN.md). Unlike
+// D1/D2/5-HT1A/5-HT2A above (each a single G-protein-family receptor with an
+// optional second curve for a genuinely distinct anatomical pathway), alpha-2
+// itself has TWO well-documented, mechanistically distinct roles that both
+// matter clinically -- neither is a "bonus precision" addition, both are
+// built in the same pass:
+//
+//   PRESYNAPTIC autoreceptor (Gi-coupled, classical clonidine mechanism):
+//     inhibits presynaptic Ca2+ channels, reduces norepinephrine release
+//     probability -- exactly the same signaling logic as D2's presynaptic
+//     pathway above (same G-protein family, same lever). Modeled here as:
+//     scales DOWN excitatoryWeightScale, mirroring DopamineD2Action's
+//     maxReleaseReductionFrac exactly. presynapticEc50/Hill default to fully
+//     inert (huge EC50), maxPresynapticReleaseReductionFrac defaults to 0.
+//
+//   POSTSYNAPTIC PFC pyramidal dendritic spine role (guanfacine's real
+//     clinical mechanism, NOT the presynaptic autoreceptor): alpha-2A
+//     receptors on PFC pyramidal spines inhibit cAMP production, which
+//     closes HCN (hyperpolarization-activated cyclic-nucleotide-gated)
+//     channels, strengthening PFC network connectivity and working-memory
+//     performance (Wang et al 2007, Cell 129:397 -- "alpha2A-Adrenoceptors
+//     Strengthen Working Memory Networks by Inhibiting cAMP-HCN Channel
+//     Signaling in Prefrontal Cortex"). This is a Gs-cascade-INHIBITION
+//     pathway, same net "less braking / more excitable" direction as D1's
+//     adaptation-reduction lever, so it reuses that exact target. Modeled
+//     here as: scales DOWN adaptationScale, mirroring DopamineD1Action's
+//     maxAdaptationReductionFrac exactly. postsynapticEc50/Hill default to
+//     fully inert (huge EC50), maxPostsynapticAdaptationReductionFrac
+//     defaults to 0.
+//
+// Both curves default to fully inert -- any config that doesn't set these
+// fields is a bit-identical no-op, same guarantee as every other field in
+// this file. No literature-sourced NE-specific EC50 was found this session
+// for either curve (order-of-magnitude anchors only: clonidine ~17nM for
+// presynaptic glutamate-release inhibition, UK14304 ~173nM for presynaptic
+// dopamine-release inhibition) -- both EC50 fields are illustrative
+// placeholders until a real drug-specific value is sourced, same "flagged
+// placeholder" policy as 5-HT1A's max_autoreceptor_suppression magnitude.
+struct Alpha2Action {
+    float presynapticEc50 = 1.0e9f;
+    float presynapticHill = 1.0f;
+    float maxPresynapticReleaseReductionFrac = 0.0f;
+    float postsynapticEc50 = 1.0e9f;
+    float postsynapticHill = 1.0f;
+    float maxPostsynapticAdaptationReductionFrac = 0.0f;
+};
+
 // One shared profile for the whole batch (the compound under test) -- same
 // "single drug, one profile" pattern as ReceptorDrugProfile/
 // ReuptakeTransporter's per-drug structs.
@@ -221,6 +268,7 @@ struct NeuromodulatorProfile {
     DopamineD2Action d2;
     Serotonin5HT1AAction ht1a;
     Serotonin5HT2AAction ht2a;
+    Alpha2Action alpha2;
 };
 
 // Final composed multiplicative scale factors to apply to this engine's
@@ -242,17 +290,18 @@ struct NeuromodulatorGainModifiers {
 // receptors use the identical dose-response shape.
 float neuromodulatorOccupancy(float dose, float ec50, float hill);
 
-// Composes all four receptors' contributions into one set of gain
-// modifiers. Takes TWO doses rather than one -- see ReuptakeTransporter.h's
-// amplifiedDoseUm comment: SERT/DAT reuptake block (Phase 3a) amplifies the
-// EFFECTIVE dose the corresponding receptor "sees", and since SERT only
-// touches serotonin (5-HT1A/5-HT2A) while DAT only touches dopamine
-// (D1/D2), the two systems can have genuinely different effective doses
-// once a transporter-blocking drug is layered on top of a direct
-// receptor-agonist dose. doseForDopamine and doseForSerotonin are identical
-// (both equal to the raw dose) whenever no SERT/DAT transporter block is
-// configured -- see DrugModel::computeNeuromodulatorGainModifiers for where
-// the amplification is actually computed. Dose=0 or a fully-inert profile
+// Composes all five receptors' contributions into one set of gain
+// modifiers. Takes THREE doses rather than one -- see ReuptakeTransporter.h's
+// amplifiedDoseUm comment: SERT/DAT/NET reuptake block (Phase 3a) amplifies
+// the EFFECTIVE dose the corresponding receptor "sees", and since SERT only
+// touches serotonin (5-HT1A/5-HT2A), DAT only touches dopamine (D1/D2), and
+// NET only touches norepinephrine (alpha-2, Tier 2.2), the three systems can
+// have genuinely different effective doses once a transporter-blocking drug
+// is layered on top of a direct receptor-agonist dose. doseForDopamine,
+// doseForSerotonin, and doseForNorepinephrine are identical (all equal to
+// the raw dose) whenever no SERT/DAT/NET transporter block is configured --
+// see DrugModel::computeNeuromodulatorGainModifiers for where the
+// amplification is actually computed. Dose=0 or a fully-inert profile
 // returns NeuromodulatorGainModifiers{} (all 1.0) exactly.
 // Tier 2.1: currentTimeMs is the elapsed simulation time (0 at the start
 // of a run), needed only for 5-HT1A's autoreceptor desensitization term --
@@ -263,6 +312,7 @@ float neuromodulatorOccupancy(float dose, float ec50, float hill);
 NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
     float doseForDopamine,
     float doseForSerotonin,
+    float doseForNorepinephrine,
     const NeuromodulatorProfile& profile,
     float currentTimeMs = 0.0f
 );
