@@ -156,8 +156,17 @@ public:
         float ht2aHill,
         float ht2aMaxKReductionFrac,
         float ht2aMaxAdaptationReductionFrac,
-        // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
-        // see NeuronUpdate.h's BatchedStepLaunchInfo comment /
+        // Tier 2.2: alpha-2, both curves -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment / NeuromodulatorSystem.h for the
+        // design.
+        float alpha2PresynapticEc50,
+        float alpha2PresynapticHill,
+        float alpha2MaxPresynapticReleaseReductionFrac,
+        float alpha2PostsynapticEc50,
+        float alpha2PostsynapticHill,
+        float alpha2MaxPostsynapticAdaptationReductionFrac,
+        // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification
+        // -- see NeuronUpdate.h's BatchedStepLaunchInfo comment /
         // ReuptakeTransporter.h's amplifiedDoseUm for the design. Mechanism
         // ints match spp::synapse::TransporterBlockType (0=None,
         // 1=Competitive, 2=NonCompetitive).
@@ -169,6 +178,10 @@ public:
         float datKiUm,
         float datHill,
         float datMaxExtensionFold,
+        int netMechanism,
+        float netKiUm,
+        float netHill,
+        float netMaxExtensionFold,
         // Phase 3c: vesicle pool dynamics -- see NeuronUpdate.h's
         // BatchedStepLaunchInfo comment / NeurotransmitterPool.h for the
         // design. No GPU kernel existed for this until now; main.cpp's

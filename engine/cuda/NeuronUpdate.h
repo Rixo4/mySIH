@@ -150,15 +150,26 @@ struct BatchedStepLaunchInfo {
     float ht2aMaxKReductionFrac = 0.0f;
     float ht2aMaxAdaptationReductionFrac = 0.0f;
 
-    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification -- see
-    // ReuptakeTransporter.h's amplifiedDoseUm and NeuromodulatorSystem.h's
-    // two-dose computeNeuromodulatorGainModifiers comment. DAT amplifies
-    // the dose D1/D2 see; SERT amplifies the dose 5-HT1A/5-HT2A see.
-    // Mechanism ints match spp::synapse::TransporterBlockType (0=None,
-    // 1=Competitive, 2=NonCompetitive), same encoding as gat1Mechanism
-    // above. No per-neuron override array needed, same reasoning as
-    // gat1Ki/gat1Hill (dose is already per-neuron; these are shared scalars
-    // for the whole batch).
+    // Tier 2.2 (PRECISION_GAP_CLOSURE_PLAN.md): alpha-2, both presynaptic
+    // autoreceptor and postsynaptic PFC pathways -- see
+    // NeuromodulatorSystem.h's Alpha2Action comment. SYNC WARNING: manual-
+    // sync duplication, keep in sync with the host struct.
+    float alpha2PresynapticEc50 = 1.0e9f;
+    float alpha2PresynapticHill = 1.0f;
+    float alpha2MaxPresynapticReleaseReductionFrac = 0.0f;
+    float alpha2PostsynapticEc50 = 1.0e9f;
+    float alpha2PostsynapticHill = 1.0f;
+    float alpha2MaxPostsynapticAdaptationReductionFrac = 0.0f;
+
+    // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
+    // see ReuptakeTransporter.h's amplifiedDoseUm and NeuromodulatorSystem.h's
+    // three-dose computeNeuromodulatorGainModifiers comment. DAT amplifies
+    // the dose D1/D2 see; SERT amplifies the dose 5-HT1A/5-HT2A see; NET
+    // amplifies the dose alpha-2 sees (Tier 2.2). Mechanism ints match
+    // spp::synapse::TransporterBlockType (0=None, 1=Competitive,
+    // 2=NonCompetitive), same encoding as gat1Mechanism above. No per-neuron
+    // override array needed, same reasoning as gat1Ki/gat1Hill (dose is
+    // already per-neuron; these are shared scalars for the whole batch).
     int sertMechanism = 0;
     float sertKiUm = 1.0e9f;
     float sertHill = 1.0f;
@@ -167,6 +178,10 @@ struct BatchedStepLaunchInfo {
     float datKiUm = 1.0e9f;
     float datHill = 1.0f;
     float datMaxExtensionFold = 1.0f;
+    int netMechanism = 0;
+    float netKiUm = 1.0e9f;
+    float netHill = 1.0f;
+    float netMaxExtensionFold = 1.0f;
 
     // Phase 3c: vesicle pool dynamics -- mirrors synapse::VesiclePoolConfig
     // (NeurotransmitterPool.h) exactly. Unlike gat1Ki/d1Ec50/etc above, this

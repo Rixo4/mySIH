@@ -557,6 +557,14 @@ __global__ void fusedBatchedStepKernel(
             const float sertCeiling = fmaxf(1.0f, launchInfo.sertMaxExtensionFold);
             doseForSerotonin = dose * (1.0f + (sertCeiling - 1.0f) * sertOcc);
         }
+        // Tier 2.2: NET amplifies the dose alpha-2 sees, same pattern as
+        // DAT/SERT above.
+        float doseForNorepinephrine = dose;
+        if (launchInfo.netMechanism != 0) {
+            const float netOcc = hillBlockDevice(dose, launchInfo.netKiUm, launchInfo.netHill);
+            const float netCeiling = fmaxf(1.0f, launchInfo.netMaxExtensionFold);
+            doseForNorepinephrine = dose * (1.0f + (netCeiling - 1.0f) * netOcc);
+        }
 
         // D1: shrinks adaptation current, boosts NMDA gain.
         const float d1Occ = hillBlockDevice(doseForDopamine, launchInfo.d1Ec50, launchInfo.d1Hill);
@@ -613,6 +621,26 @@ __global__ void fusedBatchedStepKernel(
         const float ht2aAdaptFrac = clamp01(launchInfo.ht2aMaxAdaptationReductionFrac);
         nmodGKEffScale      *= (1.0f - ht2aKReductionFrac * ht2aOcc);
         nmodAdaptationScale *= (1.0f - ht2aAdaptFrac * ht2aOcc);
+
+        // ALPHA-2 PRESYNAPTIC (Tier 2.2): shrinks excitatory synaptic weight
+        // (release-probability proxy) -- same Gi-coupled lever as D2's
+        // presynaptic pathway above, driven by doseForNorepinephrine.
+        // Mirrors NeuromodulatorSystem.cpp's alpha-2-presynaptic block
+        // exactly.
+        const float a2PreOcc = hillBlockDevice(
+            doseForNorepinephrine, launchInfo.alpha2PresynapticEc50, launchInfo.alpha2PresynapticHill);
+        const float a2ReleaseFrac = clamp01(launchInfo.alpha2MaxPresynapticReleaseReductionFrac);
+        nmodExcitatoryWeightScale *= (1.0f - a2ReleaseFrac * a2PreOcc);
+
+        // ALPHA-2 POSTSYNAPTIC (Tier 2.2): second, independent Hill curve on
+        // the same dose (own EC50/Hill -- distinct PFC cAMP-HCN pathway, not
+        // a relabeled copy of the presynaptic autoreceptor) that shrinks
+        // adaptationScale -- same lever as D1's above. Mirrors
+        // NeuromodulatorSystem.cpp's alpha-2-postsynaptic block exactly.
+        const float a2PostOcc = hillBlockDevice(
+            doseForNorepinephrine, launchInfo.alpha2PostsynapticEc50, launchInfo.alpha2PostsynapticHill);
+        const float a2AdaptFrac = clamp01(launchInfo.alpha2MaxPostsynapticAdaptationReductionFrac);
+        nmodAdaptationScale *= (1.0f - a2AdaptFrac * a2PostOcc);
     }
 
     // Tier 2.1: apply D2's postsynaptic scale to the gCaEff computed
@@ -1129,7 +1157,16 @@ struct CudaSimulator::DeviceBuffers {
     float batchedHt2aMaxKReductionFrac = 0.0f;
     float batchedHt2aMaxAdaptationReductionFrac = 0.0f;
 
-    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
+    // Tier 2.2: alpha-2, both curves -- stateless, same shared-scalar
+    // storage pattern as the other neuromodulator fields above.
+    float batchedAlpha2PresynapticEc50 = 1.0e9f;
+    float batchedAlpha2PresynapticHill = 1.0f;
+    float batchedAlpha2MaxPresynapticReleaseReductionFrac = 0.0f;
+    float batchedAlpha2PostsynapticEc50 = 1.0e9f;
+    float batchedAlpha2PostsynapticHill = 1.0f;
+    float batchedAlpha2MaxPostsynapticAdaptationReductionFrac = 0.0f;
+
+    // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
     // stateless, same shared-scalar storage pattern as the neuromodulator
     // fields above.
     int batchedSertMechanism = 0;
@@ -1140,6 +1177,10 @@ struct CudaSimulator::DeviceBuffers {
     float batchedDatKiUm = 1.0e9f;
     float batchedDatHill = 1.0f;
     float batchedDatMaxExtensionFold = 1.0f;
+    int batchedNetMechanism = 0;
+    float batchedNetKiUm = 1.0e9f;
+    float batchedNetHill = 1.0f;
+    float batchedNetMaxExtensionFold = 1.0f;
 
     // Phase 3c: vesicle pool dynamics -- releaseScale is a parallel ring
     // buffer to batchedDelayBuffer (same neuronCount_*delaySteps_ shape);
@@ -1565,8 +1606,16 @@ void CudaSimulator::initializeBatchedSimulation(
     float ht2aHill,
     float ht2aMaxKReductionFrac,
     float ht2aMaxAdaptationReductionFrac,
-    // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification -- see
-    // NeuronUpdate.h's BatchedStepLaunchInfo comment.
+    // Tier 2.2: alpha-2, both curves -- see NeuronUpdate.h's
+    // BatchedStepLaunchInfo comment / NeuromodulatorSystem.h for the design.
+    float alpha2PresynapticEc50,
+    float alpha2PresynapticHill,
+    float alpha2MaxPresynapticReleaseReductionFrac,
+    float alpha2PostsynapticEc50,
+    float alpha2PostsynapticHill,
+    float alpha2MaxPostsynapticAdaptationReductionFrac,
+    // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
+    // see NeuronUpdate.h's BatchedStepLaunchInfo comment.
     int sertMechanism,
     float sertKiUm,
     float sertHill,
@@ -1575,6 +1624,10 @@ void CudaSimulator::initializeBatchedSimulation(
     float datKiUm,
     float datHill,
     float datMaxExtensionFold,
+    int netMechanism,
+    float netKiUm,
+    float netHill,
+    float netMaxExtensionFold,
     // Phase 3c: vesicle pool dynamics -- see NeuronUpdate.h's
     // BatchedStepLaunchInfo comment / NeurotransmitterPool.h for the design.
     int vesiclePoolEnabled,
@@ -1699,6 +1752,12 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedHt2aHill = ht2aHill;
     buffers_->batchedHt2aMaxKReductionFrac = ht2aMaxKReductionFrac;
     buffers_->batchedHt2aMaxAdaptationReductionFrac = ht2aMaxAdaptationReductionFrac;
+    buffers_->batchedAlpha2PresynapticEc50 = alpha2PresynapticEc50;
+    buffers_->batchedAlpha2PresynapticHill = alpha2PresynapticHill;
+    buffers_->batchedAlpha2MaxPresynapticReleaseReductionFrac = alpha2MaxPresynapticReleaseReductionFrac;
+    buffers_->batchedAlpha2PostsynapticEc50 = alpha2PostsynapticEc50;
+    buffers_->batchedAlpha2PostsynapticHill = alpha2PostsynapticHill;
+    buffers_->batchedAlpha2MaxPostsynapticAdaptationReductionFrac = alpha2MaxPostsynapticAdaptationReductionFrac;
     buffers_->batchedSertMechanism = sertMechanism;
     buffers_->batchedSertKiUm = sertKiUm;
     buffers_->batchedSertHill = sertHill;
@@ -1707,6 +1766,10 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedDatKiUm = datKiUm;
     buffers_->batchedDatHill = datHill;
     buffers_->batchedDatMaxExtensionFold = datMaxExtensionFold;
+    buffers_->batchedNetMechanism = netMechanism;
+    buffers_->batchedNetKiUm = netKiUm;
+    buffers_->batchedNetHill = netHill;
+    buffers_->batchedNetMaxExtensionFold = netMaxExtensionFold;
     buffers_->batchedVesiclePoolEnabled = vesiclePoolEnabled;
     buffers_->batchedVesiclePoolRrpSize = vesiclePoolRrpSize;
     buffers_->batchedVesiclePoolReserveSize = vesiclePoolReserveSize;
@@ -1872,6 +1935,12 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.ht2aHill = buffers_->batchedHt2aHill;
     launchInfo.ht2aMaxKReductionFrac = buffers_->batchedHt2aMaxKReductionFrac;
     launchInfo.ht2aMaxAdaptationReductionFrac = buffers_->batchedHt2aMaxAdaptationReductionFrac;
+    launchInfo.alpha2PresynapticEc50 = buffers_->batchedAlpha2PresynapticEc50;
+    launchInfo.alpha2PresynapticHill = buffers_->batchedAlpha2PresynapticHill;
+    launchInfo.alpha2MaxPresynapticReleaseReductionFrac = buffers_->batchedAlpha2MaxPresynapticReleaseReductionFrac;
+    launchInfo.alpha2PostsynapticEc50 = buffers_->batchedAlpha2PostsynapticEc50;
+    launchInfo.alpha2PostsynapticHill = buffers_->batchedAlpha2PostsynapticHill;
+    launchInfo.alpha2MaxPostsynapticAdaptationReductionFrac = buffers_->batchedAlpha2MaxPostsynapticAdaptationReductionFrac;
     launchInfo.sertMechanism = buffers_->batchedSertMechanism;
     launchInfo.sertKiUm = buffers_->batchedSertKiUm;
     launchInfo.sertHill = buffers_->batchedSertHill;
@@ -1880,6 +1949,10 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.datKiUm = buffers_->batchedDatKiUm;
     launchInfo.datHill = buffers_->batchedDatHill;
     launchInfo.datMaxExtensionFold = buffers_->batchedDatMaxExtensionFold;
+    launchInfo.netMechanism = buffers_->batchedNetMechanism;
+    launchInfo.netKiUm = buffers_->batchedNetKiUm;
+    launchInfo.netHill = buffers_->batchedNetHill;
+    launchInfo.netMaxExtensionFold = buffers_->batchedNetMaxExtensionFold;
     launchInfo.vesiclePoolEnabled = buffers_->batchedVesiclePoolEnabled;
     launchInfo.vesiclePoolRrpSize = buffers_->batchedVesiclePoolRrpSize;
     launchInfo.vesiclePoolReserveSize = buffers_->batchedVesiclePoolReserveSize;
