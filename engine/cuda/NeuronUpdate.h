@@ -161,6 +161,19 @@ struct BatchedStepLaunchInfo {
     float alpha2PostsynapticHill = 1.0f;
     float alpha2MaxPostsynapticAdaptationReductionFrac = 0.0f;
 
+    // Tier 2.2 completion: beta and alpha-1, single-pathway each -- see
+    // NeuromodulatorSystem.h's BetaAction/Alpha1Action comments. Both
+    // INCREASE adaptationScale (literature-grounded direction reversal),
+    // so maxAdaptationIncreaseFold is a ceiling FOLD (>=1), same convention
+    // as d1MaxNmdaGainFold above, not a 0..1 reduction fraction. SYNC
+    // WARNING: manual-sync duplication, keep in sync with the host struct.
+    float betaEc50 = 1.0e9f;
+    float betaHill = 1.0f;
+    float betaMaxAdaptationIncreaseFold = 1.0f;
+    float alpha1Ec50 = 1.0e9f;
+    float alpha1Hill = 1.0f;
+    float alpha1MaxAdaptationIncreaseFold = 1.0f;
+
     // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
     // see ReuptakeTransporter.h's amplifiedDoseUm and NeuromodulatorSystem.h's
     // three-dose computeNeuromodulatorGainModifiers comment. DAT amplifies

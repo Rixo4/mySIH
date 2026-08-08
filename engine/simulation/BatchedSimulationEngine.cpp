@@ -282,6 +282,14 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.alpha2.postsynapticEc50,
             receptorProfile_.neuromod.alpha2.postsynapticHill,
             receptorProfile_.neuromod.alpha2.maxPostsynapticAdaptationReductionFrac,
+            // Tier 2.2 completion: beta and alpha-1, single-pathway each --
+            // same shared-profile passthrough pattern as alpha-2 above.
+            receptorProfile_.neuromod.beta.ec50,
+            receptorProfile_.neuromod.beta.hill,
+            receptorProfile_.neuromod.beta.maxAdaptationIncreaseFold,
+            receptorProfile_.neuromod.alpha1.ec50,
+            receptorProfile_.neuromod.alpha1.hill,
+            receptorProfile_.neuromod.alpha1.maxAdaptationIncreaseFold,
             // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-
             // amplification -- same shared-profile values the CPU fallback
             // loop reads from receptorProfile_.sert/dat/net directly (see

@@ -165,6 +165,15 @@ public:
         float alpha2PostsynapticEc50,
         float alpha2PostsynapticHill,
         float alpha2MaxPostsynapticAdaptationReductionFrac,
+        // Tier 2.2 completion: beta and alpha-1, single-pathway each -- see
+        // NeuronUpdate.h's BatchedStepLaunchInfo comment / NeuromodulatorSystem.h
+        // for the design.
+        float betaEc50,
+        float betaHill,
+        float betaMaxAdaptationIncreaseFold,
+        float alpha1Ec50,
+        float alpha1Hill,
+        float alpha1MaxAdaptationIncreaseFold,
         // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification
         // -- see NeuronUpdate.h's BatchedStepLaunchInfo comment /
         // ReuptakeTransporter.h's amplifiedDoseUm for the design. Mechanism

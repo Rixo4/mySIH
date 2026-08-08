@@ -641,6 +641,25 @@ __global__ void fusedBatchedStepKernel(
             doseForNorepinephrine, launchInfo.alpha2PostsynapticEc50, launchInfo.alpha2PostsynapticHill);
         const float a2AdaptFrac = clamp01(launchInfo.alpha2MaxPostsynapticAdaptationReductionFrac);
         nmodAdaptationScale *= (1.0f - a2AdaptFrac * a2PostOcc);
+
+        // BETA (Tier 2.2 completion): INCREASES adaptationScale (more
+        // braking) -- mirror image of D1's/alpha-2-postsynaptic's decrease,
+        // literature-grounded direction reversal (see NeuromodulatorSystem.h's
+        // BetaAction comment), not a naive same-Gs-family copy of D1.
+        // Mirrors NeuromodulatorSystem.cpp's beta block exactly.
+        const float betaOcc = hillBlockDevice(doseForNorepinephrine, launchInfo.betaEc50, launchInfo.betaHill);
+        const float betaIncreaseCeiling = fmaxf(1.0f, launchInfo.betaMaxAdaptationIncreaseFold);
+        nmodAdaptationScale *= (1.0f + (betaIncreaseCeiling - 1.0f) * betaOcc);
+
+        // ALPHA-1 (Tier 2.2 completion): INCREASES adaptationScale (more
+        // braking), same lever/target/direction as beta above --
+        // literature-grounded direction reversal (see
+        // NeuromodulatorSystem.h's Alpha1Action comment), not a naive
+        // same-Gq-family copy of 5-HT2A. Mirrors NeuromodulatorSystem.cpp's
+        // alpha-1 block exactly.
+        const float a1Occ = hillBlockDevice(doseForNorepinephrine, launchInfo.alpha1Ec50, launchInfo.alpha1Hill);
+        const float a1IncreaseCeiling = fmaxf(1.0f, launchInfo.alpha1MaxAdaptationIncreaseFold);
+        nmodAdaptationScale *= (1.0f + (a1IncreaseCeiling - 1.0f) * a1Occ);
     }
 
     // Tier 2.1: apply D2's postsynaptic scale to the gCaEff computed
@@ -1166,6 +1185,15 @@ struct CudaSimulator::DeviceBuffers {
     float batchedAlpha2PostsynapticHill = 1.0f;
     float batchedAlpha2MaxPostsynapticAdaptationReductionFrac = 0.0f;
 
+    // Tier 2.2 completion: beta and alpha-1, single-pathway each --
+    // stateless, same shared-scalar storage pattern as alpha-2 above.
+    float batchedBetaEc50 = 1.0e9f;
+    float batchedBetaHill = 1.0f;
+    float batchedBetaMaxAdaptationIncreaseFold = 1.0f;
+    float batchedAlpha1Ec50 = 1.0e9f;
+    float batchedAlpha1Hill = 1.0f;
+    float batchedAlpha1MaxAdaptationIncreaseFold = 1.0f;
+
     // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
     // stateless, same shared-scalar storage pattern as the neuromodulator
     // fields above.
@@ -1614,6 +1642,15 @@ void CudaSimulator::initializeBatchedSimulation(
     float alpha2PostsynapticEc50,
     float alpha2PostsynapticHill,
     float alpha2MaxPostsynapticAdaptationReductionFrac,
+    // Tier 2.2 completion: beta and alpha-1, single-pathway each -- see
+    // NeuronUpdate.h's BatchedStepLaunchInfo comment / NeuromodulatorSystem.h
+    // for the design.
+    float betaEc50,
+    float betaHill,
+    float betaMaxAdaptationIncreaseFold,
+    float alpha1Ec50,
+    float alpha1Hill,
+    float alpha1MaxAdaptationIncreaseFold,
     // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
     // see NeuronUpdate.h's BatchedStepLaunchInfo comment.
     int sertMechanism,
@@ -1758,6 +1795,12 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedAlpha2PostsynapticEc50 = alpha2PostsynapticEc50;
     buffers_->batchedAlpha2PostsynapticHill = alpha2PostsynapticHill;
     buffers_->batchedAlpha2MaxPostsynapticAdaptationReductionFrac = alpha2MaxPostsynapticAdaptationReductionFrac;
+    buffers_->batchedBetaEc50 = betaEc50;
+    buffers_->batchedBetaHill = betaHill;
+    buffers_->batchedBetaMaxAdaptationIncreaseFold = betaMaxAdaptationIncreaseFold;
+    buffers_->batchedAlpha1Ec50 = alpha1Ec50;
+    buffers_->batchedAlpha1Hill = alpha1Hill;
+    buffers_->batchedAlpha1MaxAdaptationIncreaseFold = alpha1MaxAdaptationIncreaseFold;
     buffers_->batchedSertMechanism = sertMechanism;
     buffers_->batchedSertKiUm = sertKiUm;
     buffers_->batchedSertHill = sertHill;
@@ -1941,6 +1984,12 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.alpha2PostsynapticEc50 = buffers_->batchedAlpha2PostsynapticEc50;
     launchInfo.alpha2PostsynapticHill = buffers_->batchedAlpha2PostsynapticHill;
     launchInfo.alpha2MaxPostsynapticAdaptationReductionFrac = buffers_->batchedAlpha2MaxPostsynapticAdaptationReductionFrac;
+    launchInfo.betaEc50 = buffers_->batchedBetaEc50;
+    launchInfo.betaHill = buffers_->batchedBetaHill;
+    launchInfo.betaMaxAdaptationIncreaseFold = buffers_->batchedBetaMaxAdaptationIncreaseFold;
+    launchInfo.alpha1Ec50 = buffers_->batchedAlpha1Ec50;
+    launchInfo.alpha1Hill = buffers_->batchedAlpha1Hill;
+    launchInfo.alpha1MaxAdaptationIncreaseFold = buffers_->batchedAlpha1MaxAdaptationIncreaseFold;
     launchInfo.sertMechanism = buffers_->batchedSertMechanism;
     launchInfo.sertKiUm = buffers_->batchedSertKiUm;
     launchInfo.sertHill = buffers_->batchedSertHill;
