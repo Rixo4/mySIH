@@ -125,7 +125,10 @@ std::string buildLiabilityReportText(
         // must count toward "this run has a real network effect", same as
         // the other four neuromodulator receptors above.
         evalInput.config.presynaptic_ec50_alpha2  < kReceptorInertThreshold ||
-        evalInput.config.postsynaptic_ec50_alpha2 < kReceptorInertThreshold;
+        evalInput.config.postsynaptic_ec50_alpha2 < kReceptorInertThreshold ||
+        // Tier 2.2 completion: beta and alpha-1, same reasoning.
+        evalInput.config.ec50_beta   < kReceptorInertThreshold ||
+        evalInput.config.ec50_alpha1 < kReceptorInertThreshold;
     const bool hasAnyReportOnlyTransporter =
         evalInput.config.ki_sert < kReceptorInertThreshold ||
         evalInput.config.ki_dat  < kReceptorInertThreshold ||
@@ -194,6 +197,12 @@ std::string buildLiabilityReportText(
         addTarget("Alpha-2 Presynaptic EC50", evalInput.config.presynaptic_ec50_alpha2);
     if (evalInput.config.postsynaptic_ec50_alpha2 < kReceptorInertThreshold)
         addTarget("Alpha-2 Postsynaptic EC50", evalInput.config.postsynaptic_ec50_alpha2);
+    // Tier 2.2 completion: beta and alpha-1 -- same proactive header-
+    // visibility fix as alpha-2's addition above.
+    if (evalInput.config.ec50_beta < kReceptorInertThreshold)
+        addTarget("Beta EC50", evalInput.config.ec50_beta);
+    if (evalInput.config.ec50_alpha1 < kReceptorInertThreshold)
+        addTarget("Alpha-1 EC50", evalInput.config.ec50_alpha1);
     aLine("Configured Targets", firstTarget ? "None (unconfigured/inert profile)" : targets.str());
     aLine("Hill Coefficient(s)", formatRuntimeNumber(evalInput.config.hill, 2));
     aLine("Dose Range Tested",  fRange(report.minTestedDose, report.maxTestedDose)
@@ -215,19 +224,19 @@ std::string buildLiabilityReportText(
                "  clinical study.\n";
         out << "- This configuration produces zero simulated network effect: the only\n"
                "  targets configured (transporter Ki values) feed serotonin/dopamine/\n"
-               "  norepinephrine pathways that need a matching D1/D2/5-HT1A/5-HT2A/alpha-2\n"
-               "  receptor configured alongside them to have anywhere to act -- none is set\n"
-               "  in this run. Any dose-response shape in a run like this would be random\n"
-               "  seed noise, not a real pharmacological signal -- so the remaining sections\n"
-               "  of this report format (Quantitative Findings, Benchmark Context) are\n"
-               "  omitted rather than populated with noise.\n";
+               "  norepinephrine pathways that need a matching D1/D2/5-HT1A/5-HT2A/alpha-2/\n"
+               "  beta/alpha-1 receptor configured alongside them to have anywhere to act --\n"
+               "  none is set in this run. Any dose-response shape in a run like this would be\n"
+               "  random seed noise, not a real pharmacological signal -- so the remaining\n"
+               "  sections of this report format (Quantitative Findings, Benchmark Context)\n"
+               "  are omitted rather than populated with noise.\n";
         out << "\n--------------------------------------------------\n\n";
         out << "[Suggested Next Step]\n";
         out << "Add a matching receptor configuration (D1/D2 for a DAT-blocking compound,\n"
-               "5-HT1A/5-HT2A for a SERT-blocking compound, alpha-2 for a NET-blocking\n"
-               "compound) for the transporter pharmacology above to reach the simulated\n"
-               "network, or treat this run as configuration-only documentation rather than a\n"
-               "liability screen.\n";
+               "5-HT1A/5-HT2A for a SERT-blocking compound, alpha-2/beta/alpha-1 for a\n"
+               "NET-blocking compound) for the transporter pharmacology above to reach the\n"
+               "simulated network, or treat this run as configuration-only documentation\n"
+               "rather than a liability screen.\n";
         out << "==================================================\n";
         return out.str();
     }
@@ -450,16 +459,22 @@ std::string buildLiabilityReportText(
     // Tier 2.2: alpha-2 now exists (both presynaptic autoreceptor and
     // postsynaptic PFC pathways) -- computed here (before the generic
     // fallback below) so both that check and the NET-specific message
-    // further down can use it.
+    // further down can use it. Tier 2.2 completion added beta/alpha-1 --
+    // computed alongside it for the same reason (this generic fallback
+    // needs to exclude all three adrenergic receptors, not just alpha-2).
     const bool alpha2Configured =
         evalInput.config.presynaptic_ec50_alpha2  < kReceptorInertThreshold ||
         evalInput.config.postsynaptic_ec50_alpha2 < kReceptorInertThreshold;
-    // alpha2Configured gets its own accurate message below (both curves, no
-    // split ambiguity the way D2/5-HT1A have) -- excluded here so an
-    // alpha-2-only run doesn't ALSO get this "no split" claim, which would
-    // be wrong for it (alpha-2 always ships both curves together).
+    const bool betaConfigured   = evalInput.config.ec50_beta   < kReceptorInertThreshold;
+    const bool alpha1Configured = evalInput.config.ec50_alpha1 < kReceptorInertThreshold;
+    // alpha2/beta/alpha1Configured each get their own accurate message
+    // below -- excluded here so a run configuring only one of them doesn't
+    // ALSO get this "no split" claim, which is specific to D1/D2/5-HT1A/
+    // 5-HT2A and wrong for all three adrenergic additions (alpha-2 always
+    // ships both curves together with no split ambiguity; beta/alpha-1 are
+    // single-pathway and were never split candidates in the first place).
     if (!ht1aTimeDependent && !ht1aAutoreceptorConfigured && !d2PostsynapticConfigured
-        && !alpha2Configured && hasNeuromodEffect) {
+        && !alpha2Configured && !betaConfigured && !alpha1Configured && hasNeuromodEffect) {
         out << "- D1/D2/5-HT1A/5-HT2A pathways configured in this run are single monotonic\n"
                "  curves with no presynaptic-autoreceptor-vs-postsynaptic-receptor split --\n"
                "  genuinely biphasic dopaminergic/serotonergic response (real for some\n"
@@ -467,15 +482,16 @@ std::string buildLiabilityReportText(
                "  (PRECISION_GAP_CLOSURE_PLAN.md 2.1).\n";
     }
     // This branch used to unconditionally claim "no adrenergic gain system
-    // exists yet", which is now WRONG whenever alpha2 is configured
-    // alongside NET. Beta/alpha-1 remain genuinely unmodeled, so the message
-    // is split: NET-without-alpha2 still gets the old "no receptor pathway
-    // reached" note (still true for that case), alpha2-configured gets its
+    // exists yet", which is now WRONG whenever any of alpha-2/beta/alpha-1
+    // is configured alongside NET. The message is split: NET-without-any-
+    // adrenergic-receptor still gets the old "no receptor pathway reached"
+    // note (still true for that case), each configured receptor gets its
     // own accurate description instead.
-    if (evalInput.config.ki_net < kReceptorInertThreshold && !alpha2Configured) {
-        out << "- NET (norepinephrine transporter) is configured but no alpha-2 receptor\n"
-               "  pathway is set alongside it, so the amplified norepinephrine dose has no\n"
-               "  receptor to act on and produces no simulated network effect\n"
+    if (evalInput.config.ki_net < kReceptorInertThreshold
+        && !alpha2Configured && !betaConfigured && !alpha1Configured) {
+        out << "- NET (norepinephrine transporter) is configured but no alpha-2/beta/alpha-1\n"
+               "  receptor pathway is set alongside it, so the amplified norepinephrine dose\n"
+               "  has no receptor to act on and produces no simulated network effect\n"
                "  (PRECISION_GAP_CLOSURE_PLAN.md 2.2).\n";
     }
     if (alpha2Configured) {
@@ -484,8 +500,30 @@ std::string buildLiabilityReportText(
                "  reduction, same lever as D2's presynaptic pathway) and a postsynaptic PFC\n"
                "  cAMP-HCN pathway (adaptation reduction, same lever as D1's). Both respond\n"
                "  instantly to dose, with no chronic-exposure/onset-delay behavior modeled\n"
-               "  (unlike 5-HT1A's autoreceptor). Beta and alpha-1 adrenergic receptors are\n"
-               "  still entirely unmodeled -- this run only covers alpha-2\n"
+               "  (unlike 5-HT1A's autoreceptor) (PRECISION_GAP_CLOSURE_PLAN.md 2.2).\n";
+    }
+    // Tier 2.2 completion: beta and alpha-1 both INCREASE adaptationScale
+    // (more braking) -- the opposite direction from D1/alpha-2-postsynaptic/
+    // 5-HT2A's decrease, a literature-grounded finding (not a naive same-
+    // G-protein-family assumption) worth surfacing explicitly here so this
+    // direction isn't mistaken for a bug when compared against those.
+    if (betaConfigured) {
+        out << "- Beta (norepinephrine) is configured -- single pathway, INCREASES\n"
+               "  adaptationScale (more braking / suppressed persistent firing) rather than\n"
+               "  decreasing it, despite sharing D1's Gs coupling -- literature-grounded\n"
+               "  direction (beta1-AR opens the same HCN channels alpha-2 closes; high NE/\n"
+               "  cAMP-PKA suppresses PFC persistent firing), not the naive same-family\n"
+               "  assumption. No presynaptic/postsynaptic split modeled -- no comparably\n"
+               "  strong dual-role literature found for beta this session\n"
+               "  (PRECISION_GAP_CLOSURE_PLAN.md 2.2).\n";
+    }
+    if (alpha1Configured) {
+        out << "- Alpha-1 (norepinephrine) is configured -- single pathway, INCREASES\n"
+               "  adaptationScale (more braking / suppressed dlPFC firing) rather than\n"
+               "  decreasing it, despite sharing 5-HT2A's Gq coupling -- literature-grounded\n"
+               "  direction (Arnsten lab: PKC-mediated dlPFC firing suppression), not the\n"
+               "  naive same-family assumption. No gKEff lever modeled (unlike 5-HT2A) --\n"
+               "  no K+-conductance-specific citation found for alpha-1 this session\n"
                "  (PRECISION_GAP_CLOSURE_PLAN.md 2.2).\n";
     }
     if (fragmentedWindow) {
