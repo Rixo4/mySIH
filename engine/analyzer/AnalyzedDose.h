@@ -43,7 +43,13 @@ enum class MechanismSignature {
     D1Gain,
     D2Gain,
     Ht1aGain,
-    Ht2aGain
+    Ht2aGain,
+    // Tier 2.2 (PRECISION_GAP_CLOSURE_PLAN.md): alpha-2 neuromodulator gain.
+    // Uses the presynaptic curve's occupancy, same convention as D2Gain
+    // above (which also only tracks its presynaptic curve, not its
+    // postsynaptic addition) -- one classification signature per receptor
+    // family, not one per curve.
+    Alpha2Gain
 };
 
 struct AnalyzedDose {
@@ -69,6 +75,8 @@ struct AnalyzedDose {
     float d2Gain   = 0.0f;
     float ht1aGain = 0.0f;
     float ht2aGain = 0.0f;
+    // Tier 2.2: mirrors DoseObservation's alpha2Gain.
+    float alpha2Gain = 0.0f;
 
     RawMetrics metrics;
 

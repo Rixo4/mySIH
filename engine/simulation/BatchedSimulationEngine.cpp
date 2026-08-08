@@ -274,10 +274,19 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.neuromod.ht2a.hill,
             receptorProfile_.neuromod.ht2a.maxKReductionFrac,
             receptorProfile_.neuromod.ht2a.maxAdaptationReductionFrac,
-            // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification
-            // -- same shared-profile values the CPU fallback loop reads
-            // from receptorProfile_.sert/dat directly (see
-            // DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin).
+            // Tier 2.2: alpha-2, both curves -- same shared-profile
+            // passthrough pattern as the other neuromodulator fields above.
+            receptorProfile_.neuromod.alpha2.presynapticEc50,
+            receptorProfile_.neuromod.alpha2.presynapticHill,
+            receptorProfile_.neuromod.alpha2.maxPresynapticReleaseReductionFrac,
+            receptorProfile_.neuromod.alpha2.postsynapticEc50,
+            receptorProfile_.neuromod.alpha2.postsynapticHill,
+            receptorProfile_.neuromod.alpha2.maxPostsynapticAdaptationReductionFrac,
+            // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-
+            // amplification -- same shared-profile values the CPU fallback
+            // loop reads from receptorProfile_.sert/dat/net directly (see
+            // DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin/
+            // amplifiedDoseForNorepinephrine).
             static_cast<int>(receptorProfile_.sert.mechanism),
             receptorProfile_.sert.kiUm,
             receptorProfile_.sert.hill,
@@ -286,6 +295,10 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             receptorProfile_.dat.kiUm,
             receptorProfile_.dat.hill,
             receptorProfile_.dat.maxExtensionFold,
+            static_cast<int>(receptorProfile_.net.mechanism),
+            receptorProfile_.net.kiUm,
+            receptorProfile_.net.hill,
+            receptorProfile_.net.maxExtensionFold,
             // Phase 3c: vesicle pool dynamics -- same config_.vesiclePool*
             // fields the CPU fallback loop below reads directly (see
             // vesiclePoolConfig construction further down in this

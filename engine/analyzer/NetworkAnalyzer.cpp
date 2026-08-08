@@ -54,6 +54,7 @@ std::vector<AnalyzedDose> NetworkAnalyzer::analyze(
         analyzed.d2Gain   = obs.d2Gain;
         analyzed.ht1aGain = obs.ht1aGain;
         analyzed.ht2aGain = obs.ht2aGain;
+        analyzed.alpha2Gain = obs.alpha2Gain;
         analyzed.metrics = obs.metrics;
 
         // Compute deltas vs baseline
@@ -256,7 +257,7 @@ MechanismSignature NetworkAnalyzer::detectMechanism(const AnalyzedDose& dose) {
     // hierarchies) is enough; a genuine channel+receptor combination drug
     // isn't part of that set and would just show up as Mixed here, which
     // is the correct fallback.
-    const std::array<std::pair<MechanismSignature, float>, 12> candidates{{
+    const std::array<std::pair<MechanismSignature, float>, 13> candidates{{
         {MechanismSignature::NaBlock,         dose.blockNa},
         {MechanismSignature::KBlock,          dose.blockK},
         {MechanismSignature::CaBlock,         dose.blockCa},
@@ -272,7 +273,10 @@ MechanismSignature NetworkAnalyzer::detectMechanism(const AnalyzedDose& dose) {
         {MechanismSignature::D1Gain,   dose.d1Gain},
         {MechanismSignature::D2Gain,   dose.d2Gain},
         {MechanismSignature::Ht1aGain, dose.ht1aGain},
-        {MechanismSignature::Ht2aGain, dose.ht2aGain}
+        {MechanismSignature::Ht2aGain, dose.ht2aGain},
+        // Tier 2.2: alpha-2 neuromodulator gain, same flat-candidate
+        // treatment as D1/D2/5-HT1A/5-HT2A above.
+        {MechanismSignature::Alpha2Gain, dose.alpha2Gain}
     }};
 
     auto sorted = candidates;

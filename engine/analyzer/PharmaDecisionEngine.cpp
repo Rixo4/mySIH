@@ -567,8 +567,16 @@ PharmaDecisionReport PharmaDecisionEngine::evaluate(
     // keep this array's size in sync -- there is no compile-time check
     // tying the two together. Phase 3c added 4 more enum values
     // (D1Gain/D2Gain/Ht1aGain/Ht2aGain), so this was bumped 10 -> 14 to
-    // avoid repeating the exact same bug.
-    std::array<int, 14> counts{};
+    // avoid repeating the exact same bug. Tier 2.2 added Alpha2Gain, bumped
+    // 14 -> 15 -- found via test_alpha2_dual_pathway.json's own first real
+    // run, which showed "Mechanism observed: Unknown" despite a clean 28.8%
+    // effect and R^2=0.98 sigmoidal fit, because Alpha2Gain didn't exist as
+    // a candidate anywhere in this pipeline yet (AnalyzedDose.h,
+    // DoseObservation.h, NetworkAnalyzer.cpp's candidate list, and this
+    // array all needed the same addition) -- same reactive-fix-on-first-run
+    // pattern as 5-HT1A's and D2's report-honesty gaps, just in the
+    // classification path instead of the disclaimer text.
+    std::array<int, 15> counts{};
     auto indexOf = [](MechanismSignature s) -> std::size_t {
         return static_cast<std::size_t>(s);
     };
@@ -962,6 +970,7 @@ std::string PharmaDecisionEngine::toString(MechanismSignature sig) {
         case MechanismSignature::D2Gain:          return "D2 Neuromodulator Gain";
         case MechanismSignature::Ht1aGain:        return "5-HT1A Neuromodulator Gain";
         case MechanismSignature::Ht2aGain:        return "5-HT2A Neuromodulator Gain";
+        case MechanismSignature::Alpha2Gain:      return "Alpha-2 Neuromodulator Gain";
         default:                                  return "Unknown";
     }
 }

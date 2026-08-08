@@ -832,6 +832,18 @@ DoseObservation buildDoseObservation(
             doseForSerotonin, static_cast<float>(input.config.ec50_ht1a), static_cast<float>(input.config.hill_ht1a));
         o.ht2aGain = spp::synapse::neuromodulatorOccupancy(
             doseForSerotonin, static_cast<float>(input.config.ec50_ht2a), static_cast<float>(input.config.hill_ht2a));
+        // Tier 2.2: alpha-2 presynaptic occupancy, same
+        // amplified-dose-through-NET treatment as D1/D2 (DAT) and 5-HT1A/
+        // 5-HT2A (SERT) above -- otherwise mechanism detection would
+        // attribute doses that don't match what the network actually
+        // simulated, same bug class this section's header comment warns
+        // about.
+        const float doseForNorepinephrine =
+            spp::drug::DrugModel::amplifiedDoseForNorepinephrine(fullProfile, dF);
+        o.alpha2Gain = spp::synapse::neuromodulatorOccupancy(
+            doseForNorepinephrine,
+            static_cast<float>(input.config.presynaptic_ec50_alpha2),
+            static_cast<float>(input.config.presynaptic_hill_alpha2));
     }
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;

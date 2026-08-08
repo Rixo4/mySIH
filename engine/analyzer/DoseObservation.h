@@ -28,6 +28,10 @@ struct DoseObservation {
     float d2Gain   = 0.0f;
     float ht1aGain = 0.0f;
     float ht2aGain = 0.0f;
+    // Tier 2.2 (PRECISION_GAP_CLOSURE_PLAN.md): alpha-2 presynaptic
+    // occupancy, same scale/purpose as d1Gain/d2Gain/ht1aGain/ht2aGain
+    // above. See AnalyzedDose.h.
+    float alpha2Gain = 0.0f;
 
     RawMetrics metrics;
 };
