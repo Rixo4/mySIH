@@ -194,6 +194,20 @@ struct SimulationConfig {
     double postsynaptic_hill_alpha2                      = 1.0;
     double max_postsynaptic_adaptation_reduction_alpha2 = 0.0; // 0..1 fraction
 
+    // Tier 2.2 completion: beta and alpha-1 (norepinephrine) -- see
+    // NeuromodulatorSystem.h's BetaAction/Alpha1Action comments. Both
+    // INCREASE adaptationScale (literature-grounded direction reversal from
+    // the naive same-G-protein-family assumption -- see those comments for
+    // the citations), so max_adaptation_increase is a ceiling FOLD (>=1),
+    // not a 0..1 reduction fraction like every other max_*_reduction field
+    // in this section.
+    double ec50_beta                     = 1.0e9;
+    double hill_beta                     = 1.0;
+    double max_adaptation_increase_beta  = 1.0; // ceiling fold, >=1
+    double ec50_alpha1                   = 1.0e9;
+    double hill_alpha1                   = 1.0;
+    double max_adaptation_increase_alpha1 = 1.0; // ceiling fold, >=1
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";

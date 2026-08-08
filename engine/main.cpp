@@ -428,6 +428,14 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.neuromod.alpha2.postsynapticHill = static_cast<float>(cfg.postsynaptic_hill_alpha2);
     profile.neuromod.alpha2.maxPostsynapticAdaptationReductionFrac = static_cast<float>(cfg.max_postsynaptic_adaptation_reduction_alpha2);
 
+    profile.neuromod.beta.ec50 = static_cast<float>(cfg.ec50_beta);
+    profile.neuromod.beta.hill = static_cast<float>(cfg.hill_beta);
+    profile.neuromod.beta.maxAdaptationIncreaseFold = static_cast<float>(cfg.max_adaptation_increase_beta);
+
+    profile.neuromod.alpha1.ec50 = static_cast<float>(cfg.ec50_alpha1);
+    profile.neuromod.alpha1.hill = static_cast<float>(cfg.hill_alpha1);
+    profile.neuromod.alpha1.maxAdaptationIncreaseFold = static_cast<float>(cfg.max_adaptation_increase_alpha1);
+
     return profile;
 }
 
@@ -844,6 +852,16 @@ DoseObservation buildDoseObservation(
             doseForNorepinephrine,
             static_cast<float>(input.config.presynaptic_ec50_alpha2),
             static_cast<float>(input.config.presynaptic_hill_alpha2));
+        // Tier 2.2 completion: beta/alpha-1 occupancy, same
+        // amplified-NE-dose treatment as alpha-2 above.
+        o.betaGain = spp::synapse::neuromodulatorOccupancy(
+            doseForNorepinephrine,
+            static_cast<float>(input.config.ec50_beta),
+            static_cast<float>(input.config.hill_beta));
+        o.alpha1Gain = spp::synapse::neuromodulatorOccupancy(
+            doseForNorepinephrine,
+            static_cast<float>(input.config.ec50_alpha1),
+            static_cast<float>(input.config.hill_alpha1));
     }
     o.metrics.meanFiringRateHz         = metrics.meanFiringRateHz;
     o.metrics.synchronizationIndex     = metrics.synchronizationIndex;
@@ -1110,6 +1128,22 @@ static bool loadDrugConfigFromJsonFile(
             if(auto n=extractJsonNumber(c,"postsynaptic_ec50",a2P);n) out.config.postsynaptic_ec50_alpha2=*n;
             if(auto h=extractJsonNumber(c,"postsynaptic_hill",a2P);h) out.config.postsynaptic_hill_alpha2=*h;
             if(auto m=extractJsonNumber(c,"max_postsynaptic_adaptation_reduction",a2P);m) out.config.max_postsynaptic_adaptation_reduction_alpha2=*m;
+        }
+        // Tier 2.2 completion: beta and alpha-1, single-pathway each -- same
+        // nested-object pattern as above. "max_adaptation_increase" (not
+        // "_reduction") since both INCREASE adaptationScale -- see
+        // NeuromodulatorSystem.h's BetaAction/Alpha1Action comments.
+        const auto betaP=c.find("\"Beta\"",nmPos);
+        if(betaP!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",betaP);n) out.config.ec50_beta=*n;
+            if(auto h=extractJsonNumber(c,"hill",betaP);h) out.config.hill_beta=*h;
+            if(auto m=extractJsonNumber(c,"max_adaptation_increase",betaP);m) out.config.max_adaptation_increase_beta=*m;
+        }
+        const auto a1P=c.find("\"Alpha1\"",nmPos);
+        if(a1P!=c.npos){
+            if(auto n=extractJsonNumber(c,"ec50",a1P);n) out.config.ec50_alpha1=*n;
+            if(auto h=extractJsonNumber(c,"hill",a1P);h) out.config.hill_alpha1=*h;
+            if(auto m=extractJsonNumber(c,"max_adaptation_increase",a1P);m) out.config.max_adaptation_increase_alpha1=*m;
         }
     }
     const auto drP=c.find("\"dose_range\"");
