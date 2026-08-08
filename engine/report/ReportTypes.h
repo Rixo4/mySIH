@@ -182,6 +182,18 @@ struct SimulationConfig {
     double max_k_reduction_ht2a          = 0.0; // 0..1 fraction
     double max_adaptation_reduction_ht2a = 0.0; // 0..1 fraction
 
+    // Tier 2.2 alpha-2 (norepinephrine) -- see NeuromodulatorSystem.h's
+    // Alpha2Action comment. Presynaptic autoreceptor (Gi, release-
+    // probability lever, D2-presynaptic-shaped) and postsynaptic PFC
+    // cAMP-HCN pathway (D1-adaptation-shaped) built together, own EC50/Hill
+    // each -- same "second independent curve" pattern as D2/5-HT1A's splits.
+    double presynaptic_ec50_alpha2                     = 1.0e9;
+    double presynaptic_hill_alpha2                      = 1.0;
+    double max_presynaptic_release_reduction_alpha2     = 0.0; // 0..1 fraction
+    double postsynaptic_ec50_alpha2                     = 1.0e9;
+    double postsynaptic_hill_alpha2                      = 1.0;
+    double max_postsynaptic_adaptation_reduction_alpha2 = 0.0; // 0..1 fraction
+
     bool use_cuda    = true;
     bool export_csv  = true;
     std::string output_folder = "output_data";
