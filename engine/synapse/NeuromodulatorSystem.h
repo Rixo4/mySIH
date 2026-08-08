@@ -260,6 +260,66 @@ struct Alpha2Action {
     float maxPostsynapticAdaptationReductionFrac = 0.0f;
 };
 
+// Norepinephrine beta -- Tier 2.2 completion (PRECISION_GAP_CLOSURE_PLAN.md).
+// IMPORTANT DIRECTION NOTE, found via literature check before building (not
+// assumed from G-protein family alone): beta receptors are Gs-coupled, same
+// family as D1 above, but the naive "same family = same lever direction"
+// assumption does NOT hold here. Beta1-AR activation in PFC pyramidal cells
+// OPENS HCN channels via the cAMP pathway (Yi et al, PMC5701640,
+// "Noradrenaline Modulates the Membrane Potential ... via beta1-Adrenergic
+// Receptors and HCN Channels") -- the MIRROR IMAGE of alpha-2's postsynaptic
+// action above (which CLOSES the same HCN channels, Wang et al 2007). Same
+// channel target, opposite G-protein family (Gs vs Gi), opposite direction.
+// HCN opening increases dendritic leak and dampens persistent firing --
+// consistent with the broader finding that high noradrenaline/cAMP-PKA
+// SUPPRESSES persistent firing in PFC and impairs working memory at high
+// levels (Ramos & Arnsten 2007, Pharmacol Ther 113:523-536; Arnsten's
+// inverted-U catecholamine model). Modeled here as: INCREASES
+// adaptationScale (more braking) -- the mirror image of D1's/alpha-2-
+// postsynaptic's DEcrease-adaptation lever, same target, opposite
+// direction, deliberately NOT copied from D1 despite the shared Gs
+// coupling. maxAdaptationIncreaseFold is a ceiling FOLD-INCREASE (>=1,
+// same "fold" convention as D1's maxNmdaGainFold), not a 0..1 reduction
+// fraction -- inert default is 1.0 (no increase). No presynaptic/
+// postsynaptic split built: unlike alpha-2, no comparably strong dual-role
+// literature was found this session for beta in this engine's scope, so it
+// stays single-pathway (same "don't build ahead of evidence" discipline as
+// everywhere else in this file). No literature-sourced NE-specific EC50
+// found this session -- illustrative placeholder, same flagged-placeholder
+// policy as alpha-2's EC50s.
+struct BetaAction {
+    float ec50 = 1.0e9f;
+    float hill = 1.0f;
+    float maxAdaptationIncreaseFold = 1.0f;
+};
+
+// Norepinephrine alpha-1 -- Tier 2.2 completion (PRECISION_GAP_CLOSURE_PLAN.md).
+// Same direction-check discipline as beta above: alpha-1 is Gq-coupled,
+// same family as 5-HT2A, but literature does NOT support copying 5-HT2A's
+// "less braking" direction. Alpha-1 stimulation in primate dorsolateral PFC
+// SUPPRESSES pyramidal neuron firing via a calcium-PKC cascade (Arnsten
+// lab: Birnbaum et al 1999, Biol Psychiatry 46:1266; Mao et al 2019, J
+// Neurosci 39:2722 -- "Noradrenergic alpha1-Adrenoceptor Actions in the
+// Primate Dorsolateral Prefrontal Cortex"), specifically engaged under
+// high-norepinephrine/stress conditions -- the opposite functional
+// direction from 5-HT2A's K+-leak-reduction/"less braking" role (Herzog et
+// al 2025) despite the shared Gq coupling. No K+-conductance-specific
+// citation was found this session for alpha-1 (unlike 5-HT2A's Herzog et al
+// finding), so only the adaptation lever is modeled here, not a gKEff lever
+// -- avoids inventing a mechanism beyond what was actually found. Modeled
+// here as: INCREASES adaptationScale (more braking), same lever/target and
+// direction as beta above (both suppress PFC firing via different
+// G-protein routes converging on the same net effect), opposite of
+// 5-HT2A's decrease. maxAdaptationIncreaseFold is a ceiling fold-increase
+// (>=1), same convention as beta's field above. No literature-sourced
+// NE-specific EC50 found this session -- illustrative placeholder, same
+// flagged-placeholder policy as beta/alpha-2's EC50s.
+struct Alpha1Action {
+    float ec50 = 1.0e9f;
+    float hill = 1.0f;
+    float maxAdaptationIncreaseFold = 1.0f;
+};
+
 // One shared profile for the whole batch (the compound under test) -- same
 // "single drug, one profile" pattern as ReceptorDrugProfile/
 // ReuptakeTransporter's per-drug structs.
@@ -269,6 +329,8 @@ struct NeuromodulatorProfile {
     Serotonin5HT1AAction ht1a;
     Serotonin5HT2AAction ht2a;
     Alpha2Action alpha2;
+    BetaAction beta;
+    Alpha1Action alpha1;
 };
 
 // Final composed multiplicative scale factors to apply to this engine's
