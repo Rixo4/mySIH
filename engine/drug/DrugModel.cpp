@@ -259,20 +259,26 @@ float DrugModel::amplifiedDoseForSerotonin(const ReceptorDrugProfile& profile, f
     return spp::synapse::amplifiedDoseUm(dose, toTransporterDrugEffect(profile.sert));
 }
 
+float DrugModel::amplifiedDoseForNorepinephrine(const ReceptorDrugProfile& profile, float dose) {
+    return spp::synapse::amplifiedDoseUm(dose, toTransporterDrugEffect(profile.net));
+}
+
 spp::synapse::NeuromodulatorGainModifiers DrugModel::computeNeuromodulatorGainModifiers(
     const ReceptorDrugProfile& profile, float dose, float currentTimeMs) {
     // Phase 3c retrofit: DAT reuptake block amplifies the dose D1/D2 see;
-    // SERT reuptake block amplifies the dose 5-HT1A/5-HT2A see. Both are
-    // exact no-ops (return `dose` unchanged) when profile.dat/profile.sert
-    // are unconfigured (mechanism=None), so this is a bit-identical
-    // extension of the pre-existing behavior -- see
+    // SERT reuptake block amplifies the dose 5-HT1A/5-HT2A see; NET reuptake
+    // block amplifies the dose alpha-2 sees (Tier 2.2). All three are
+    // exact no-ops (return `dose` unchanged) when profile.dat/profile.sert/
+    // profile.net are unconfigured (mechanism=None), so this is a bit-
+    // identical extension of the pre-existing behavior -- see
     // ReuptakeTransporter.h's amplifiedDoseUm and
-    // NeuromodulatorSystem.h's two-dose computeNeuromodulatorGainModifiers
+    // NeuromodulatorSystem.h's three-dose computeNeuromodulatorGainModifiers
     // comment for the full design rationale.
-    const float doseForDopamine  = amplifiedDoseForDopamine(profile, dose);
-    const float doseForSerotonin = amplifiedDoseForSerotonin(profile, dose);
+    const float doseForDopamine      = amplifiedDoseForDopamine(profile, dose);
+    const float doseForSerotonin     = amplifiedDoseForSerotonin(profile, dose);
+    const float doseForNorepinephrine = amplifiedDoseForNorepinephrine(profile, dose);
     return spp::synapse::computeNeuromodulatorGainModifiers(
-        doseForDopamine, doseForSerotonin, profile.neuromod, currentTimeMs);
+        doseForDopamine, doseForSerotonin, doseForNorepinephrine, profile.neuromod, currentTimeMs);
 }
 
 } // namespace spp::drug

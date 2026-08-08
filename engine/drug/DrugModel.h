@@ -145,6 +145,9 @@ public:
     // "Max Effect" field).
     static float amplifiedDoseForDopamine(const ReceptorDrugProfile& profile, float dose);
     static float amplifiedDoseForSerotonin(const ReceptorDrugProfile& profile, float dose);
+    // Tier 2.2: NET reuptake block amplifies the effective dose the alpha-2
+    // receptor sees -- same pattern as the two above, using profile.net.
+    static float amplifiedDoseForNorepinephrine(const ReceptorDrugProfile& profile, float dose);
 
     void enablePerNeuronProfiles(std::size_t neuronCount);
     [[nodiscard]] bool hasPerNeuronProfiles() const { return perNeuronEnabled_; }
