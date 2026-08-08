@@ -788,11 +788,26 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 // applied as a per-block multiplicative scale on the
                 // increment step. nMods.adaptationScale == 1.0 when
                 // unconfigured, exact no-op.
+                //
+                // Tier 2.4 part 1: beta/alpha-1 (Tier 2.2) populate a
+                // SEPARATE excitatory-only scale (nMods.adaptationScaleExcitatory)
+                // instead of the shared one above -- see
+                // NeuromodulatorGainModifiers' comment for why (D1/5-HT2A/
+                // alpha-2-postsynaptic's already-validated uniform behavior
+                // must not change). isExcitatory selects which per-cell-type
+                // field applies; both default to 1.0 (inert) so any config
+                // not using beta/alpha-1 is bit-identical to before this field
+                // existed.
                 const synapse::NeuromodulatorGainModifiers& nMods = blockNeuromodMods[i / neuronsPerBlock_];
-                const float adaptStep = ((population_.neuronType[i] == 1U)
+                const bool isExcitatory = (population_.neuronType[i] == 1U);
+                const float cellTypeAdaptScale = isExcitatory
+                    ? nMods.adaptationScaleExcitatory
+                    : nMods.adaptationScaleInhibitory;
+                const float adaptStep = (isExcitatory
                                             ? adaptationIncrement
                                             : adaptationIncrement * adaptationInhibitoryScale)
-                                        * nMods.adaptationScale;
+                                        * nMods.adaptationScale
+                                        * cellTypeAdaptScale;
                 adaptationCurrent[i] = std::clamp(adaptationCurrent[i] + adaptStep, 0.0f, adaptationMaxCurrent);
             }
         }

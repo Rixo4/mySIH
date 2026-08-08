@@ -329,6 +329,11 @@ std::vector<NeuronMetrics> MetricsAnalyzer::computeNeuronMetrics(
         NeuronMetrics m;
         m.spikeCount   = spikes.size();
         m.firingRateHz = static_cast<float>(m.spikeCount) / durationSec;
+        // Diagnostic addition (2026-08-08): carry the neuron's cell type
+        // through so CsvWriter can label each row. Falls back to the
+        // default (excitatory=1) if the result didn't populate neuronTypes
+        // (e.g. an older code path) rather than reading out of bounds.
+        m.neuronType = (i < result.neuronTypes.size()) ? result.neuronTypes[i] : 1U;
 
         if (spikes.size() >= 2U) {
             const std::size_t nIsi = spikes.size() - 1U;

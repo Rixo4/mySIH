@@ -344,6 +344,29 @@ struct NeuromodulatorGainModifiers {
     float gMaxNmdaScale          = 1.0f; // multiplies NMDA peak conductance
     float adaptationScale        = 1.0f; // multiplies adaptation-current constants
     float excitatoryWeightScale  = 1.0f; // multiplies excitatory synaptic weight
+
+    // Tier 2.4 part 1 (PRECISION_GAP_CLOSURE_PLAN.md): cell-type-selective
+    // addition to adaptationScale, layered ON TOP of the shared
+    // adaptationScale above rather than replacing it. Why a separate pair
+    // of fields instead of just making adaptationScale itself cell-type-
+    // selective: D1/5-HT2A/alpha-2-postsynaptic already validated on real
+    // hardware applying their (de)increase uniformly to both cell types via
+    // the shared field above -- changing that field's meaning would
+    // silently alter their already-proven behavior. Beta and alpha-1's
+    // source literature (Yi et al PMC5701640; Arnsten lab) is specifically
+    // about PFC PYRAMIDAL (excitatory) neurons, so they populate
+    // adaptationScaleExcitatory ONLY, leaving adaptationScaleInhibitory
+    // inert -- this is the mechanism believed responsible for Tier 2.2's
+    // paradoxical population-level excitatory reading (leading hypothesis:
+    // uniformly suppressing both cell types was disinhibiting the network;
+    // restricting the effect to excitatory cells removes that path). Both
+    // default to 1.0 (fully inert), so any config not using beta/alpha-1 is
+    // a bit-identical no-op -- same guarantee as every other field in this
+    // file. Consumers multiply BOTH the shared adaptationScale AND the
+    // matching per-cell-type field into each neuron's adaptation step (see
+    // BatchedSimulationEngine.cpp).
+    float adaptationScaleExcitatory = 1.0f;
+    float adaptationScaleInhibitory = 1.0f;
 };
 
 // Standard Hill occupancy fraction (0..1), same formula used everywhere else

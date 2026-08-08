@@ -169,32 +169,43 @@ NeuromodulatorGainModifiers computeNeuromodulatorGainModifiers(
         out.adaptationScale *= (1.0f - adaptFrac * occ);
     }
 
-    // BETA (norepinephrine, Tier 2.2 completion): INCREASES adaptationScale
-    // (more braking) -- the mirror image of D1's/alpha-2-postsynaptic's
-    // decrease, same target, opposite direction. See BetaAction's header
-    // comment for the literature (beta1-AR opens the same HCN channels
-    // alpha-2 closes; high NE/cAMP-PKA suppresses PFC persistent firing) --
+    // BETA (norepinephrine, Tier 2.2 completion): INCREASES
+    // adaptationScaleExcitatory (more braking, EXCITATORY NEURONS ONLY) --
+    // the mirror image of D1's/alpha-2-postsynaptic's decrease, same
+    // target family, opposite direction. See BetaAction's header comment
+    // for the literature (beta1-AR opens the same HCN channels alpha-2
+    // closes; high NE/cAMP-PKA suppresses PFC persistent firing) --
     // deliberately not modeled the same direction as D1 despite sharing
     // Gs coupling. maxAdaptationIncreaseFold is a ceiling FOLD (>=1), same
     // convention as D1's maxNmdaGainFold, not a 0..1 reduction fraction.
+    // Tier 2.4 part 1 correction: this used to multiply the SHARED
+    // adaptationScale (applied to both cell types), which produced a real,
+    // reproducible paradoxical population-level EXCITATORY reading on real
+    // hardware (see Tier 2.2's writeup) -- leading hypothesis was E/I
+    // disinhibition from suppressing inhibitory neurons too, when beta's
+    // source literature is specifically about PFC PYRAMIDAL (excitatory)
+    // cells. Now multiplies the excitatory-only field instead -- see
+    // NeuromodulatorGainModifiers' comment for the full rationale.
     {
         const float occ = neuromodulatorOccupancy(doseForNorepinephrine, profile.beta.ec50, profile.beta.hill);
         const float increaseCeiling = std::max(1.0f, profile.beta.maxAdaptationIncreaseFold);
-        out.adaptationScale *= (1.0f + (increaseCeiling - 1.0f) * occ);
+        out.adaptationScaleExcitatory *= (1.0f + (increaseCeiling - 1.0f) * occ);
     }
 
     // ALPHA-1 (norepinephrine, Tier 2.2 completion): INCREASES
-    // adaptationScale (more braking), same lever/target/direction as beta
-    // above -- both suppress PFC firing via different G-protein routes. See
-    // Alpha1Action's header comment for the literature (Arnsten lab: PKC-
-    // mediated dlPFC firing suppression) -- deliberately not modeled the
-    // same direction as 5-HT2A despite sharing Gq coupling. No gKEff lever
+    // adaptationScaleExcitatory (more braking, EXCITATORY NEURONS ONLY),
+    // same lever family/direction as beta above -- both suppress PFC
+    // pyramidal firing via different G-protein routes. See Alpha1Action's
+    // header comment for the literature (Arnsten lab: PKC-mediated dlPFC
+    // PYRAMIDAL firing suppression) -- deliberately not modeled the same
+    // direction as 5-HT2A despite sharing Gq coupling. No gKEff lever
     // (unlike 5-HT2A) since no K+-conductance-specific citation was found
-    // this session for alpha-1.
+    // this session for alpha-1. Tier 2.4 part 1 correction: same fix as
+    // beta above, same reasoning -- see that comment.
     {
         const float occ = neuromodulatorOccupancy(doseForNorepinephrine, profile.alpha1.ec50, profile.alpha1.hill);
         const float increaseCeiling = std::max(1.0f, profile.alpha1.maxAdaptationIncreaseFold);
-        out.adaptationScale *= (1.0f + (increaseCeiling - 1.0f) * occ);
+        out.adaptationScaleExcitatory *= (1.0f + (increaseCeiling - 1.0f) * occ);
     }
 
     return out;

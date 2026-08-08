@@ -1,22 +1,19 @@
 {
-  "_status": "NEW MECHANISM shape-validation test (Tier 2.2 alpha-2 adrenergic, PRECISION_GAP_CLOSURE_PLAN.md, 2026-08-08) -- first run of the alpha-2 presynaptic-autoreceptor (excitatoryWeightScale) + postsynaptic PFC cAMP-HCN (adaptationScale) pathways, isolated from any real drug's config (same discipline as test_d2_postsynaptic.json/test_5ht1a_autoreceptor.json validating those mechanisms before applying them to a real compound). Not yet run -- CUDA side only verified via brace/paren-balance + cross-layer field-name grep this session (no nvcc available in this environment); this test still needs a real nvcc build + run on the Ubuntu machine before the mechanism can be called validated.",
-  "_reference": "presynaptic_ec50/hill set EQUAL to postsynaptic_ec50/hill -- same illustrative-shape-check choice as D2's postsynaptic split (test_d2_postsynaptic.json), but on WEAKER footing: D2's choice was justified by same-receptor-subtype reasoning (D2 at two synaptic locations); alpha-2's two pathways are both classically alpha-2A but the presynaptic-autoreceptor-vs-postsynaptic-PFC-spine affinity relationship was not confirmed identical in this session's literature search (unlike 5-HT1A's F13714/F15599 ~30x differential, which WAS confirmed and used). Treat this EC50 choice as a first-pass placeholder for shape validation only, not a modeling claim. max_presynaptic_release_reduction and max_postsynaptic_adaptation_reduction both set to 0.5 for a symmetric first-pass check, same illustrative-magnitude caveat as every other new-mechanism suppression fraction in this file (5-HT1A's max_autoreceptor_suppression, D2's max_postsynaptic_ca_reduction).",
-  "drug_name": "Alpha-2 Dual-Pathway Shape-Validation Test",
+  "_status": "NEW MECHANISM shape-validation test (Tier 2.2 completion: beta adrenergic, PRECISION_GAP_CLOSURE_PLAN.md, 2026-08-08) -- isolated from alpha-1 deliberately (testing both together with matching EC50s would tie the mechanism classifier and read as Mixed instead of cleanly validating either one). Not yet run -- CUDA side only verified via brace/paren-balance + parameter type-diff this session (no nvcc available in this environment).",
+  "_reference": "IMPORTANT DIRECTION NOTE: beta INCREASES adaptationScale (more braking, suppressed firing) rather than decreasing it -- literature-grounded (beta1-AR opens the same HCN channels alpha-2 closes; high NE/cAMP-PKA suppresses PFC persistent firing), the opposite direction from D1 despite sharing Gs coupling. max_adaptation_increase=2.0 means adaptationScale rises toward 2x (not toward 0) at saturating occupancy. No literature-sourced NE-specific EC50 found this session -- illustrative placeholder for shape validation only.",
+  "drug_name": "Beta Adrenergic Shape-Validation Test",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
   "neuromodulators": {
-    "Alpha2": {
-      "presynaptic_ec50": 0.005,
-      "presynaptic_hill": 1.0,
-      "max_presynaptic_release_reduction": 0.5,
-      "postsynaptic_ec50": 0.005,
-      "postsynaptic_hill": 1.0,
-      "max_postsynaptic_adaptation_reduction": 0.5
+    "Beta": {
+      "ec50": 0.005,
+      "hill": 1.0,
+      "max_adaptation_increase": 2.0
     }
   },
-  "dose_range": { "min": 0.0, "max": 0.02, "step": 0.002 },
+  "dose_range": { "min": 0.0, "max": 0.004, "step": 0.004 },
   "runs": 8
 }

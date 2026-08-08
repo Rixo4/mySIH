@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include "../simulation/SimulationEngine.h"
 #include "RawMetrics.h"
@@ -18,6 +19,16 @@ struct NeuronMetrics {
     float firingRateHz      = 0.0f;
     float isiMeanMs         = 0.0f;
     float isiVarianceMs     = 0.0f;  // sample variance (÷ n-1)
+
+    // Diagnostic addition (2026-08-08, Tier 2.4 beta/alpha-1 investigation):
+    // mirrors SimulationResult::neuronTypes (1 = excitatory, 0 = inhibitory,
+    // see network::Network.cpp's convention). Added so per-neuron CSV export
+    // can be split by cell type -- needed to test whether a population-level
+    // paradoxical effect (e.g. beta/alpha-1's excitatory reading from a
+    // per-neuron suppressive lever) is driven by inhibitory-neuron dynamics,
+    // without which neuron_stats.csv rows are anonymous and this can't be
+    // checked from report output alone.
+    std::uint8_t neuronType = 1U;
 };
 
 // ─── Network-level raw measurements ──────────────────────────────────────────

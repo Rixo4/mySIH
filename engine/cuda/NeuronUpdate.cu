@@ -538,6 +538,14 @@ __global__ void fusedBatchedStepKernel(
     float nmodGMaxNmdaScale = 1.0f;
     float nmodAdaptationScale = 1.0f;
     float nmodExcitatoryWeightScale = 1.0f;
+    // Tier 2.4 part 1: cell-type-selective addition to nmodAdaptationScale,
+    // mirrors NeuromodulatorGainModifiers::adaptationScaleExcitatory/
+    // adaptationScaleInhibitory exactly -- see that struct's comment for
+    // the full rationale. D1/5-HT2A/alpha-2-postsynaptic keep using the
+    // shared nmodAdaptationScale above (unchanged, already validated);
+    // beta/alpha-1 populate nmodAdaptationScaleExcitatory only.
+    float nmodAdaptationScaleExcitatory = 1.0f;
+    float nmodAdaptationScaleInhibitory = 1.0f;
     {
         // Phase 3c retrofit: SERT/DAT reuptake block dose-amplification --
         // mirrors DrugModel::amplifiedDoseForDopamine/amplifiedDoseForSerotonin
@@ -642,24 +650,30 @@ __global__ void fusedBatchedStepKernel(
         const float a2AdaptFrac = clamp01(launchInfo.alpha2MaxPostsynapticAdaptationReductionFrac);
         nmodAdaptationScale *= (1.0f - a2AdaptFrac * a2PostOcc);
 
-        // BETA (Tier 2.2 completion): INCREASES adaptationScale (more
-        // braking) -- mirror image of D1's/alpha-2-postsynaptic's decrease,
-        // literature-grounded direction reversal (see NeuromodulatorSystem.h's
-        // BetaAction comment), not a naive same-Gs-family copy of D1.
-        // Mirrors NeuromodulatorSystem.cpp's beta block exactly.
+        // BETA (Tier 2.2 completion): INCREASES adaptationScaleExcitatory
+        // (more braking, EXCITATORY NEURONS ONLY) -- mirror image of D1's/
+        // alpha-2-postsynaptic's decrease, literature-grounded direction
+        // reversal (see NeuromodulatorSystem.h's BetaAction comment), not a
+        // naive same-Gs-family copy of D1. Tier 2.4 part 1 correction:
+        // switched from the shared nmodAdaptationScale to the excitatory-
+        // only field -- see NeuromodulatorGainModifiers' comment and Tier
+        // 2.2's writeup (this used to produce a paradoxical population-
+        // level EXCITATORY reading via E/I disinhibition). Mirrors
+        // NeuromodulatorSystem.cpp's beta block exactly.
         const float betaOcc = hillBlockDevice(doseForNorepinephrine, launchInfo.betaEc50, launchInfo.betaHill);
         const float betaIncreaseCeiling = fmaxf(1.0f, launchInfo.betaMaxAdaptationIncreaseFold);
-        nmodAdaptationScale *= (1.0f + (betaIncreaseCeiling - 1.0f) * betaOcc);
+        nmodAdaptationScaleExcitatory *= (1.0f + (betaIncreaseCeiling - 1.0f) * betaOcc);
 
-        // ALPHA-1 (Tier 2.2 completion): INCREASES adaptationScale (more
-        // braking), same lever/target/direction as beta above --
-        // literature-grounded direction reversal (see
-        // NeuromodulatorSystem.h's Alpha1Action comment), not a naive
-        // same-Gq-family copy of 5-HT2A. Mirrors NeuromodulatorSystem.cpp's
+        // ALPHA-1 (Tier 2.2 completion): INCREASES adaptationScaleExcitatory
+        // (more braking, EXCITATORY NEURONS ONLY), same lever family/
+        // direction as beta above -- literature-grounded direction reversal
+        // (see NeuromodulatorSystem.h's Alpha1Action comment), not a naive
+        // same-Gq-family copy of 5-HT2A. Tier 2.4 part 1 correction: same
+        // fix as beta above, same reasoning. Mirrors NeuromodulatorSystem.cpp's
         // alpha-1 block exactly.
         const float a1Occ = hillBlockDevice(doseForNorepinephrine, launchInfo.alpha1Ec50, launchInfo.alpha1Hill);
         const float a1IncreaseCeiling = fmaxf(1.0f, launchInfo.alpha1MaxAdaptationIncreaseFold);
-        nmodAdaptationScale *= (1.0f + (a1IncreaseCeiling - 1.0f) * a1Occ);
+        nmodAdaptationScaleExcitatory *= (1.0f + (a1IncreaseCeiling - 1.0f) * a1Occ);
     }
 
     // Tier 2.1: apply D2's postsynaptic scale to the gCaEff computed
@@ -828,10 +842,19 @@ __global__ void fusedBatchedStepKernel(
     );
 
     if (spike != 0U) {
-        const float adaptStep = ((devicePointers.neuronType[i] == 1U)
+        // Tier 2.4 part 1: apply the cell-type-specific scale (beta/alpha-1,
+        // excitatory-only) alongside the shared nmodAdaptationScale (D1/
+        // 5-HT2A/alpha-2-postsynaptic, both cell types) -- mirrors
+        // BatchedSimulationEngine.cpp's CPU-path cellTypeAdaptScale exactly.
+        const bool isExcitatory = (devicePointers.neuronType[i] == 1U);
+        const float cellTypeAdaptScale = isExcitatory
+            ? nmodAdaptationScaleExcitatory
+            : nmodAdaptationScaleInhibitory;
+        const float adaptStep = (isExcitatory
                                     ? launchInfo.adaptationIncrement
                                     : launchInfo.adaptationIncrement * launchInfo.adaptationInhibitoryScale)
-                                    * nmodAdaptationScale;
+                                    * nmodAdaptationScale
+                                    * cellTypeAdaptScale;
         adapt = fminf(launchInfo.adaptationMaxCurrent, fmaxf(0.0f, adapt + adaptStep));
     }
 

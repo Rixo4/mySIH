@@ -15,12 +15,17 @@ void CsvWriter::writeNeuronStats(
         throw std::runtime_error("Unable to open neuron stats output file: " + filePath);
     }
 
-    out << "neuron_id,spike_count,firing_rate_hz,isi_mean_ms,isi_variance_ms\n";
+    // neuron_type: 1 = excitatory, 0 = inhibitory (see network::Network.cpp's
+    // convention). Added 2026-08-08 as a diagnostic so per-neuron rows can be
+    // split by cell type post-hoc -- without it there was no way to check
+    // whether a population-level effect (e.g. beta/alpha-1's paradoxical
+    // excitatory reading) is driven asymmetrically by one cell type.
+    out << "neuron_id,neuron_type,spike_count,firing_rate_hz,isi_mean_ms,isi_variance_ms\n";
     out << std::fixed << std::setprecision(6);
 
     for (std::size_t i = 0; i < neuronMetrics.size(); ++i) {
         const auto& m = neuronMetrics[i];
-        out << i << ',' << m.spikeCount << ',' << m.firingRateHz << ',' << m.isiMeanMs << ',' << m.isiVarianceMs << '\n';
+        out << i << ',' << static_cast<int>(m.neuronType) << ',' << m.spikeCount << ',' << m.firingRateHz << ',' << m.isiMeanMs << ',' << m.isiVarianceMs << '\n';
     }
 }
 
