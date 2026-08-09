@@ -241,6 +241,20 @@ struct AggregatedStats {
     float meanFirstThirdRateHz    = 0.0f;
     float meanMiddleThirdRateHz   = 0.0f;
     float meanLastThirdRateHz     = 0.0f;
+
+    // Diagnostic addition (2026-08-08, Tier 2.4 investigation): per-dose
+    // mean firing rate split by cell type, averaged across repeats. See
+    // RunResult::excitatoryRateHz/inhibitoryRateHz in main.cpp.
+    float meanExcitatoryRateHz = 0.0f;
+    float meanInhibitoryRateHz = 0.0f;
+
+    // Diagnostic addition (2026-08-08, Tier 2.4 rhythm-hypothesis test):
+    // per-dose mean ISI/ISI-variance split by cell type. See
+    // RunResult::excitatoryIsiMeanMs/etc. in main.cpp.
+    float meanExcitatoryIsiMeanMs = 0.0f;
+    float meanInhibitoryIsiMeanMs = 0.0f;
+    float meanExcitatoryIsiVarMs  = 0.0f;
+    float meanInhibitoryIsiVarMs  = 0.0f;
 };
 
 } // namespace spp::report

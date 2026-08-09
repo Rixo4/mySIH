@@ -526,6 +526,40 @@ std::string buildLiabilityReportText(
                "  no K+-conductance-specific citation found for alpha-1 this session\n"
                "  (PRECISION_GAP_CLOSURE_PLAN.md 2.2).\n";
     }
+    // Tier 2.4 (2026-08-08): permanent, automatic warning -- NOT just a
+    // plan-doc note -- because this report's own "Excitatory"/"Effective"
+    // classification above is easy to misread as "this drug excites
+    // neurons via a classical excitatory pathway", which is NOT what beta/
+    // alpha-1 do. Real-hardware investigation (PRECISION_GAP_CLOSURE_PLAN.md
+    // 2.4) found this network's population firing rate has a NON-MONOTONIC
+    // ("dip-shaped") relationship to per-neuron spike-frequency adaptation
+    // strength: rate is highest at zero adaptation, falls to a minimum
+    // close to this network's own baseline adaptation level, then rises
+    // again in EITHER direction away from that point. Beta/alpha-1 operate
+    // on the rising-again side (increasing adaptation from baseline), which
+    // is why the population-level classification reads "Excitatory" even
+    // though the per-neuron mechanism is doing exactly what it's built to
+    // do (increasing adaptation/braking, confirmed directly from this run's
+    // own drug parameters, not inferred from the population reading below).
+    // This is a confirmed, general property of this network's dynamics
+    // (verified independent of any drug code via a direct adaptation-
+    // increment sweep at dose=0), not a bug in beta/alpha-1's
+    // implementation and not something tuning beta/alpha-1's parameters
+    // can fix. D1/5-HT2A/alpha-2-postsynaptic, which also use the
+    // adaptationScale lever, were separately checked and confirmed NOT
+    // exposed to this same issue -- their reported directions are reliable.
+    if (betaConfigured || alpha1Configured) {
+        out << "- IMPORTANT: the \"Excitatory\"/\"Effective\" classification above for\n"
+               "  Beta/Alpha-1 reflects a documented NON-MONOTONIC network response, not a\n"
+               "  classical excitatory mechanism -- this network's population firing rate\n"
+               "  dips to a minimum near baseline adaptation strength and rises again as\n"
+               "  adaptation is pushed higher OR lower from that point. Beta/Alpha-1 are\n"
+               "  correctly increasing per-neuron adaptation (braking) exactly as designed;\n"
+               "  the population-level rate increase is an emergent network consequence,\n"
+               "  not evidence the drug acts on an excitatory pathway. Confirmed on real\n"
+               "  hardware, independent of any drug-specific code (PRECISION_GAP_CLOSURE_\n"
+               "  PLAN.md Tier 2.4, 2026-08-08 dip characterization).\n";
+    }
     if (fragmentedWindow) {
         out << "- The effective/excitatory window fragmented at one or more tested doses --\n"
                "  see Per-Dose Network State above for the raw per-dose classification behind\n"

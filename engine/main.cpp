@@ -121,6 +121,31 @@ struct RunResult {
     float firstThirdRateHz    = 0.0f;
     float middleThirdRateHz   = 0.0f;
     float lastThirdRateHz     = 0.0f;
+
+    // Diagnostic addition (2026-08-08, Tier 2.4 beta/alpha-1 ISN-hypothesis
+    // investigation): per-run mean firing rate split by cell type, computed
+    // directly from that run's NeuronMetrics (now that NeuronMetrics carries
+    // neuronType -- see analyzer/Metrics.h). Added because there was
+    // previously no reliable way to compare excitatory vs. inhibitory rate
+    // AT A GIVEN DOSE across the whole sweep -- only exportSingleRunArtifacts'
+    // finalNM snapshot (the LAST dose x LAST repeat) ever reached a CSV,
+    // which caused real confusion when manually diffing separate re-runs.
+    // This is computed for every (dose, repeat) pair, not just the last one.
+    float excitatoryRateHz = 0.0f;
+    float inhibitoryRateHz = 0.0f;
+
+    // Diagnostic addition (2026-08-08, Tier 2.4 rhythm-hypothesis test):
+    // per-run mean ISI and ISI variance split by cell type, same pattern
+    // and same motivation as excitatoryRateHz/inhibitoryRateHz above --
+    // tests whether the drug is making excitatory neurons fire MORE
+    // REGULARLY (lower isi_variance_ms) rather than just more/less often,
+    // since two direct hypotheses (I-neuron disinhibition, ISN network
+    // effect) have already been tested and falsified with real celltype
+    // rate data.
+    float excitatoryIsiMeanMs = 0.0f;
+    float inhibitoryIsiMeanMs = 0.0f;
+    float excitatoryIsiVarMs  = 0.0f;
+    float inhibitoryIsiVarMs  = 0.0f;
 };
 
 struct SigmoidFitResult {
@@ -551,6 +576,8 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     std::vector<float> rates,syncs,bursts,burstRates,isis;
     std::vector<float> peakSyncs, burstingPcts, burstDurs, rateStds, silentPcts, lateSilentPcts, earlyRates, lateRates;
     std::vector<float> firstThirdRates, middleThirdRates, lastThirdRates;
+    std::vector<float> excRates, inhRates;
+    std::vector<float> excIsiMean, inhIsiMean, excIsiVar, inhIsiVar;
     rates.reserve(results.size());      syncs.reserve(results.size());
     bursts.reserve(results.size());     isis.reserve(results.size());
     burstRates.reserve(results.size());
@@ -562,6 +589,10 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     firstThirdRates.reserve(results.size());
     middleThirdRates.reserve(results.size());
     lastThirdRates.reserve(results.size());
+    excRates.reserve(results.size());
+    inhRates.reserve(results.size());
+    excIsiMean.reserve(results.size()); inhIsiMean.reserve(results.size());
+    excIsiVar.reserve(results.size());  inhIsiVar.reserve(results.size());
 
     for (const auto& r : results) {
         rates.push_back(r.firingRate);
@@ -580,6 +611,12 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
         firstThirdRates.push_back(r.firstThirdRateHz);
         middleThirdRates.push_back(r.middleThirdRateHz);
         lastThirdRates.push_back(r.lastThirdRateHz);
+        excRates.push_back(r.excitatoryRateHz);
+        inhRates.push_back(r.inhibitoryRateHz);
+        excIsiMean.push_back(r.excitatoryIsiMeanMs);
+        inhIsiMean.push_back(r.inhibitoryIsiMeanMs);
+        excIsiVar.push_back(r.excitatoryIsiVarMs);
+        inhIsiVar.push_back(r.inhibitoryIsiVarMs);
     }
 
     stats.meanRate      = computeMean(rates);      stats.stdRate  = computeStd(rates,  stats.meanRate);
@@ -600,6 +637,12 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     stats.meanFirstThirdRateHz  = computeMean(firstThirdRates);
     stats.meanMiddleThirdRateHz = computeMean(middleThirdRates);
     stats.meanLastThirdRateHz   = computeMean(lastThirdRates);
+    stats.meanExcitatoryRateHz  = computeMean(excRates);
+    stats.meanInhibitoryRateHz  = computeMean(inhRates);
+    stats.meanExcitatoryIsiMeanMs = computeMean(excIsiMean);
+    stats.meanInhibitoryIsiMeanMs = computeMean(inhIsiMean);
+    stats.meanExcitatoryIsiVarMs  = computeMean(excIsiVar);
+    stats.meanInhibitoryIsiVarMs  = computeMean(inhIsiVar);
 
     return stats;
 }
@@ -654,10 +697,16 @@ std::vector<RunResult> runMultipleSimulations(
 // scaling with sweep size: one shared timestep loop, one set of GPU
 // transfers per step, covering the whole sweep at once.
 //
-// Each block gets its own independently-generated network topology (a
+// Each REPEAT gets its own independently-generated network topology (a
 // fresh Network::buildRandom() with its own seed) so that repeats are true
 // biological replicates, not the same network measured three times with
-// only the noise stream varying.
+// only the noise stream varying. As of the 2026-08-08 fix below, that
+// network topology is now held FIXED across all doses within a given
+// repeat -- i.e. dose d=0..N for repeat r=3 all use the same network,
+// only the drug dose differs -- a proper paired/within-subject design.
+// Previously each (dose, repeat) pair got its own fresh network, which
+// confounded dose with network identity (see the seed-formula comment
+// inside this function for the real-hardware evidence that surfaced this).
 std::vector<std::vector<RunResult>> runAllDosesBatched(
     const RuntimeInput& evalInput,
     const std::vector<double>& doses,
@@ -674,7 +723,27 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     // dosing. One template network config is shared as the *statistical*
     // template; each block still gets its own random instantiation.
     const NetworkConfig networkCfgTemplate = buildNetworkConfig(evalInput.config, baseSeed);
-    const spp::simulation::SimulationConfig engineCfg = buildEngineConfig(evalInput.config, baseSeed);
+    spp::simulation::SimulationConfig engineCfg = buildEngineConfig(evalInput.config, baseSeed);
+    // Diagnostic override (2026-08-08, PRECISION_GAP_CLOSURE_PLAN.md Tier
+    // 2.2/2.4 beta/alpha-1 investigation): lets a test config directly set
+    // the network's baseline adaptationIncrement, bypassing the whole
+    // drug/dose pathway entirely -- normally this is only reachable
+    // indirectly via noise_level (buildEngineConfig above). Added
+    // specifically to answer one question: does MORE spike-frequency
+    // adaptation cause MORE or LESS population firing in this network, in
+    // general -- independent of beta/alpha-1's drug-wiring code entirely.
+    // If running at dose=0 (no drug) with adaptationIncrement swept
+    // directly shows rate rising as increment rises, that's a genuine,
+    // general property of this network's dynamics -- not something
+    // specific to how beta/alpha-1 was built, and would mean every OTHER
+    // drug using the adaptation lever (D1, 5-HT2A, alpha-2-postsynaptic)
+    // needs the same scrutiny, not just beta/alpha-1.
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_ADAPTATION_INCREMENT")) {
+        try {
+            const double parsed = std::stod(trim(*envVal));
+            if (parsed >= 0.0) engineCfg.adaptationIncrement = static_cast<float>(parsed);
+        } catch (...) {}
+    }
 
     const ChannelDrugProfile profile{
         static_cast<float>(evalInput.config.ic50_na),
@@ -690,11 +759,34 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     blocks.reserve(doses.size() * static_cast<std::size_t>(runs));
     for (std::size_t d = 0; d < doses.size(); ++d) {
         for (int r = 0; r < runs; ++r) {
-            // Same seed formula as the old per-run loop (baseSeed + dose
-            // offset + run offset), so a given (dose, repeat) pair gets the
-            // same network seed it would have under the old sequential path.
+            // FIX (2026-08-08, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.2/2.4
+            // beta/alpha-1 investigation): this used to be
+            // `baseSeed + d*7919U + r*9973+101` -- i.e. the network-topology
+            // seed depended on the DOSE INDEX `d` as well as the repeat
+            // index `r`. That meant every dose in a sweep got an entirely
+            // fresh, independently-randomized network (different synaptic
+            // wiring, different excitatory/inhibitory assignment) instead of
+            // the SAME network being tested at increasing drug levels --
+            // dose was confounded with network identity. Real-hardware data
+            // showed the tell: excitatory firing rate clustered near-
+            // perfectly by DOSE INDEX PARITY rather than dose magnitude
+            // (odd-index doses ~25.57-25.60 Hz, even-index doses ~26.07-
+            // 26.82 Hz, regardless of the actual dose value), which is the
+            // signature of a seed artifact, not a real dose-response.
+            //
+            // Fix: drop the `d*7919U` term entirely. The network seed now
+            // depends ONLY on the repeat index `r`, so for a given repeat,
+            // the SAME network topology is used across every dose in the
+            // sweep -- a proper paired/within-subject design (one simulated
+            // network, tested at multiple drug levels), while different
+            // repeats (r=0..runs-1) still sample genuinely different random
+            // networks, preserving between-repeat biological-replicate
+            // averaging. This changes dose-eval behavior for every drug
+            // config that uses a multi-point sweep, not just beta/alpha-1 --
+            // any previously-recorded dose-response shape should be treated
+            // as validated under the OLD (confounded) methodology until
+            // re-run under this fix.
             const std::uint32_t seed = baseSeed
-                + static_cast<std::uint32_t>(d * 7919U)
                 + static_cast<std::uint32_t>(r * 9973 + 101);
             blocks.push_back(BatchBlockSpec{static_cast<float>(doses[d]), seed});
         }
@@ -750,6 +842,41 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
             rr.firstThirdRateHz    = netm.firstThirdRateHz;
             rr.middleThirdRateHz   = netm.middleThirdRateHz;
             rr.lastThirdRateHz     = netm.lastThirdRateHz;
+
+            // Diagnostic addition (2026-08-08, Tier 2.4 investigation): split
+            // this run's per-neuron rates by cell type. Computed for EVERY
+            // (dose, repeat) pair here -- unlike finalNM above, which only
+            // ever holds the very last block processed and caused real
+            // confusion when manually comparing separate re-runs against
+            // each other instead of doses within the SAME sweep.
+            double excSum = 0.0, inhSum = 0.0;
+            std::size_t excCnt = 0, inhCnt = 0;
+            // Diagnostic addition (2026-08-08, Tier 2.4 rhythm-hypothesis
+            // test): also accumulate ISI mean/variance by type, same loop,
+            // same NeuronMetrics -- tests whether the drug makes excitatory
+            // neurons fire more REGULARLY (lower isiVarianceMs) rather than
+            // just more often, now that the two direct-mechanism hypotheses
+            // (I-neuron disinhibition, ISN effect) are both ruled out.
+            double excIsiMeanSum = 0.0, inhIsiMeanSum = 0.0;
+            double excIsiVarSum = 0.0, inhIsiVarSum = 0.0;
+            for (const auto& nmi : nm) {
+                if (nmi.neuronType == 1U) {
+                    excSum += nmi.firingRateHz; ++excCnt;
+                    excIsiMeanSum += nmi.isiMeanMs;
+                    excIsiVarSum  += nmi.isiVarianceMs;
+                } else {
+                    inhSum += nmi.firingRateHz; ++inhCnt;
+                    inhIsiMeanSum += nmi.isiMeanMs;
+                    inhIsiVarSum  += nmi.isiVarianceMs;
+                }
+            }
+            rr.excitatoryRateHz = excCnt ? static_cast<float>(excSum / static_cast<double>(excCnt)) : 0.0f;
+            rr.inhibitoryRateHz = inhCnt ? static_cast<float>(inhSum / static_cast<double>(inhCnt)) : 0.0f;
+            rr.excitatoryIsiMeanMs = excCnt ? static_cast<float>(excIsiMeanSum / static_cast<double>(excCnt)) : 0.0f;
+            rr.inhibitoryIsiMeanMs = inhCnt ? static_cast<float>(inhIsiMeanSum / static_cast<double>(inhCnt)) : 0.0f;
+            rr.excitatoryIsiVarMs  = excCnt ? static_cast<float>(excIsiVarSum / static_cast<double>(excCnt)) : 0.0f;
+            rr.inhibitoryIsiVarMs  = inhCnt ? static_cast<float>(inhIsiVarSum / static_cast<double>(inhCnt)) : 0.0f;
+
             perDoseResults[d].push_back(rr);
         }
     }
@@ -1369,12 +1496,33 @@ void runDoseEvaluationMode(
     bool usedGpu = false;
     const auto perDoseResults = runAllDosesBatched(evalInput, doses, runs, baseSeed, &finalNM, &usedGpu);
 
+    // Diagnostic addition (2026-08-08, Tier 2.4 investigation): one row per
+    // dose with the excitatory/inhibitory mean rate split, so this can be
+    // read straight off a SINGLE sweep run instead of manually diffing
+    // separate re-runs (which is what caused confusion earlier this session
+    // -- see PRECISION_GAP_CLOSURE_PLAN.md 2.4's beta/alpha-1 write-up).
+    // Diagnostic addition (2026-08-08, Tier 2.4 rhythm-hypothesis test):
+    // ISI mean/variance split by type added alongside rate -- see
+    // AggregatedStats::meanExcitatoryIsiMeanMs/etc.
+    struct CellTypeRateRow {
+        float dose;
+        float excitatoryRateHz; float inhibitoryRateHz;
+        float excitatoryIsiMeanMs; float inhibitoryIsiMeanMs;
+        float excitatoryIsiVarMs; float inhibitoryIsiVarMs;
+    };
+    std::vector<CellTypeRateRow> cellTypeRates;
+    cellTypeRates.reserve(doses.size());
+
     for(std::size_t i=0; i<doses.size(); ++i) {
         const auto& rr = perDoseResults[i];
         if(rr.empty()) continue;
 
         const AggregatedStats ds = computeStats(rr);
         allRunResults.insert(allRunResults.end(), rr.begin(), rr.end());
+        cellTypeRates.push_back({
+            static_cast<float>(doses[i]), ds.meanExcitatoryRateHz, ds.meanInhibitoryRateHz,
+            ds.meanExcitatoryIsiMeanMs, ds.meanInhibitoryIsiMeanMs,
+            ds.meanExcitatoryIsiVarMs, ds.meanInhibitoryIsiVarMs});
 
         // Build aggregated NetworkMetrics from raw multi-run means
         const NetworkMetrics am = buildAggregatedNetworkMetrics(ds);
@@ -1437,6 +1585,27 @@ void runDoseEvaluationMode(
             evalInput.config.output_folder + "/network_metrics.csv", networkRecords);
         CsvWriter::writeNeuronStats(
             evalInput.config.output_folder + "/neuron_stats.csv", finalNM);
+
+        // Diagnostic addition (2026-08-08, Tier 2.4 investigation): see
+        // cellTypeRates construction above. Written directly here rather
+        // than through CsvWriter since it's a standalone diagnostic export,
+        // not part of the stable report schema other code depends on.
+        {
+            std::ofstream ctOut(evalInput.config.output_folder + "/celltype_rates.csv",
+                                 std::ios::out | std::ios::trunc);
+            if (ctOut.is_open()) {
+                ctOut << "dose,excitatory_rate_hz,inhibitory_rate_hz,"
+                         "excitatory_isi_mean_ms,inhibitory_isi_mean_ms,"
+                         "excitatory_isi_var_ms,inhibitory_isi_var_ms\n";
+                ctOut << std::fixed << std::setprecision(6);
+                for (const auto& row : cellTypeRates) {
+                    ctOut << row.dose << ',' << row.excitatoryRateHz << ',' << row.inhibitoryRateHz << ','
+                          << row.excitatoryIsiMeanMs << ',' << row.inhibitoryIsiMeanMs << ','
+                          << row.excitatoryIsiVarMs << ',' << row.inhibitoryIsiVarMs << '\n';
+                }
+            }
+        }
+
         writeLiabilityReport(
             evalInput.config.output_folder + "/liability_screening_report.txt",
             report, stabilityStats, runs, evalInput, engineInputMode, usedGpu);
