@@ -104,6 +104,54 @@ struct TransporterAction {
     float maxExtensionFold = 1.0f;   // literature-bounded ceiling on decay-tau stretch
 };
 
+// ─── Tier 2.4 part 2: NMDA activity-dependent open-channel trapping ────────
+// Ketamine's real interneuron-selectivity is NOT a receptor-density
+// difference -- it is a kinetic consequence of ketamine being an OPEN-
+// CHANNEL blocker: interneurons fire tonically at higher rates than
+// pyramidal cells, so their NMDA channels sit open more of the time, giving
+// ketamine more opportunity to bind and get trapped inside. Pyramidal cells
+// fire less often, so their channels are blocked less. This is distinct
+// from the flat `nmda.ec50/hill` Block mechanism above, which applies the
+// identical fractional block to every neuron regardless of its own firing
+// state. (Glasgow et al., J Neurosci 2017 -- see
+// PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 for the full literature note.)
+//
+// Deliberately kept a DRUG-profile property (here), not an intrinsic
+// receptor property like GABA-A desensitization (Synapse.h's
+// DesensitizationConfig, which lives on the run-level SimulationConfig
+// instead) -- memantine, the other NMDA blocker in this project's set,
+// does NOT show this same activity-dependent interneuron lean per the same
+// literature, so this cannot be a fixed property of the NMDA receptor
+// itself; it has to travel with ketamine's own profile.
+//
+// Modeled as a persistent per-neuron 0..1 "trapped channel fraction" T,
+// evolving each timestep as:
+//   dT/dt = (1/tauTrapMs) * occupancy(dose) * drive * (1-T) - (1/tauUntrapMs) * T
+// where occupancy(dose) is the ordinary Hill occupancy already computed
+// from nmda.ec50/hill above (reused, not duplicated) and `drive` is this
+// neuron's own raw (pre-block) NMDA conductance, 0..1-ish -- the same
+// "existing conductance as activation proxy" trick already used for GABA-A
+// desensitization (see DesensitizationConfig comment in Synapse.h). NMDA's
+// effective residual becomes (1-T) instead of the flat (1-occupancy) when
+// this is enabled, so block strength is driven by each neuron's own
+// activity history, not just dose -- no cell-type flag anywhere; higher-
+// firing neurons end up more blocked purely because they fire more.
+//
+// Deliberately opt-in / off by default (enabled=false): nmda.mechanism ==
+// Block with this left disabled reproduces today's exact flat-block
+// behavior byte-identically (the original test_ketamine.json, memantine,
+// dextromethorphan, felbamate all keep working unchanged unless a test
+// explicitly opts in). tauTrapMs/tauUntrapMs below are literature-informed
+// STARTING ESTIMATES, not validated rate constants -- only the *shape* of
+// the mechanism (activity-dependent trapping, fast-on/slow-off) is
+// literature-grounded; the exact numbers need real domain-expert
+// (electrophysiology) review before being treated as a validated claim.
+struct NmdaActivityDependentBlock {
+    bool enabled = false;
+    float tauTrapMs = 300.0f;     // fast: binding while a drug-occupied channel is open
+    float tauUntrapMs = 6000.0f;  // slow: ketamine's hallmark "trapping blocker" off-rate
+};
+
 // One drug's full receptor pharmacology: an action per receptor type. A drug
 // that only touches one receptor leaves the other three at mechanism None.
 struct ReceptorDrugProfile {
@@ -111,6 +159,11 @@ struct ReceptorDrugProfile {
     ReceptorAction nmda;    // typically Block (e.g. ketamine, memantine) or None
     ReceptorAction gabaA;   // typically Potentiate (benzos/barbiturates) or None
     ReceptorAction gabaB;   // typically Agonist (baclofen) or None
+
+    // Tier 2.4 part 2: opt-in activity-dependent refinement of `nmda` above
+    // -- see NmdaActivityDependentBlock comment. Only meaningful when
+    // nmda.mechanism == Block; ignored otherwise.
+    NmdaActivityDependentBlock nmdaActivityBlock;
 
     // Phase 3a additions -- see TransporterAction comment above. All default
     // to None/inert.

@@ -1,19 +1,20 @@
 {
-  "_status": "NEW MECHANISM shape-validation test (Tier 2.2 completion: beta adrenergic, PRECISION_GAP_CLOSURE_PLAN.md, 2026-08-08) -- isolated from alpha-1 deliberately (testing both together with matching EC50s would tie the mechanism classifier and read as Mixed instead of cleanly validating either one). Not yet run -- CUDA side only verified via brace/paren-balance + parameter type-diff this session (no nvcc available in this environment).",
-  "_reference": "IMPORTANT DIRECTION NOTE: beta INCREASES adaptationScale (more braking, suppressed firing) rather than decreasing it -- literature-grounded (beta1-AR opens the same HCN channels alpha-2 closes; high NE/cAMP-PKA suppresses PFC persistent firing), the opposite direction from D1 despite sharing Gs coupling. max_adaptation_increase=2.0 means adaptationScale rises toward 2x (not toward 0) at saturating occupancy. No literature-sourced NE-specific EC50 found this session -- illustrative placeholder for shape validation only.",
-  "drug_name": "Beta Adrenergic Shape-Validation Test",
+  "_status": "New test (2026-08-09, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2): exercises ketamine's activity-dependent NMDA trapping mechanism (drug::NmdaActivityDependentBlock, ReceptorDrugProfile.h) -- opt-in, so this is a SEPARATE file from test_ketamine.json rather than an edit to it. test_ketamine.json keeps its original flat-Hill-block behavior byte-identical (regression safety); this file is where the new interneuron-selectivity-via-firing-activity mechanism gets exercised. tauTrapMs/tauUntrapMs below are literature-informed STARTING ESTIMATES (see ReceptorDrugProfile.h comment), not validated rate constants -- compare celltype_rates.csv output against test_ketamine.json's flat-block run at the same doses to see whether the activity-dependent version actually produces the expected interneuron > pyramidal block asymmetry before treating any liability read from this file as more than a mechanism smoke test.",
+  "drug_name": "Ketamine (activity-dependent NMDA trapping)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "neuromodulators": {
-    "Beta": {
-      "ec50": 0.005,
+  "receptors": {
+    "NMDA": {
+      "ec50": 0.5,
       "hill": 1.0,
-      "max_adaptation_increase": 2.0
+      "activity_dependent": true,
+      "trap_tau_ms": 300.0,
+      "untrap_tau_ms": 6000.0
     }
   },
-  "dose_range": { "min": 0.0, "max": 0.02, "step": 0.002 },
+  "dose_range": { "min": 0.0, "max": 2.5, "step": 0.25 },
   "runs": 8
 }

@@ -74,6 +74,13 @@ struct SimulationConfig {
     double hill_ampa              = 1.0;
     double ic50_nmda              = 1.0e9;
     double hill_nmda              = 1.0;
+    // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping -- see
+    // ReceptorDrugProfile.h's NmdaActivityDependentBlock comment. Opt-in /
+    // off by default, so an unconfigured drug gets today's exact flat-block
+    // behavior.
+    bool nmda_activity_dependent  = false;
+    double nmda_trap_tau_ms       = 300.0;
+    double nmda_untrap_tau_ms     = 6000.0;
     double ec50_gabaA             = 1.0e9;
     double hill_gabaA             = 1.0;
     double max_potentiation_gabaA = 1.0;

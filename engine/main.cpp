@@ -364,6 +364,12 @@ ReceptorDrugProfile buildReceptorProfile(const SimulationConfig& cfg) {
     profile.nmda.ec50      = static_cast<float>(cfg.ic50_nmda);
     profile.nmda.hill      = static_cast<float>(cfg.hill_nmda);
 
+    // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping, see
+    // ReceptorDrugProfile.h's NmdaActivityDependentBlock comment.
+    profile.nmdaActivityBlock.enabled     = cfg.nmda_activity_dependent;
+    profile.nmdaActivityBlock.tauTrapMs   = static_cast<float>(cfg.nmda_trap_tau_ms);
+    profile.nmdaActivityBlock.tauUntrapMs = static_cast<float>(cfg.nmda_untrap_tau_ms);
+
     profile.gabaA.mechanism             = ReceptorMechanism::Potentiate;
     profile.gabaA.ec50                  = static_cast<float>(cfg.ec50_gabaA);
     profile.gabaA.hill                  = static_cast<float>(cfg.hill_gabaA);
@@ -1149,6 +1155,13 @@ static bool loadDrugConfigFromJsonFile(
         if(nmdaP!=c.npos){
             if(auto n=extractJsonNumber(c,"ec50",nmdaP);n) out.config.ic50_nmda=*n;
             if(auto h=extractJsonNumber(c,"hill",nmdaP);h) out.config.hill_nmda=*h;
+            // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping,
+            // see ReceptorDrugProfile.h's NmdaActivityDependentBlock
+            // comment. Opt-in -- a drug config that never mentions these
+            // keys gets today's exact flat-block behavior.
+            if(auto b=extractJsonBool(c,"activity_dependent",nmdaP);b) out.config.nmda_activity_dependent=*b;
+            if(auto n=extractJsonNumber(c,"trap_tau_ms",nmdaP);n) out.config.nmda_trap_tau_ms=*n;
+            if(auto n=extractJsonNumber(c,"untrap_tau_ms",nmdaP);n) out.config.nmda_untrap_tau_ms=*n;
         }
         const auto gabaAP=c.find("\"GABA_A\"",rcPos);
         if(gabaAP!=c.npos){

@@ -317,7 +317,14 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             config_.vesiclePoolReserveSize,
             config_.vesiclePoolRrpRefillTauMs,
             config_.vesiclePoolReserveRefillTauMs,
-            config_.vesiclePoolCalciumFactor
+            config_.vesiclePoolCalciumFactor,
+            // Tier 2.4 part 2: NMDA activity-dependent trapping (ketamine
+            // interneuron-selectivity) -- same receptorProfile_
+            // passthrough pattern as every other mechanism above. See
+            // ReceptorDrugProfile.h's NmdaActivityDependentBlock comment.
+            static_cast<int>(receptorProfile_.nmdaActivityBlock.enabled),
+            receptorProfile_.nmdaActivityBlock.tauTrapMs,
+            receptorProfile_.nmdaActivityBlock.tauUntrapMs
         );
 #endif
     }
@@ -390,6 +397,21 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
         poolState.reserve = vesiclePoolConfig.reserveSize;
     }
     std::vector<float> releaseScales(totalNeurons_, 1.0f);
+
+    // Tier 2.4 part 2: NMDA activity-dependent trapping (ketamine
+    // interneuron-selectivity) -- persistent per-neuron 0..1 "trapped
+    // channel fraction", same storage pattern as vesiclePoolStates above.
+    // See ReceptorDrugProfile.h's NmdaActivityDependentBlock comment for
+    // the design. Kept off receptorProfile_ (a drug property, not an
+    // intrinsic receptor one -- see that comment for why), so it's gated
+    // on nmda.mechanism == Block AND nmdaActivityBlock.enabled, not a
+    // config_ flag like desensitization above.
+    std::vector<float> nmdaTrapped(totalNeurons_, 0.0f);
+    const bool nmdaActivityDependentOn =
+        receptorProfile_.nmda.mechanism == drug::ReceptorMechanism::Block &&
+        receptorProfile_.nmdaActivityBlock.enabled;
+    const float nmdaTrapTauMs = std::max(1.0f, receptorProfile_.nmdaActivityBlock.tauTrapMs);
+    const float nmdaUntrapTauMs = std::max(1.0f, receptorProfile_.nmdaActivityBlock.tauUntrapMs);
 
     // Per-(block, type) Hill-equation block fractions, recomputed once per
     // timestep instead of once per neuron. Index = block * 2 + type
@@ -645,8 +667,29 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
             );
             synapticEff[i].gGABAaEff =
                 config_.gMaxGABAa * receptorConductances[i].gGABAa * rMods.gabaAPotentiation;
+
+            // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping,
+            // overriding the flat rMods.nmdaResidual with a per-neuron
+            // trapped-channel-fraction residual when enabled -- see
+            // ReceptorDrugProfile.h's NmdaActivityDependentBlock comment.
+            // occupancy reuses the same Hill fraction rMods.nmdaResidual is
+            // built from (1-nmdaResidual) instead of recomputing hillBlock.
+            // drive = this neuron's own raw (pre-block) NMDA conductance,
+            // same activation-proxy trick already used for GABA-A
+            // desensitization above.
+            float nmdaResidualEff = rMods.nmdaResidual;
+            if (nmdaActivityDependentOn) {
+                const float occupancy = 1.0f - rMods.nmdaResidual;
+                const float drive = receptorConductances[i].gNMDA;
+                float trapped = nmdaTrapped[i];
+                trapped += (config_.dtMs / nmdaTrapTauMs) * occupancy * drive * (1.0f - trapped)
+                         - (config_.dtMs / nmdaUntrapTauMs) * trapped;
+                trapped = std::clamp(trapped, 0.0f, 1.0f);
+                nmdaTrapped[i] = trapped;
+                nmdaResidualEff = std::max(0.0f, 1.0f - trapped);
+            }
             synapticEff[i].gNMDAEff =
-                config_.gMaxNMDA * nMods.gMaxNmdaScale * receptorConductances[i].gNMDA * rMods.nmdaResidual * nMods.excitatoryWeightScale;
+                config_.gMaxNMDA * nMods.gMaxNmdaScale * receptorConductances[i].gNMDA * nmdaResidualEff * nMods.excitatoryWeightScale;
             synapticEff[i].gGABAbEff =
                 config_.gMaxGABAb * receptorConductances[i].gGABAb +
                 config_.gMaxGABAbAgonist * rMods.gabaBAgonistActivation;

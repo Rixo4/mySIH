@@ -210,6 +210,18 @@ struct BatchedStepLaunchInfo {
     float vesiclePoolRrpRefillTauMs = 1500.0f;
     float vesiclePoolReserveRefillTauMs = 20000.0f;
     float vesiclePoolCalciumFactor = 1.0f;
+
+    // Tier 2.4 part 2: NMDA activity-dependent trapping (ketamine
+    // interneuron-selectivity) -- mirrors
+    // drug::NmdaActivityDependentBlock (ReceptorDrugProfile.h) exactly.
+    // Persistent per-neuron state (BatchedStepDevicePointers::nmdaTrapped
+    // below), same reasoning as desensitization's gabaADesensitization --
+    // trapped-channel fraction has to persist across steps, it isn't a
+    // stateless function of dose. enabled is an int for the same POD-
+    // copied-to-device reason as vesiclePoolEnabled above.
+    int nmdaActivityBlockEnabled = 0;
+    float nmdaActivityBlockTauTrapMs = 300.0f;
+    float nmdaActivityBlockTauUntrapMs = 6000.0f;
 };
 
 struct BatchedStepDevicePointers {
@@ -254,6 +266,12 @@ struct BatchedStepDevicePointers {
     // packed 8-wide receptor state block above since it's one value instead
     // of a decay/rise pair.
     float* gabaADesensitization = nullptr;
+
+    // Tier 2.4 part 2: persistent per-neuron NMDA "trapped channel
+    // fraction" (0..1), mirrors drug::NmdaActivityDependentBlock's design
+    // (ReceptorDrugProfile.h) exactly -- one float per neuron, same
+    // separate-single-value storage pattern as gabaADesensitization above.
+    float* nmdaTrapped = nullptr;
 
     // Phase 3c: vesicle pool release-scale ring buffer, parallel to
     // delayBuffer above (same neuronCount*delaySteps shape, same indexing).

@@ -780,7 +780,25 @@ __global__ void fusedBatchedStepKernel(
     }
     float nmdaResidual = 1.0f;
     if (launchInfo.nmdaMechanism == 1) { // Block
-        nmdaResidual = fmaxf(0.0f, 1.0f - hillBlockDevice(dose, launchInfo.nmdaEc50, launchInfo.nmdaHill));
+        const float nmdaOccupancy = hillBlockDevice(dose, launchInfo.nmdaEc50, launchInfo.nmdaHill);
+        if (launchInfo.nmdaActivityBlockEnabled != 0) {
+            // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping
+            // -- mirrors BatchedSimulationEngine.cpp's CPU loop exactly
+            // (same occupancy*drive trap-rate formula; drive = this
+            // thread's own raw pre-block NMDA conductance gNMDARaw,
+            // already computed above). See ReceptorDrugProfile.h's
+            // NmdaActivityDependentBlock comment for the full design.
+            const float tauTrap = fmaxf(1.0f, launchInfo.nmdaActivityBlockTauTrapMs);
+            const float tauUntrap = fmaxf(1.0f, launchInfo.nmdaActivityBlockTauUntrapMs);
+            float trapped = devicePointers.nmdaTrapped[i];
+            trapped += (launchInfo.dtMs / tauTrap) * nmdaOccupancy * gNMDARaw * (1.0f - trapped)
+                     - (launchInfo.dtMs / tauUntrap) * trapped;
+            trapped = clamp01(trapped);
+            devicePointers.nmdaTrapped[i] = trapped;
+            nmdaResidual = fmaxf(0.0f, 1.0f - trapped);
+        } else {
+            nmdaResidual = fmaxf(0.0f, 1.0f - nmdaOccupancy);
+        }
     }
     float gabaAPotentiation = 1.0f;
     if (launchInfo.gabaAMechanism == 2) { // Potentiate
@@ -1147,6 +1165,12 @@ struct CudaSimulator::DeviceBuffers {
     int batchedNmdaMechanism = 0;
     float batchedNmdaEc50 = 1.0e9f;
     float batchedNmdaHill = 1.0f;
+    // Tier 2.4 part 2: NMDA activity-dependent trapping shared scalars --
+    // same storage pattern as the other NMDA fields above. Persistent
+    // per-neuron buffer declared near batchedGabaADesensitization below.
+    int batchedNmdaActivityBlockEnabled = 0;
+    float batchedNmdaActivityBlockTauTrapMs = 300.0f;
+    float batchedNmdaActivityBlockTauUntrapMs = 6000.0f;
     int batchedGabaAMechanism = 0;
     float batchedGabaAEc50 = 1.0e9f;
     float batchedGabaAHill = 1.0f;
@@ -1171,6 +1195,12 @@ struct CudaSimulator::DeviceBuffers {
     float batchedDesensitizationTauDesenseMs = 30000.0f;
     float batchedDesensitizationTauRecoveryMs = 124000.0f;
     float batchedDesensitizationMaxAttenuation = 0.9f;
+
+    // Tier 2.4 part 2: NMDA activity-dependent trapping -- persistent
+    // per-neuron 0..1 "trapped channel fraction", same separate-single-
+    // float-allocation storage pattern as batchedGabaADesensitization
+    // above (see ReceptorDrugProfile.h's NmdaActivityDependentBlock).
+    float* batchedNmdaTrapped = nullptr;
 
     // Phase 3c: neuromodulator gain -- stateless (no persistent per-neuron
     // buffer, unlike desensitization above), same shared-scalar storage
@@ -1349,6 +1379,7 @@ CudaSimulator::CudaSimulator(std::size_t neuronCount)
             cudaFree(buffers_->batchedSpikeHistory);
             cudaFree(buffers_->batchedReceptorState);
             cudaFree(buffers_->batchedGabaADesensitization);
+            cudaFree(buffers_->batchedNmdaTrapped);
             cudaFree(buffers_->batchedReleaseScale);
             cudaFree(buffers_->batchedVesicleRrp);
             cudaFree(buffers_->batchedVesicleReserve);
@@ -1401,6 +1432,7 @@ CudaSimulator::~CudaSimulator() {
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
     cudaFree(buffers_->batchedGabaADesensitization);
+    cudaFree(buffers_->batchedNmdaTrapped);
     cudaFree(buffers_->batchedReleaseScale);
     cudaFree(buffers_->batchedVesicleRrp);
     cudaFree(buffers_->batchedVesicleReserve);
@@ -1695,7 +1727,12 @@ void CudaSimulator::initializeBatchedSimulation(
     float vesiclePoolReserveSize,
     float vesiclePoolRrpRefillTauMs,
     float vesiclePoolReserveRefillTauMs,
-    float vesiclePoolCalciumFactor
+    float vesiclePoolCalciumFactor,
+    // Tier 2.4 part 2: NMDA activity-dependent trapping -- see
+    // NeuronUpdate.h's BatchedStepLaunchInfo comment.
+    int nmdaActivityBlockEnabled,
+    float nmdaActivityBlockTauTrapMs,
+    float nmdaActivityBlockTauUntrapMs
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1737,6 +1774,7 @@ void CudaSimulator::initializeBatchedSimulation(
     cudaFree(buffers_->batchedSpikeHistory);
     cudaFree(buffers_->batchedReceptorState);
     cudaFree(buffers_->batchedGabaADesensitization);
+    cudaFree(buffers_->batchedNmdaTrapped);
     cudaFree(buffers_->batchedReleaseScale);
     cudaFree(buffers_->batchedVesicleRrp);
     cudaFree(buffers_->batchedVesicleReserve);
@@ -1774,6 +1812,9 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedNmdaMechanism = nmdaMechanism;
     buffers_->batchedNmdaEc50 = nmdaEc50;
     buffers_->batchedNmdaHill = nmdaHill;
+    buffers_->batchedNmdaActivityBlockEnabled = nmdaActivityBlockEnabled;
+    buffers_->batchedNmdaActivityBlockTauTrapMs = nmdaActivityBlockTauTrapMs;
+    buffers_->batchedNmdaActivityBlockTauUntrapMs = nmdaActivityBlockTauUntrapMs;
     buffers_->batchedGabaAMechanism = gabaAMechanism;
     buffers_->batchedGabaAEc50 = gabaAEc50;
     buffers_->batchedGabaAHill = gabaAHill;
@@ -1877,6 +1918,12 @@ void CudaSimulator::initializeBatchedSimulation(
     checkCuda(cudaMalloc(&buffers_->batchedGabaADesensitization, floatBytes), "cudaMalloc batchedGabaADesensitization");
     checkCuda(cudaMemset(buffers_->batchedGabaADesensitization, 0, floatBytes), "memset batchedGabaADesensitization");
 
+    // Tier 2.4 part 2: NMDA activity-dependent trapping -- persistent
+    // per-neuron 0..1 state, zero-initialized (fresh/untrapped), same
+    // pattern as batchedGabaADesensitization above.
+    checkCuda(cudaMalloc(&buffers_->batchedNmdaTrapped, floatBytes), "cudaMalloc batchedNmdaTrapped");
+    checkCuda(cudaMemset(buffers_->batchedNmdaTrapped, 0, floatBytes), "memset batchedNmdaTrapped");
+
     // Phase 3c: vesicle pool dynamics. releaseScale can't be zero-memset
     // like the state above -- its no-op value is 1.0 (multiplicative
     // passthrough, see NeurotransmitterPool.h's baseline-preservation
@@ -1963,6 +2010,9 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.nmdaMechanism = buffers_->batchedNmdaMechanism;
     launchInfo.nmdaEc50 = buffers_->batchedNmdaEc50;
     launchInfo.nmdaHill = buffers_->batchedNmdaHill;
+    launchInfo.nmdaActivityBlockEnabled = buffers_->batchedNmdaActivityBlockEnabled;
+    launchInfo.nmdaActivityBlockTauTrapMs = buffers_->batchedNmdaActivityBlockTauTrapMs;
+    launchInfo.nmdaActivityBlockTauUntrapMs = buffers_->batchedNmdaActivityBlockTauUntrapMs;
     launchInfo.gabaAMechanism = buffers_->batchedGabaAMechanism;
     launchInfo.gabaAEc50 = buffers_->batchedGabaAEc50;
     launchInfo.gabaAHill = buffers_->batchedGabaAHill;
@@ -2069,6 +2119,7 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     devicePointers.receptorGabaBDecay = buffers_->batchedReceptorGabaBDecay;
     devicePointers.receptorGabaBRise = buffers_->batchedReceptorGabaBRise;
     devicePointers.gabaADesensitization = buffers_->batchedGabaADesensitization;
+    devicePointers.nmdaTrapped = buffers_->batchedNmdaTrapped;
     devicePointers.releaseScale = buffers_->batchedReleaseScale;
     devicePointers.vesicleRrp = buffers_->batchedVesicleRrp;
     devicePointers.vesicleReserve = buffers_->batchedVesicleReserve;

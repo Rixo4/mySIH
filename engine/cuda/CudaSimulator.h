@@ -202,7 +202,15 @@ public:
         float vesiclePoolReserveSize,
         float vesiclePoolRrpRefillTauMs,
         float vesiclePoolReserveRefillTauMs,
-        float vesiclePoolCalciumFactor
+        float vesiclePoolCalciumFactor,
+        // Tier 2.4 part 2: NMDA activity-dependent trapping (ketamine
+        // interneuron-selectivity) -- see NeuronUpdate.h's
+        // BatchedStepLaunchInfo comment / ReceptorDrugProfile.h's
+        // NmdaActivityDependentBlock for the design. int for the same
+        // POD-copied-to-device reason as vesiclePoolEnabled above.
+        int nmdaActivityBlockEnabled,
+        float nmdaActivityBlockTauTrapMs,
+        float nmdaActivityBlockTauUntrapMs
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

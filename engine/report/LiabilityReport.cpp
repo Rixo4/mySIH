@@ -560,6 +560,26 @@ std::string buildLiabilityReportText(
                "  hardware, independent of any drug-specific code (PRECISION_GAP_CLOSURE_\n"
                "  PLAN.md Tier 2.4, 2026-08-08 dip characterization).\n";
     }
+    // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping --
+    // report-honesty note, same reasoning as the beta/alpha-1 block above
+    // (the caveat needs to travel with the report output itself, not just
+    // live in the plan doc). Only the *shape* of this mechanism (activity-
+    // dependent trapping vs. a flat dose-only block) is literature-
+    // grounded (Glasgow et al., J Neurosci 2017); the tauTrapMs/
+    // tauUntrapMs rate constants are starting estimates pending real
+    // domain-expert (electrophysiology) review.
+    if (evalInput.config.ic50_nmda < kReceptorInertThreshold && evalInput.config.nmda_activity_dependent) {
+        out << "- IMPORTANT: NMDA block in this run uses the activity-dependent trapping\n"
+               "  model (ketamine's interneuron-selectivity mechanism), not a flat dose-only\n"
+               "  block -- each neuron's own block strength depends on how often its NMDA\n"
+               "  channels have been open recently, so higher-firing neurons end up more\n"
+               "  blocked purely from their own activity, with no cell-type flag anywhere.\n"
+               "  Only the SHAPE of this mechanism is literature-grounded (Glasgow et al.,\n"
+               "  J Neurosci 2017); the trap/untrap time-constant VALUES are starting\n"
+               "  estimates, not validated rate constants -- treat any liability read\n"
+               "  driven primarily by this lever as provisional pending real\n"
+               "  electrophysiology review (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
+    }
     if (fragmentedWindow) {
         out << "- The effective/excitatory window fragmented at one or more tested doses --\n"
                "  see Per-Dose Network State above for the raw per-dose classification behind\n"
