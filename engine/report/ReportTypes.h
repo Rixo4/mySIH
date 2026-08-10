@@ -262,6 +262,15 @@ struct AggregatedStats {
     float meanInhibitoryIsiMeanMs = 0.0f;
     float meanExcitatoryIsiVarMs  = 0.0f;
     float meanInhibitoryIsiVarMs  = 0.0f;
+
+    // Diagnostic addition (2026-08-09, Tier 2.4 part 2 ketamine
+    // investigation): early-vs-late rate split by cell type, averaged
+    // across repeats. See RunResult::excitatoryEarlyRateHz/etc. in
+    // main.cpp.
+    float meanExcitatoryEarlyRateHz = 0.0f;
+    float meanExcitatoryLateRateHz  = 0.0f;
+    float meanInhibitoryEarlyRateHz = 0.0f;
+    float meanInhibitoryLateRateHz  = 0.0f;
 };
 
 } // namespace spp::report

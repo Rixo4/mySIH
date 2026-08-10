@@ -146,6 +146,22 @@ struct RunResult {
     float inhibitoryIsiMeanMs = 0.0f;
     float excitatoryIsiVarMs  = 0.0f;
     float inhibitoryIsiVarMs  = 0.0f;
+
+    // Diagnostic addition (2026-08-09, Tier 2.4 part 2 ketamine
+    // investigation): early-vs-late firing rate split by cell type, same
+    // midpoint-of-duration windowing as earlyWindowRateHz/lateWindowRateHz
+    // above (population-wide), just split by neuronType instead. Built to
+    // directly check whether adaptationInhibitoryScale (SimulationEngine.h,
+    // currently 0.5) is actually producing less rate sag for inhibitory
+    // neurons than excitatory ones -- the "do interneurons behave like
+    // marathoners" question raised while diagnosing why the new NMDA
+    // activity-dependent trapping mechanism showed no interneuron
+    // selectivity (celltype_rates.csv showed near-identical exc/inh rates
+    // at every dose).
+    float excitatoryEarlyRateHz = 0.0f;
+    float excitatoryLateRateHz  = 0.0f;
+    float inhibitoryEarlyRateHz = 0.0f;
+    float inhibitoryLateRateHz  = 0.0f;
 };
 
 struct SigmoidFitResult {
@@ -584,6 +600,7 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     std::vector<float> firstThirdRates, middleThirdRates, lastThirdRates;
     std::vector<float> excRates, inhRates;
     std::vector<float> excIsiMean, inhIsiMean, excIsiVar, inhIsiVar;
+    std::vector<float> excEarlyRates, excLateRates, inhEarlyRates, inhLateRates;
     rates.reserve(results.size());      syncs.reserve(results.size());
     bursts.reserve(results.size());     isis.reserve(results.size());
     burstRates.reserve(results.size());
@@ -623,6 +640,10 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
         inhIsiMean.push_back(r.inhibitoryIsiMeanMs);
         excIsiVar.push_back(r.excitatoryIsiVarMs);
         inhIsiVar.push_back(r.inhibitoryIsiVarMs);
+        excEarlyRates.push_back(r.excitatoryEarlyRateHz);
+        excLateRates.push_back(r.excitatoryLateRateHz);
+        inhEarlyRates.push_back(r.inhibitoryEarlyRateHz);
+        inhLateRates.push_back(r.inhibitoryLateRateHz);
     }
 
     stats.meanRate      = computeMean(rates);      stats.stdRate  = computeStd(rates,  stats.meanRate);
@@ -649,6 +670,10 @@ AggregatedStats computeStats(const std::vector<RunResult>& results) {
     stats.meanInhibitoryIsiMeanMs = computeMean(inhIsiMean);
     stats.meanExcitatoryIsiVarMs  = computeMean(excIsiVar);
     stats.meanInhibitoryIsiVarMs  = computeMean(inhIsiVar);
+    stats.meanExcitatoryEarlyRateHz = computeMean(excEarlyRates);
+    stats.meanExcitatoryLateRateHz  = computeMean(excLateRates);
+    stats.meanInhibitoryEarlyRateHz = computeMean(inhEarlyRates);
+    stats.meanInhibitoryLateRateHz  = computeMean(inhLateRates);
 
     return stats;
 }
@@ -748,6 +773,24 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
         try {
             const double parsed = std::stod(trim(*envVal));
             if (parsed >= 0.0) engineCfg.adaptationIncrement = static_cast<float>(parsed);
+        } catch (...) {}
+    }
+    // Diagnostic override (2026-08-09, Tier 2.4 part 2 ketamine
+    // investigation): lets a test config directly force
+    // adaptationInhibitoryScale to an extreme value (e.g. 0.0 -- inhibitory
+    // neurons don't adapt AT ALL), bypassing the normal fixed 0.50f
+    // buildEngineConfig sets above. Purpose: check whether this lever has
+    // ANY power to separate excitatory/inhibitory early-vs-late firing
+    // rates in this network, before concluding the whole
+    // adaptationInhibitoryScale approach is the wrong lever entirely. If
+    // even 0.0 (the most extreme possible setting) fails to produce a
+    // visible early/late gap between cell types, that points at something
+    // bigger than "turn the dial further" -- e.g. the network's recurrent
+    // E/I coupling washing out individual-neuron parameter differences.
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_ADAPTATION_INHIBITORY_SCALE")) {
+        try {
+            const double parsed = std::stod(trim(*envVal));
+            if (parsed >= 0.0) engineCfg.adaptationInhibitoryScale = static_cast<float>(parsed);
         } catch (...) {}
     }
 
@@ -882,6 +925,34 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
             rr.inhibitoryIsiMeanMs = inhCnt ? static_cast<float>(inhIsiMeanSum / static_cast<double>(inhCnt)) : 0.0f;
             rr.excitatoryIsiVarMs  = excCnt ? static_cast<float>(excIsiVarSum / static_cast<double>(excCnt)) : 0.0f;
             rr.inhibitoryIsiVarMs  = inhCnt ? static_cast<float>(inhIsiVarSum / static_cast<double>(inhCnt)) : 0.0f;
+
+            // Diagnostic addition (2026-08-09, Tier 2.4 part 2 ketamine
+            // investigation): early-vs-late rate split by cell type, using
+            // this run's raw per-neuron spike times directly (same
+            // midpoint-of-duration windowing as MetricsAnalyzer::
+            // computeNetworkMetrics's earlyWindowRateHz/lateWindowRateHz in
+            // Metrics.cpp, just split by neuronTypes instead of population-
+            // wide). blockResults[idx] is the same SimulationResult nm was
+            // computed from above.
+            {
+                const auto& sr = blockResults[idx];
+                const float halfDurationMs = sr.durationMs * 0.5f;
+                const float halfSec = std::max(1.0e-6f, (sr.durationMs * 0.5f) / 1000.0f);
+                double excEarly = 0.0, excLate = 0.0, inhEarly = 0.0, inhLate = 0.0;
+                std::size_t excN = 0, inhN = 0;
+                for (std::size_t n = 0; n < sr.spikeTimes.size(); ++n) {
+                    const bool isExc = (n < sr.neuronTypes.size()) ? (sr.neuronTypes[n] == 1U) : true;
+                    if (isExc) ++excN; else ++inhN;
+                    for (float t : sr.spikeTimes[n]) {
+                        if (t < halfDurationMs) { if (isExc) excEarly += 1.0; else inhEarly += 1.0; }
+                        else                    { if (isExc) excLate  += 1.0; else inhLate  += 1.0; }
+                    }
+                }
+                rr.excitatoryEarlyRateHz = excN ? static_cast<float>(excEarly / (static_cast<double>(excN) * halfSec)) : 0.0f;
+                rr.excitatoryLateRateHz  = excN ? static_cast<float>(excLate  / (static_cast<double>(excN) * halfSec)) : 0.0f;
+                rr.inhibitoryEarlyRateHz = inhN ? static_cast<float>(inhEarly / (static_cast<double>(inhN) * halfSec)) : 0.0f;
+                rr.inhibitoryLateRateHz  = inhN ? static_cast<float>(inhLate  / (static_cast<double>(inhN) * halfSec)) : 0.0f;
+            }
 
             perDoseResults[d].push_back(rr);
         }
@@ -1522,6 +1593,11 @@ void runDoseEvaluationMode(
         float excitatoryRateHz; float inhibitoryRateHz;
         float excitatoryIsiMeanMs; float inhibitoryIsiMeanMs;
         float excitatoryIsiVarMs; float inhibitoryIsiVarMs;
+        // Diagnostic addition (2026-08-09, Tier 2.4 part 2): early-vs-late
+        // rate split by cell type -- see AggregatedStats::
+        // meanExcitatoryEarlyRateHz/etc. comment.
+        float excitatoryEarlyRateHz; float excitatoryLateRateHz;
+        float inhibitoryEarlyRateHz; float inhibitoryLateRateHz;
     };
     std::vector<CellTypeRateRow> cellTypeRates;
     cellTypeRates.reserve(doses.size());
@@ -1535,7 +1611,9 @@ void runDoseEvaluationMode(
         cellTypeRates.push_back({
             static_cast<float>(doses[i]), ds.meanExcitatoryRateHz, ds.meanInhibitoryRateHz,
             ds.meanExcitatoryIsiMeanMs, ds.meanInhibitoryIsiMeanMs,
-            ds.meanExcitatoryIsiVarMs, ds.meanInhibitoryIsiVarMs});
+            ds.meanExcitatoryIsiVarMs, ds.meanInhibitoryIsiVarMs,
+            ds.meanExcitatoryEarlyRateHz, ds.meanExcitatoryLateRateHz,
+            ds.meanInhibitoryEarlyRateHz, ds.meanInhibitoryLateRateHz});
 
         // Build aggregated NetworkMetrics from raw multi-run means
         const NetworkMetrics am = buildAggregatedNetworkMetrics(ds);
@@ -1609,12 +1687,16 @@ void runDoseEvaluationMode(
             if (ctOut.is_open()) {
                 ctOut << "dose,excitatory_rate_hz,inhibitory_rate_hz,"
                          "excitatory_isi_mean_ms,inhibitory_isi_mean_ms,"
-                         "excitatory_isi_var_ms,inhibitory_isi_var_ms\n";
+                         "excitatory_isi_var_ms,inhibitory_isi_var_ms,"
+                         "excitatory_early_rate_hz,excitatory_late_rate_hz,"
+                         "inhibitory_early_rate_hz,inhibitory_late_rate_hz\n";
                 ctOut << std::fixed << std::setprecision(6);
                 for (const auto& row : cellTypeRates) {
                     ctOut << row.dose << ',' << row.excitatoryRateHz << ',' << row.inhibitoryRateHz << ','
                           << row.excitatoryIsiMeanMs << ',' << row.inhibitoryIsiMeanMs << ','
-                          << row.excitatoryIsiVarMs << ',' << row.inhibitoryIsiVarMs << '\n';
+                          << row.excitatoryIsiVarMs << ',' << row.inhibitoryIsiVarMs << ','
+                          << row.excitatoryEarlyRateHz << ',' << row.excitatoryLateRateHz << ','
+                          << row.inhibitoryEarlyRateHz << ',' << row.inhibitoryLateRateHz << '\n';
                 }
             }
         }

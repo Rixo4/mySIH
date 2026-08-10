@@ -563,22 +563,33 @@ std::string buildLiabilityReportText(
     // Tier 2.4 part 2: ketamine's activity-dependent NMDA trapping --
     // report-honesty note, same reasoning as the beta/alpha-1 block above
     // (the caveat needs to travel with the report output itself, not just
-    // live in the plan doc). Only the *shape* of this mechanism (activity-
-    // dependent trapping vs. a flat dose-only block) is literature-
-    // grounded (Glasgow et al., J Neurosci 2017); the tauTrapMs/
-    // tauUntrapMs rate constants are starting estimates pending real
-    // domain-expert (electrophysiology) review.
+    // live in the plan doc). UPDATED (2026-08-09) from a "pending review"
+    // hedge to a CONFIRMED finding: real-hardware celltype_rates.csv data
+    // showed no interneuron/pyramidal asymmetry at any dose, traced to this
+    // network's excitatory/inhibitory populations already firing at nearly
+    // identical rates with no drug present at all -- confirmed structural
+    // (not tunable: adaptationInhibitoryScale forced to its most extreme
+    // possible value, 0.0, still produced no separation, so this is the
+    // network's recurrent E/I coupling overriding intrinsic per-neuron
+    // differences, not a mistuned parameter). See PRECISION_GAP_CLOSURE_
+    // PLAN.md Tier 2.4 part 2 for the full investigation.
     if (evalInput.config.ic50_nmda < kReceptorInertThreshold && evalInput.config.nmda_activity_dependent) {
         out << "- IMPORTANT: NMDA block in this run uses the activity-dependent trapping\n"
                "  model (ketamine's interneuron-selectivity mechanism), not a flat dose-only\n"
-               "  block -- each neuron's own block strength depends on how often its NMDA\n"
-               "  channels have been open recently, so higher-firing neurons end up more\n"
-               "  blocked purely from their own activity, with no cell-type flag anywhere.\n"
-               "  Only the SHAPE of this mechanism is literature-grounded (Glasgow et al.,\n"
-               "  J Neurosci 2017); the trap/untrap time-constant VALUES are starting\n"
-               "  estimates, not validated rate constants -- treat any liability read\n"
-               "  driven primarily by this lever as provisional pending real\n"
-               "  electrophysiology review (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
+               "  block -- each neuron's own block strength is meant to depend on how often\n"
+               "  its NMDA channels have been open recently, so higher-firing neurons would\n"
+               "  end up more blocked purely from their own activity. CONFIRMED on real\n"
+               "  hardware that this network does NOT currently produce that selectivity --\n"
+               "  excitatory and inhibitory populations are suppressed almost identically at\n"
+               "  every tested dose, because this network's excitatory/inhibitory neurons\n"
+               "  already fire at nearly equal rates with no drug present, and the one lever\n"
+               "  meant to separate them (adaptationInhibitoryScale) has no power to do so\n"
+               "  even at its most extreme setting -- the network's own recurrent coupling\n"
+               "  overrides it. The mechanism is implemented correctly; this network's\n"
+               "  current design just does not support interneuron-selective effects for any\n"
+               "  drug. Treat this run's liability read as equivalent to a flat NMDA block,\n"
+               "  not as evidence of (or against) real interneuron selectivity\n"
+               "  (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
     }
     if (fragmentedWindow) {
         out << "- The effective/excitatory window fragmented at one or more tested doses --\n"
