@@ -1,0 +1,20 @@
+{
+  "_status": "Diagnostic test (2026-08-10, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2, second attempt). NO DRUG -- pure network property test, same discipline as test_fs_interneuron_baseline.json/test_fs_interneuron_control.json. This file captures the VALIDATED gk_scale=1.0 (neutral) + kinetics_phi=3.0 combination found via real-hardware sweep on 2026-08-10, after six other levers (adaptation scale, gK alone, gCa, external drive, E->I synaptic weight) all failed to move the E/I rate ratio beyond a ~0.989-1.03 noise band, and after the original gk_scale=1.8 default was found to actively fight kinetics_phi when both are raised together (wrong-direction movement at phi=3, near-total inhibitory collapse at phi=5). With gK neutralized, phi=3.0 gave a real ~34.5% inhibitory-faster-than-excitatory separation (29.18 vs 21.70 Hz) with only moderate ISI-variance elevation, the best tradeoff across 2.0/3.0/5.0 tested. Still well short of real cortex's several-fold FS-vs-pyramidal gap -- read this as 'first lever combination to produce a real, correctly-directioned, non-catastrophic separation,' not as a claim that interneuron realism is solved. Compare this file's dose=0 row against test_fs_interneuron_control.json (profile fully disabled) and test_fs_interneuron_baseline.json (old gk_scale=1.8, no phi) to see the progression.",
+  "drug_name": "Fast-Spiking Interneuron Profile -- gK-neutral + kinetics-phi=3.0 (validated combo, no drug)",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "fast_spiking_interneurons": {
+    "enabled": true,
+    "gk_scale": 1.0,
+    "gca_scale": 0.4,
+    "threshold_offset": 0.0,
+    "ext_current_offset": 0.0,
+    "adaptation_scale": 0.05,
+    "kinetics_phi": 3.0
+  },
+  "dose_range": { "min": 0.0, "max": 0.002, "step": 0.001 },
+  "runs": 8
+}

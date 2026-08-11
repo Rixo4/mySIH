@@ -315,6 +315,11 @@ NetworkConfig buildNetworkConfig(const SimulationConfig& cfg, std::uint32_t seed
     netCfg.inhibitoryWeightMax   = 5.80f * inhScale * neuronScale;
     netCfg.recurrentExcitatoryBias = 0.78f;
     netCfg.feedbackInhibitoryBias  = 0.82f;
+    // Tier 2.4 part 2 follow-up: E->I weight scaling -- see
+    // NetworkConfig::excitatoryToInhibitoryWeightScale. Defaults to 1.0
+    // (disabled / bit-identical to previous behaviour).
+    netCfg.excitatoryToInhibitoryWeightScale =
+        std::max(0.0f, static_cast<float>(cfg.excitatory_to_inhibitory_weight_scale));
     netCfg.maxSynapses = std::max<std::size_t>(500000,
         static_cast<std::size_t>(
             static_cast<double>(cfg.neuron_count) *
@@ -341,6 +346,20 @@ spp::simulation::SimulationConfig buildEngineConfig(const SimulationConfig& cfg,
     simCfg.adaptationIncrement = 0.016f + 0.010f*std::clamp(static_cast<float>(cfg.noise_level),0.0f,2.0f);
     simCfg.adaptationMaxCurrent      = 1.8f;
     simCfg.adaptationInhibitoryScale = 0.50f;
+
+    // Tier 2.4 part 2 follow-up: fast-spiking interneuron profile
+    // pass-through -- see SimulationEngine.h's SimulationConfig comment for
+    // the design. Off unless a config's "fast_spiking_interneurons" section
+    // enables it, so every existing drug config is a bit-identical no-op.
+    simCfg.fastSpikingInterneurons       = cfg.fast_spiking_interneurons;
+    simCfg.fsInterneuronGKScale          = static_cast<float>(cfg.fs_interneuron_gk_scale);
+    simCfg.fsInterneuronGCaScale         = static_cast<float>(cfg.fs_interneuron_gca_scale);
+    simCfg.fsInterneuronThresholdOffset  = static_cast<float>(cfg.fs_interneuron_threshold_offset);
+    simCfg.fsInterneuronExtCurrentOffset = static_cast<float>(cfg.fs_interneuron_ext_current_offset);
+    simCfg.fsInterneuronAdaptationScale  = static_cast<float>(cfg.fs_interneuron_adaptation_scale);
+    // Tier 2.4 part 2, second attempt: gating-kinetics speedup -- see
+    // SimulationEngine.h's fsInterneuronKineticsPhi comment.
+    simCfg.fsInterneuronKineticsPhi      = static_cast<float>(cfg.fs_interneuron_kinetics_phi);
     simCfg.drugOnsetTauMs            = 140.0f;
     simCfg.useGpu                    = cfg.use_cuda;
 
@@ -753,7 +772,18 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
     // timing, not on dose — dose only affects the per-block DrugModel
     // dosing. One template network config is shared as the *statistical*
     // template; each block still gets its own random instantiation.
-    const NetworkConfig networkCfgTemplate = buildNetworkConfig(evalInput.config, baseSeed);
+    NetworkConfig networkCfgTemplate = buildNetworkConfig(evalInput.config, baseSeed);
+    // Diagnostic override (2026-08-09, Tier 2.4 part 2 follow-up): sweep the
+    // E->I synaptic weight scale without editing a config file, same pattern
+    // as the SPP_DOSE_EVAL_FS_* overrides below. This is the lever the
+    // real-hardware sweeps identified as the only one with authority over
+    // the E/I firing-rate ratio -- see NetworkConfig's comment in Network.h.
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_EI_WEIGHT_SCALE")) {
+        try {
+            const double parsed = std::stod(trim(*envVal));
+            if (parsed >= 0.0) networkCfgTemplate.excitatoryToInhibitoryWeightScale = static_cast<float>(parsed);
+        } catch (...) {}
+    }
     spp::simulation::SimulationConfig engineCfg = buildEngineConfig(evalInput.config, baseSeed);
     // Diagnostic override (2026-08-08, PRECISION_GAP_CLOSURE_PLAN.md Tier
     // 2.2/2.4 beta/alpha-1 investigation): lets a test config directly set
@@ -791,6 +821,44 @@ std::vector<std::vector<RunResult>> runAllDosesBatched(
         try {
             const double parsed = std::stod(trim(*envVal));
             if (parsed >= 0.0) engineCfg.adaptationInhibitoryScale = static_cast<float>(parsed);
+        } catch (...) {}
+    }
+    // Diagnostic overrides (2026-08-09, Tier 2.4 part 2 follow-up): sweep the
+    // fast-spiking interneuron profile's two most consequential levers
+    // without editing a config file each time, same pattern as the two
+    // overrides above. GK_SCALE exists because the first real-hardware test
+    // showed raising this model's (standard HH delayed-rectifier) gK
+    // slightly SUPPRESSES inhibitory firing rather than enabling it -- real
+    // Kv3 channels are high-threshold and add no outward current near rest,
+    // which plain gK scaling does not reproduce. EXT_CURRENT_OFFSET is the
+    // drive lever: balanced-network theory (van Vreeswijk & Sompolinsky
+    // 1996; Brunel 2000) says population rates are set by external drive and
+    // the synaptic weight matrix, with intrinsic properties largely
+    // cancelling -- consistent with this network's measured refusal to
+    // separate the two populations' rates under any intrinsic-only change.
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_FS_GK_SCALE")) {
+        try {
+            const double parsed = std::stod(trim(*envVal));
+            if (parsed >= 0.0) engineCfg.fsInterneuronGKScale = static_cast<float>(parsed);
+        } catch (...) {}
+    }
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_FS_EXT_CURRENT_OFFSET")) {
+        try {
+            engineCfg.fsInterneuronExtCurrentOffset = static_cast<float>(std::stod(trim(*envVal)));
+        } catch (...) {}
+    }
+    // Diagnostic override (2026-08-10, Tier 2.4 part 2, second attempt):
+    // sweep the Wang-Buzsaki gating-kinetics speedup factor without editing
+    // a config file each time, same pattern as the two overrides above. This
+    // is the one lever tried after GK_SCALE/EXT_CURRENT_OFFSET/adaptation
+    // scale/E->I weight all failed real-hardware sweeps -- see
+    // SimulationEngine.h's fsInterneuronKineticsPhi comment for why it is
+    // mechanistically distinct from those (kinetics speed, not
+    // magnitude/drive).
+    if (auto envVal = readEnvVar("SPP_DOSE_EVAL_FS_KINETICS_PHI")) {
+        try {
+            const double parsed = std::stod(trim(*envVal));
+            if (parsed > 0.0) engineCfg.fsInterneuronKineticsPhi = static_cast<float>(parsed);
         } catch (...) {}
     }
 
@@ -1386,6 +1454,26 @@ static bool loadDrugConfigFromJsonFile(
     // Depletion is observable at the normal ~400-500ms sim_time; recovery is
     // not (see NeurotransmitterPool.h) -- pair with the same "sim_time_ms"
     // override below for a long-duration recovery test.
+    // Tier 2.4 part 2 follow-up: top-level "fast_spiking_interneurons"
+    // section, same opt-in discipline as "desensitization"/"vesicle_pool"
+    // below (out.config.fast_spiking_interneurons defaults to false; a drug
+    // config that never mentions this key changes nothing). See
+    // SimulationEngine.h's SimulationConfig comment for what each scale
+    // means and why.
+    const auto fsPos=c.find("\"fast_spiking_interneurons\"");
+    if(fsPos!=c.npos){
+        if(auto b=extractJsonBool(c,"enabled",fsPos);b) out.config.fast_spiking_interneurons=*b;
+        if(auto n=extractJsonNumber(c,"gk_scale",fsPos);n) out.config.fs_interneuron_gk_scale=*n;
+        if(auto n=extractJsonNumber(c,"gca_scale",fsPos);n) out.config.fs_interneuron_gca_scale=*n;
+        if(auto n=extractJsonNumber(c,"threshold_offset",fsPos);n) out.config.fs_interneuron_threshold_offset=*n;
+        if(auto n=extractJsonNumber(c,"ext_current_offset",fsPos);n) out.config.fs_interneuron_ext_current_offset=*n;
+        if(auto n=extractJsonNumber(c,"adaptation_scale",fsPos);n) out.config.fs_interneuron_adaptation_scale=*n;
+        if(auto n=extractJsonNumber(c,"ei_weight_scale",fsPos);n) out.config.excitatory_to_inhibitory_weight_scale=*n;
+        // Tier 2.4 part 2, second attempt: gating-kinetics speedup -- see
+        // SimulationEngine.h's fsInterneuronKineticsPhi comment.
+        if(auto n=extractJsonNumber(c,"kinetics_phi",fsPos);n) out.config.fs_interneuron_kinetics_phi=*n;
+    }
+
     const auto vpPos=c.find("\"vesicle_pool\"");
     if(vpPos!=c.npos){
         if(auto b=extractJsonBool(c,"enabled",vpPos);b) out.config.vesicle_pool_enabled=*b;

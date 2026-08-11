@@ -100,6 +100,43 @@ struct SimulationConfig {
     double hill_gat1          = 1.0;
     double max_extension_gat1 = 1.0;
 
+    // Tier 2.4 part 2 follow-up: fast-spiking (PV+) interneuron intrinsic
+    // profile -- gives the inhibitory population real fast-spiking cell
+    // properties instead of treating it as a handicapped copy of the
+    // excitatory one. See spp::simulation::SimulationConfig in
+    // SimulationEngine.h for the full rationale, literature grounding, and
+    // per-lever justification. Opt-in and OFF by default: enabling it
+    // changes network dynamics for every drug, so it must not turn on
+    // silently. JSON section: "fast_spiking_interneurons".
+    // E->I synaptic weight scale (1.0 = disabled). Lives alongside the
+    // fast-spiking fields because it is part of the same fix, but is
+    // independently settable: it is a CONNECTIVITY change, and the measured
+    // evidence says it is the only lever with real authority over this
+    // network's E/I firing-rate ratio. See NetworkConfig in Network.h.
+    // JSON: "fast_spiking_interneurons": { "ei_weight_scale": ... }
+    double excitatory_to_inhibitory_weight_scale = 1.0;
+
+    bool   fast_spiking_interneurons        = false;
+    // gk_scale REVISED DOWN TO NEUTRAL (2026-08-10): real-hardware testing
+    // found the old 1.8 default actively fights fs_interneuron_kinetics_phi
+    // below when both are raised together (wrong-direction rate movement at
+    // phi=3, near-total inhibitory collapse at phi=5). See
+    // SimulationEngine.h's fsInterneuronGKScale comment for the full finding.
+    double fs_interneuron_gk_scale          = 1.0;
+    double fs_interneuron_gca_scale         = 0.4;
+    double fs_interneuron_threshold_offset  = 0.0;
+    double fs_interneuron_ext_current_offset = 0.0;
+    double fs_interneuron_adaptation_scale  = 0.05;
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup.
+    // REAL-HARDWARE VALIDATED (2026-08-10) paired with gk_scale neutral:
+    // 3.0 gives ~34.5% inhibitory-faster-than-excitatory separation with
+    // moderate (not pathological) irregularity -- the best tradeoff found
+    // across 2.0/3.0/5.0. See SimulationEngine.h's fsInterneuronKineticsPhi
+    // comment for the full sweep and why 5.0 was rejected despite a larger
+    // raw number (bursty/irregular firing, not genuine fast-spiking).
+    // JSON: "fast_spiking_interneurons": { "kinetics_phi": ... }
+    double fs_interneuron_kinetics_phi      = 3.0;
+
     // Phase 3a, remaining 3 drugs (SSRI/cocaine/reboxetine): SERT/DAT/NET
     // reuptake block. Serotonin/dopamine/norepinephrine have NO receptor
     // current in this engine (that's Phase 3c's neuromodulator gain

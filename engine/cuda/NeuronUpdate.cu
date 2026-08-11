@@ -149,7 +149,14 @@ __device__ Deriv derivatives(
     float gGABAbEff,
     float eGABAa,
     float eNMDA,
-    float eAMPA
+    float eAMPA,
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- mirrors NeuronModel.cpp's computeDerivatives gatingPhi exactly
+    // (scales dm/dh/dn only, never dv/ds/dcaCa). 1.0 = no-op. Defaulted so
+    // hhStepKernel's own inline RK4 duplicate (below, no FS-interneuron
+    // awareness -- see its "no synaptic connectivity" comment) doesn't need
+    // to change its call sites.
+    float gatingPhi = 1.0f
 ) {
     Deriv d;
     const float iNa = gNa * m * m * m * h * (v - eNa);
@@ -178,9 +185,9 @@ __device__ Deriv derivatives(
     const float iAMPA = gAMPAEff * ampaDrivingForce;
 
     d.dv = (iTotal - iNa - iK - iCa - iAHP - iLeak - iGABAa - iNMDA - iGABAb - iAMPA) / cm;
-    d.dm = alphaM(v) * (1.0f - m) - betaM(v) * m;
-    d.dh = alphaH(v) * (1.0f - h) - betaH(v) * h;
-    d.dn = alphaN(v) * (1.0f - n) - betaN(v) * n;
+    d.dm = gatingPhi * (alphaM(v) * (1.0f - m) - betaM(v) * m);
+    d.dh = gatingPhi * (alphaH(v) * (1.0f - h) - betaH(v) * h);
+    d.dn = gatingPhi * (alphaN(v) * (1.0f - n) - betaN(v) * n);
     d.ds = (sInf(v) - s) / tauS(v);
     d.dcaCa = caInflux - caCa / tauCa;
 
@@ -263,7 +270,12 @@ __device__ void integrateNeuronState(
     float* s,
     float* caCa,
     float* lastSpikeTime,
-    std::uint8_t* spikeOut
+    std::uint8_t* spikeOut,
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- passed through unchanged to all four derivatives() substage calls
+    // below. Defaulted to 1.0 (no-op) for the same reason gatingPhi is
+    // defaulted on derivatives() itself.
+    float gatingPhi = 1.0f
 ) {
     const float oldV = v[i];
 
@@ -288,7 +300,7 @@ __device__ void integrateNeuronState(
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
                                  params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
                                  gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
-                                 params.eGABAa, params.eNMDA, params.eAMPA);
+                                 params.eGABAa, params.eNMDA, params.eAMPA, gatingPhi);
 
     float y2v = yv + 0.5f * dtMs * k1.dv;
     float y2m = ym + 0.5f * dtMs * k1.dm;
@@ -302,7 +314,7 @@ __device__ void integrateNeuronState(
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
                                  params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
                                  gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
-                                 params.eGABAa, params.eNMDA, params.eAMPA);
+                                 params.eGABAa, params.eNMDA, params.eAMPA, gatingPhi);
 
     float y3v = yv + 0.5f * dtMs * k2.dv;
     float y3m = ym + 0.5f * dtMs * k2.dm;
@@ -316,7 +328,7 @@ __device__ void integrateNeuronState(
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
                                  params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
                                  gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
-                                 params.eGABAa, params.eNMDA, params.eAMPA);
+                                 params.eGABAa, params.eNMDA, params.eAMPA, gatingPhi);
 
     float y4v = yv + dtMs * k3.dv;
     float y4m = ym + dtMs * k3.dm;
@@ -330,7 +342,7 @@ __device__ void integrateNeuronState(
                                  params.cm, params.eNa, params.eK, params.eCa, params.gL, params.eL,
                                  params.gAHP, params.tauCa, params.kCa, params.gAHPFloor,
                                  gAMPAEff, gNMDAEff, gGABAaEff, gGABAbEff,
-                                 params.eGABAa, params.eNMDA, params.eAMPA);
+                                 params.eGABAa, params.eNMDA, params.eAMPA, gatingPhi);
 
     yv += (dtMs / 6.0f) * (k1.dv + 2.0f * k2.dv + 2.0f * k3.dv + k4.dv);
     ym += (dtMs / 6.0f) * (k1.dm + 2.0f * k2.dm + 2.0f * k3.dm + k4.dm);
@@ -825,6 +837,16 @@ __global__ void fusedBatchedStepKernel(
                              launchInfo.gMaxGABAbAgonist * gabaBAgonistActivation;
 
     std::uint8_t spike = 0U;
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- only applies to inhibitory neurons (neuronType==0) when the
+    // fast-spiking profile is enabled, mirrors BatchedSimulationEngine.cpp's
+    // CPU loop exactly (same neuronType branch, same GPU/CPU-parity
+    // discipline this project follows for every fast-spiking lever). 1.0
+    // (no-op) for every excitatory neuron and for every neuron when the
+    // profile is disabled.
+    const bool fsKineticsApplies =
+        (launchInfo.fastSpikingInterneurons != 0) && (devicePointers.neuronType[i] == 0U);
+    const float gatingPhi = fsKineticsApplies ? launchInfo.fsInterneuronKineticsPhi : 1.0f;
     integrateNeuronState(
         i,
         launchInfo.timeMs,
@@ -856,7 +878,8 @@ __global__ void fusedBatchedStepKernel(
         devicePointers.s,
         devicePointers.caCa,
         devicePointers.lastSpikeTime,
-        &spike
+        &spike,
+        gatingPhi
     );
 
     if (spike != 0U) {
@@ -1246,6 +1269,14 @@ struct CudaSimulator::DeviceBuffers {
     float batchedAlpha1Ec50 = 1.0e9f;
     float batchedAlpha1Hill = 1.0f;
     float batchedAlpha1MaxAdaptationIncreaseFold = 1.0f;
+
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- stateless (kernel branches on the already-uploaded neuronType
+    // buffer, no new persistent per-neuron buffer needed), same shared-
+    // scalar storage pattern as the fields above. See SimulationEngine.h's
+    // fsInterneuronKineticsPhi comment for the literature basis.
+    int batchedFastSpikingInterneurons = 0;
+    float batchedFsInterneuronKineticsPhi = 1.0f;
 
     // Phase 3c retrofit: SERT/DAT/NET reuptake block dose-amplification --
     // stateless, same shared-scalar storage pattern as the neuromodulator
@@ -1732,7 +1763,12 @@ void CudaSimulator::initializeBatchedSimulation(
     // NeuronUpdate.h's BatchedStepLaunchInfo comment.
     int nmdaActivityBlockEnabled,
     float nmdaActivityBlockTauTrapMs,
-    float nmdaActivityBlockTauUntrapMs
+    float nmdaActivityBlockTauUntrapMs,
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- see CudaSimulator.h's declaration comment / SimulationEngine.h's
+    // fsInterneuronKineticsPhi comment for the full design.
+    int fastSpikingInterneurons,
+    float fsInterneuronKineticsPhi
 ) {
     if (!available_) {
         throw std::runtime_error("CUDA simulator is not available.");
@@ -1815,6 +1851,8 @@ void CudaSimulator::initializeBatchedSimulation(
     buffers_->batchedNmdaActivityBlockEnabled = nmdaActivityBlockEnabled;
     buffers_->batchedNmdaActivityBlockTauTrapMs = nmdaActivityBlockTauTrapMs;
     buffers_->batchedNmdaActivityBlockTauUntrapMs = nmdaActivityBlockTauUntrapMs;
+    buffers_->batchedFastSpikingInterneurons = fastSpikingInterneurons;
+    buffers_->batchedFsInterneuronKineticsPhi = fsInterneuronKineticsPhi;
     buffers_->batchedGabaAMechanism = gabaAMechanism;
     buffers_->batchedGabaAEc50 = gabaAEc50;
     buffers_->batchedGabaAHill = gabaAHill;
@@ -2063,6 +2101,8 @@ void CudaSimulator::stepBatched(float timeMs, float doseScale, std::size_t batch
     launchInfo.alpha1Ec50 = buffers_->batchedAlpha1Ec50;
     launchInfo.alpha1Hill = buffers_->batchedAlpha1Hill;
     launchInfo.alpha1MaxAdaptationIncreaseFold = buffers_->batchedAlpha1MaxAdaptationIncreaseFold;
+    launchInfo.fastSpikingInterneurons = buffers_->batchedFastSpikingInterneurons;
+    launchInfo.fsInterneuronKineticsPhi = buffers_->batchedFsInterneuronKineticsPhi;
     launchInfo.sertMechanism = buffers_->batchedSertMechanism;
     launchInfo.sertKiUm = buffers_->batchedSertKiUm;
     launchInfo.sertHill = buffers_->batchedSertHill;

@@ -142,8 +142,25 @@ void Network::buildRandom() {
             }
 
             const float rawWeight = std::fabs(weightDist(rng)) * densityWeightScale;
+            // Tier 2.4 part 2 follow-up: E->I synapses are scaled relative
+            // to E->E -- see NetworkConfig::excitatoryToInhibitoryWeightScale
+            // for the literature basis and for why this (not any per-neuron
+            // parameter) is the lever that actually moves this network's
+            // E/I rate ratio. The clamp BOUNDS are scaled alongside the
+            // weight, deliberately: the point is that E->I synapses are
+            // genuinely stronger than the E->E range, so clamping them back
+            // into that range would silently undo the entire effect.
+            // Scale is exactly 1.0 by default => bit-identical to previous
+            // behaviour, including the clamp bounds.
+            const bool targetIsInhibitory =
+                (post < neuronTypes_.size()) && (neuronTypes_[post] == 0U);
+            const float eiScale = (excitatory && targetIsInhibitory)
+                                      ? std::max(0.0f, config_.excitatoryToInhibitoryWeightScale)
+                                      : 1.0f;
             const float weight = excitatory
-                                     ? std::clamp(rawWeight, config_.excitatoryWeightMin, config_.excitatoryWeightMax)
+                                     ? std::clamp(rawWeight * eiScale,
+                                                  config_.excitatoryWeightMin * eiScale,
+                                                  config_.excitatoryWeightMax * eiScale)
                                      : std::clamp(rawWeight, config_.inhibitoryWeightMin, config_.inhibitoryWeightMax);
 
             synapse::SynapseEdge edge;

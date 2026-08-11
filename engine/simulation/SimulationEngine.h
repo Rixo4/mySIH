@@ -269,6 +269,181 @@ struct SimulationConfig {
     float adaptationMaxCurrent = 6.0f;
     float adaptationInhibitoryScale = 0.55f;
 
+    // ─── Tier 2.4 part 2 follow-up: fast-spiking interneuron profile ───────
+    // WHY THIS EXISTS. Real cortical PV+ (parvalbumin-expressing) inhibitory
+    // interneurons are electrophysiologically a DIFFERENT CELL TYPE from
+    // pyramidal cells, not a scaled-down copy of one. This engine's
+    // inhibitory population, however, was only ever differentiated from the
+    // excitatory one by three scalar nudges: a lower external current, a
+    // higher spike threshold (both hardcoded in BatchedSimulationEngine's
+    // constructor), and `adaptationInhibitoryScale` above. Measured on real
+    // hardware (2026-08-09, see PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part
+    // 2): that produces excitatory and inhibitory populations firing at
+    // NEARLY IDENTICAL rates (23.58 vs 23.64 Hz at zero drug), where real
+    // cortex shows fast-spiking interneurons firing markedly FASTER than
+    // pyramidal cells. Forcing `adaptationInhibitoryScale` to 0.0 (the most
+    // extreme possible setting -- inhibitory neurons that never adapt at
+    // all) still produced no separation, proving that lever alone has no
+    // authority against this network's recurrent E/I coupling.
+    //
+    // This blocks any drug mechanism whose real action depends on cell-type
+    // firing differences. Ketamine is the first such case built (its
+    // interneuron selectivity is a kinetic consequence of interneurons
+    // firing more, keeping NMDA channels open more, and ketamine being a
+    // trapping open-channel blocker) -- but it is NOT ketamine-specific:
+    // any future mechanism keyed on interneuron-vs-pyramidal activity hits
+    // the same wall.
+    //
+    // WHAT THIS DOES, and why each lever (literature-grounded, not tuned to
+    // produce a desired number):
+    //
+    //  1. gK scale (`fsInterneuronGKScale`). The defining molecular feature
+    //     of fast-spiking interneurons is high expression of Kv3.1/Kv3.2 --
+    //     high-threshold, unusually FAST-deactivating delayed-rectifier K+
+    //     channels, whose specific functional purpose is enabling sustained
+    //     high-frequency firing (Rudy & McBain 2001, Trends Neurosci, "Kv3
+    //     channels: voltage-gated K+ channels designed for high-frequency
+    //     repetitive firing"). They give FS cells their hallmark brief
+    //     spikes (~0.3-0.5 ms half-width vs ~1-2 ms in pyramidal cells) and
+    //     short refractory recovery. In this HH model the closest faithful
+    //     mapping is an increased delayed-rectifier conductance.
+    //
+    //     REVISED DOWN TO NEUTRAL (2026-08-10), real-hardware finding: this
+    //     model's gK is a standard HH delayed-rectifier (active near resting
+    //     potential), not a real high-threshold Kv3 channel, so raising it
+    //     also raises rheobase and suppresses firing -- the wrong direction
+    //     alone (confirmed 2026-08-09) -- and, worse, it actively fights
+    //     `fsInterneuronKineticsPhi` (lever 5 below) when both are raised
+    //     together: at the old default of 1.8, phi=3 moved the rate ratio
+    //     BACKWARDS (inhibitory below excitatory) and phi=5 caused
+    //     inhibitory firing to collapse to near-silence (23.7Hz -> 2.9Hz
+    //     over 3 dose points, ISI variance 25-36x baseline -- a runaway
+    //     interaction, not a graceful scaling). Isolating gK back to neutral
+    //     (1.0) and re-sweeping phi confirmed the interaction, not phi
+    //     itself, was the cause: phi=3 with gK neutral gives a real ~34.5%
+    //     inhibitory-faster-than-excitatory separation with only moderate
+    //     irregularity. Left in the config (not removed) since the Kv3
+    //     literature grounding is real and a future combination might use
+    //     it productively, but the DEFAULT is now neutral so enabling this
+    //     profile does not silently walk into the collapse regime.
+    //
+    //  2. gCa scale (`fsInterneuronGCaScale`). PV+ FS interneurons show
+    //     minimal spike-frequency adaptation -- one of their standard
+    //     identifying signatures in slice electrophysiology. In this model
+    //     the adaptation brake is the Ca-activated AHP
+    //     (gAHP * caCa * (v - eK), see NeuronModel.h), and caCa accumulates
+    //     from the Ca current -- so reducing this cell type's Ca
+    //     conductance is the mechanistically correct way to weaken its AHP,
+    //     rather than special-casing gAHP (a shared parameter deliberately
+    //     calibrated against the Ca-blocker drug set -- see NeuronModel.h's
+    //     gAHP comment; it must not be re-tuned here).
+    //
+    //  3. Threshold / external-current offsets. These REPLACE the hardcoded
+    //     -0.45 current / +1.5 threshold inhibitory handicap in
+    //     BatchedSimulationEngine's constructor, which pushed inhibitory
+    //     neurons toward firing LESS -- the opposite direction from real FS
+    //     interneuron behavior. Defaults here are 0.0 (neutral) rather than
+    //     a compensating positive push: real FS cells actually have a
+    //     somewhat HIGHER rheobase, and their high in-vivo rates come from
+    //     steep f-I gain plus strong convergent excitatory drive (which this
+    //     network's recurrent wiring already supplies), not from being
+    //     intrinsically easier to trigger. Starting neutral avoids stacking
+    //     several unvalidated pushes at once and lets testing show whether
+    //     an additional term is genuinely needed.
+    //
+    //  4. `fsInterneuronAdaptationScale` replaces `adaptationInhibitoryScale`
+    //     when this profile is enabled -- near-zero, matching FS cells'
+    //     minimal adaptation. Known from the test above to be insufficient
+    //     ALONE; included because it is still the correct value for this
+    //     cell type, not because it is expected to carry the effect alone.
+    //
+    // OPT-IN AND OFF BY DEFAULT, deliberately. Enabling this changes network
+    // dynamics for EVERY drug, so every already-validated result in this
+    // project would need re-checking against it -- exactly the same
+    // discipline every other mechanism in this engine follows (see
+    // desensitizationEnabled / vesiclePoolEnabled below). With
+    // `fastSpikingInterneurons == false` every existing config is a
+    // bit-identical no-op.
+    //
+    // gCa scale / threshold offset / ext-current offset / adaptation scale
+    // (levers 2-4) remain NOT YET real-hardware validated in isolation --
+    // first-pass literature-grounded estimates, unchanged since first built.
+    // gK scale and kinetics phi (levers 1 and 5) ARE now real-hardware
+    // validated as of 2026-08-10 -- see their comments above for the actual
+    // measured numbers and the caveat that ~34.5% separation, while real
+    // progress, is still well short of a "realistic interneuron/pyramidal
+    // rate ratio" (real cortex: several-fold). Do not describe this profile
+    // as producing biologically realistic interneuron dynamics -- describe
+    // it as "the first tested lever combination to produce a real,
+    // correctly-directioned, non-catastrophic separation," which is what
+    // has actually been shown.
+    bool  fastSpikingInterneurons      = false;
+    float fsInterneuronGKScale         = 1.0f;
+    float fsInterneuronGCaScale        = 0.4f;
+    float fsInterneuronThresholdOffset = 0.0f;
+    float fsInterneuronExtCurrentOffset = 0.0f;
+    float fsInterneuronAdaptationScale = 0.05f;
+
+    //  5. `fsInterneuronKineticsPhi` -- Tier 2.4 part 2, second attempt.
+    //     Levers 1-4 above (plus, separately, external drive and E->I
+    //     synaptic weight scale in NetworkConfig) were real-hardware swept
+    //     and ALL failed: every one of six tested levers produced an E/I
+    //     rate ratio in a narrow 0.989-1.03 band, including gK/gCa/
+    //     adaptation at extreme settings and drive/weight changes that
+    //     showed clear saturation. That is the balanced-network servo
+    //     signature (van Vreeswijk & Sompolinsky 1996; Brunel 2000):
+    //     population rate is set by the weight matrix and external drive,
+    //     with per-neuron conductance/threshold/drive changes largely
+    //     cancelling out once the recurrent loop re-settles.
+    //
+    //     Kinetics speed is mechanistically different from all six failed
+    //     levers: it does not change how HARD a neuron is driven, it changes
+    //     how FAST its Na+/K+ gates can move once driven -- i.e. its
+    //     absolute refractory recovery speed, a ceiling on firing rate that
+    //     exists independent of drive strength. Wang & Buzsaki (1996, J
+    //     Neurosci, "Gamma oscillation by synaptic inhibition in a
+    //     hippocampal interneuronal network model") is the standard
+    //     reference fast-spiking implementation and gets its FS behavior
+    //     exactly this way: a kinetic speedup factor (traditionally phi) on
+    //     the gating variables, not raised conductance. Applied here as a
+    //     multiplier on dm/dh/dn only (see NeuronModel.cpp's
+    //     computeDerivatives) -- steady-state m_inf/h_inf/n_inf are
+    //     unaffected since both alpha and beta terms scale together, and
+    //     dv/ds/dcaCa are untouched, so this is a pure "how fast do the
+    //     gates move" lever, not a conductance/threshold/drive lever in
+    //     disguise.
+    //
+    //     1.0 = disabled / bit-identical to today.
+    //
+    //     REAL-HARDWARE VALIDATED (2026-08-10), WITH CAVEATS. Swept phi at
+    //     2.0/3.0/5.0, each paired with gK neutral (see lever 1's revised
+    //     comment above -- gK=1.8 makes this lever move the WRONG direction
+    //     or collapse entirely):
+    //       phi=2.0: ~10% inhibitory-faster-than-excitatory (26.18 vs 23.72
+    //         Hz) -- real but small, close to the noise band the six failed
+    //         levers were stuck in.
+    //       phi=3.0: ~34.5% separation (29.18 vs 21.70 Hz) -- the best
+    //         tradeoff found: real, substantially larger effect, ISI
+    //         variance elevated (~2.8x excitatory's) but not pathological.
+    //         THIS IS THE CURRENT DEFAULT.
+    //       phi=5.0: ~47% separation (31.91 vs 21.71 Hz) -- larger still,
+    //         but ISI variance exploded to ~36x excitatory's and the
+    //         ISI-mean-vs-rate relationship stopped making arithmetic sense
+    //         (mean ISI implies a slower rate than the measured rate), the
+    //         signature of BURSTY, irregular firing bought as a side effect
+    //         rather than genuine fast, regular tonic firing. Real FS
+    //         interneurons are known for regularity, not just speed, so this
+    //         value is NOT recommended despite the larger raw number.
+    //     Even at phi=3.0, the ~34.5% separation is still well short of real
+    //     cortex's several-fold FS-vs-pyramidal gap -- this is confirmed
+    //     real progress (the first of seven tested levers/combinations to
+    //     produce a correctly-directioned, non-noise-band, non-catastrophic
+    //     result), not a claim that interneuron realism is now solved. See
+    //     PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 for the full sweep
+    //     history (six null levers, then this one, including the gK
+    //     interaction that had to be isolated first).
+    float fsInterneuronKineticsPhi     = 3.0f;
+
     float drugOnsetTauMs = 120.0f;
 
     bool useGpu = false;

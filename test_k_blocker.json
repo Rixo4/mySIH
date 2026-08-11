@@ -1,13 +1,14 @@
 {
-  "drug_name": "Ketamine",
+  "_status": "CONTROL for test_fs_interneuron_baseline.json (2026-08-09, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 follow-up). Byte-identical to that file EXCEPT fast_spiking_interneurons.enabled is false, so the inhibitory population keeps its legacy profile (the -0.45 external-current / +1.5 threshold handicap and the normal adaptationInhibitoryScale). Same no-drug setup, same dose range, same run count, same everything else. Run both and diff celltype_rates.csv's dose=0 row: any excitatory-vs-inhibitory rate difference that appears in the baseline file but not here is attributable to the fast-spiking profile alone, with no drug and no other config change in play. This pairing follows the same isolation discipline as test_vesicle_pool_calibration.json / test_vesicle_pool_control.json.",
+  "drug_name": "Fast-Spiking Interneuron Profile CONTROL (profile disabled, no drug)",
   "channels": {
     "Na": { "ic50": 1000000.0 },
     "K":  { "ic50": 1000000.0 },
     "Ca": { "ic50": 1000000.0 }
   },
-  "receptors": {
-    "NMDA": { "ec50": 0.5, "hill": 1.0 }
+  "fast_spiking_interneurons": {
+    "enabled": false
   },
-  "dose_range": { "min": 0.0, "max": 2.5, "step": 0.25 },
+  "dose_range": { "min": 0.0, "max": 0.002, "step": 0.001 },
   "runs": 8
 }

@@ -210,7 +210,20 @@ public:
         // POD-copied-to-device reason as vesiclePoolEnabled above.
         int nmdaActivityBlockEnabled,
         float nmdaActivityBlockTauTrapMs,
-        float nmdaActivityBlockTauUntrapMs
+        float nmdaActivityBlockTauUntrapMs,
+        // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics
+        // speedup for fast-spiking interneurons -- see SimulationEngine.h's
+        // fsInterneuronKineticsPhi comment for the full literature basis and
+        // why this is mechanism-distinct from the fast-spiking levers
+        // already wired above (gK/gCa/threshold/drive/adaptation, all
+        // uploaded as baseGK/baseGCa/etc arrays at population-init time, not
+        // through this launch-scalar path). Kinetics phi instead needs a
+        // per-STEP kernel branch on neuronType (already an uploaded device
+        // buffer), so it travels as launch info, same pattern as
+        // nmdaActivityBlockEnabled above. int for the same POD-copied-to-
+        // device reason.
+        int fastSpikingInterneurons,
+        float fsInterneuronKineticsPhi
     );
 
     void stepBatched(float timeMs, float doseScale, std::size_t batchStepIndex);

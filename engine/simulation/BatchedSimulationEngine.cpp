@@ -85,11 +85,44 @@ BatchedSimulationEngine::BatchedSimulationEngine(
     population_.params.gL = std::clamp(population_.params.gL * 1.02f, 0.22f, 0.40f);
 
     population_.neuronType = combinedNeuronTypes_;
+    // Tier 2.4 part 2 follow-up: when config_.fastSpikingInterneurons is
+    // enabled, the inhibitory population gets a real fast-spiking (PV+)
+    // intrinsic profile instead of the legacy "excitatory neuron with a
+    // handicap" treatment below -- see SimulationConfig's long comment in
+    // SimulationEngine.h for the full rationale and literature grounding.
+    //
+    // No new GPU plumbing is needed for any of this: gNa/gK/gCa, threshold
+    // and extCurrent are ALREADY per-neuron arrays that both the CPU loop
+    // (population_.gK[i] etc. further down this file) and the CUDA kernel
+    // (uploaded as baseGNa/baseGK/baseGCa/threshold below) read per-neuron.
+    // Writing them here therefore reaches both backends identically, which
+    // is exactly why this profile is applied at population-init time rather
+    // than threaded through the kernel launch as a new parameter.
+    const bool fsInterneurons = config_.fastSpikingInterneurons;
+    const float fsGKScale  = std::max(0.0f, config_.fsInterneuronGKScale);
+    const float fsGCaScale = std::max(0.0f, config_.fsInterneuronGCaScale);
     for (std::size_t i = 0; i < totalNeurons_; ++i) {
         if (population_.neuronType[i] == 1U) {
+            // Excitatory (pyramidal-like) -- unchanged in both modes.
             population_.extCurrent[i] += 0.15f;
             population_.threshold[i] -= 0.8f;
+        } else if (fsInterneurons) {
+            // Inhibitory, fast-spiking profile.
+            //   Kv3.1/3.2-style fast delayed rectifier -> raised gK.
+            //   Weakened Ca-activated AHP (FS cells barely adapt) -> lowered
+            //   gCa, which reduces caCa accumulation and therefore the
+            //   gAHP*caCa brake, without touching the shared gAHP constant
+            //   (deliberately NOT re-tuned here -- it is calibrated against
+            //   the Ca-blocker drug set, see NeuronModel.h).
+            population_.gK[i]  *= fsGKScale;
+            population_.gCa[i] *= fsGCaScale;
+            // Replaces the legacy -0.45/+1.5 handicap below, which pushed
+            // inhibitory neurons toward firing LESS -- the wrong direction.
+            population_.extCurrent[i] += config_.fsInterneuronExtCurrentOffset;
+            population_.threshold[i]  += config_.fsInterneuronThresholdOffset;
         } else {
+            // Inhibitory, legacy profile (default). Preserved exactly so
+            // every already-validated config stays bit-identical.
             population_.extCurrent[i] -= 0.45f;
             population_.threshold[i] += 1.5f;
         }
@@ -196,7 +229,16 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             config_.adaptationTauMs,
             config_.adaptationIncrement,
             config_.adaptationMaxCurrent,
-            config_.adaptationInhibitoryScale,
+            // Tier 2.4 part 2 follow-up: MUST mirror run()'s CPU-side
+            // adaptationInhibitoryScale selection exactly -- the
+            // fast-spiking interneuron profile supplies its own near-zero
+            // adaptation scale. Missing this here would leave the GPU
+            // backend (the default) silently on the legacy value while the
+            // CPU fallback used the new one: precisely the GPU/CPU
+            // divergence class this project has already been bitten by.
+            (config_.fastSpikingInterneurons
+                 ? std::clamp(config_.fsInterneuronAdaptationScale, 0.0f, 1.0f)
+                 : config_.adaptationInhibitoryScale),
             config_.maxTotalCurrent,
             config_.synTauExcMs,
             config_.synTauInhMs,
@@ -324,7 +366,13 @@ BatchedSimulationEngine::BatchedSimulationEngine(
             // ReceptorDrugProfile.h's NmdaActivityDependentBlock comment.
             static_cast<int>(receptorProfile_.nmdaActivityBlock.enabled),
             receptorProfile_.nmdaActivityBlock.tauTrapMs,
-            receptorProfile_.nmdaActivityBlock.tauUntrapMs
+            receptorProfile_.nmdaActivityBlock.tauUntrapMs,
+            // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics
+            // speedup -- MUST mirror run()'s CPU-side gatingPhi selection
+            // exactly, same GPU/CPU-parity discipline as
+            // adaptationInhibitoryScale above (see that comment).
+            static_cast<int>(config_.fastSpikingInterneurons),
+            config_.fsInterneuronKineticsPhi
         );
 #endif
     }
@@ -511,7 +559,13 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
     const float adaptationDecay = std::exp(-config_.dtMs / adaptTauMs);
     const float adaptationIncrement = std::max(0.0f, config_.adaptationIncrement);
     const float adaptationMaxCurrent = std::max(0.0f, config_.adaptationMaxCurrent);
-    const float adaptationInhibitoryScale = std::clamp(config_.adaptationInhibitoryScale, 0.0f, 1.0f);
+    // Tier 2.4 part 2 follow-up: the fast-spiking interneuron profile
+    // supplies its own (near-zero) adaptation scale, matching PV+ cells'
+    // minimal spike-frequency adaptation -- see SimulationEngine.h.
+    const float adaptationInhibitoryScale = std::clamp(
+        config_.fastSpikingInterneurons ? config_.fsInterneuronAdaptationScale
+                                        : config_.adaptationInhibitoryScale,
+        0.0f, 1.0f);
     const float drugOnsetTauMs = std::max(0.0f, config_.drugOnsetTauMs);
     constexpr float kBackgroundCurrent = 0.18f;
 
@@ -784,7 +838,16 @@ std::vector<SimulationResult> BatchedSimulationEngine::run() {
                 }
                 iTotal = std::clamp(iTotal, -config_.maxTotalCurrent, config_.maxTotalCurrent);
 
-                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params, synapticEff[i]);
+                // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-
+                // kinetics speedup -- CPU mirror of fusedBatchedStepKernel's
+                // fsKineticsApplies/gatingPhi computation (NeuronUpdate.cu),
+                // same neuronType==0 (inhibitory) branch. 1.0 (no-op) unless
+                // both the profile is enabled AND this neuron is inhibitory.
+                const float gatingPhi =
+                    (config_.fastSpikingInterneurons && population_.neuronType[i] == 0U)
+                        ? config_.fsInterneuronKineticsPhi
+                        : 1.0f;
+                neuron::rk4Step(state, config_.dtMs, iTotal, gNaEff[i], gKEff[i], gCaEff[i], population_.params, synapticEff[i], gatingPhi);
 
                 const bool inRefractory = (timeMs - population_.lastSpikeTime[i]) < config_.refractoryMs;
                 const bool crossed = (oldV <= population_.threshold[i]) && (state.v > population_.threshold[i]);

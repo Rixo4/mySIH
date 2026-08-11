@@ -236,6 +236,23 @@ struct SynapticConductances {
     float gGABAbEff = 0.0f;
 };
 
+// gatingPhi: Tier 2.4 part 2 follow-up (fast-spiking interneuron kinetics).
+// Wang & Buzsaki (1996): real PV+ fast-spiking interneurons sustain much
+// higher firing rates than pyramidal cells largely because their Na+/K+
+// gating kinetics are FASTER (brief spikes, quick recovery), not because
+// their channel conductances are bigger. Six prior levers this session --
+// adaptation scale, gK magnitude, gCa magnitude, external drive, and E->I
+// synaptic weight -- all changed magnitude/drive and all failed to move this
+// network's E/I rate ratio beyond ~1.03 (see Network.h's
+// excitatoryToInhibitoryWeightScale comment and PRECISION_GAP_CLOSURE_PLAN.md
+// Tier 2.4 part 2 for the full real-hardware sweep). gatingPhi is mechanism-
+// distinct: it scales how FAST m/h/n approach their voltage-dependent
+// targets (multiplies dm/dh/dn only, never dv/ds/dcaCa), which changes the
+// neuron's absolute refractory recovery speed -- a ceiling the balanced-
+// network servo argument does not obviously predict away, unlike the six
+// magnitude-based levers. Default 1.0 = exact no-op (identical dm/dh/dn to
+// today), so every existing config/result stays bit-identical unless a
+// caller deliberately passes a different value.
 HHDerivatives computeDerivatives(
     const HHState& state,
     float iTotal,
@@ -243,7 +260,8 @@ HHDerivatives computeDerivatives(
     float gKEff,
     float gCaEff,
     const HHParameters& params,
-    const SynapticConductances& synaptic = {}
+    const SynapticConductances& synaptic = {},
+    float gatingPhi = 1.0f
 );
 
 void rk4Step(
@@ -254,7 +272,8 @@ void rk4Step(
     float gKEff,
     float gCaEff,
     const HHParameters& params,
-    const SynapticConductances& synaptic = {}
+    const SynapticConductances& synaptic = {},
+    float gatingPhi = 1.0f
 );
 
 bool isFiniteState(const HHState& state);

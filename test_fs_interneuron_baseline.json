@@ -1,0 +1,19 @@
+{
+  "_status": "Diagnostic baseline test (2026-08-09, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 follow-up). NO DRUG -- all channel IC50s inert, no receptors configured. This is a pure NETWORK PROPERTY test: it exists to answer one question, readable straight off celltype_rates.csv's dose=0 row: does the fast-spiking interneuron profile actually make this network's inhibitory population fire faster than its excitatory population, the way real cortex does? Baseline (profile OFF) measured 23.58 Hz excitatory vs 23.64 Hz inhibitory -- essentially identical, which is the bug. Real cortex shows fast-spiking interneurons firing several-fold faster than pyramidal cells. Compare this file's dose=0 excitatory_rate_hz vs inhibitory_rate_hz against test_fs_interneuron_control.json (identical but profile disabled) to isolate the profile's effect with nothing else changing. Also check excitatory_early/late vs inhibitory_early/late: FS interneurons should show LESS rate sag over the run than pyramidal cells, since they barely adapt.",
+  "drug_name": "Fast-Spiking Interneuron Profile -- network property test (no drug)",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "fast_spiking_interneurons": {
+    "enabled": true,
+    "gk_scale": 1.8,
+    "gca_scale": 0.4,
+    "threshold_offset": 0.0,
+    "ext_current_offset": 0.0,
+    "adaptation_scale": 0.05
+  },
+  "dose_range": { "min": 0.0, "max": 0.002, "step": 0.001 },
+  "runs": 8
+}

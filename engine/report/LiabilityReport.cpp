@@ -574,22 +574,110 @@ std::string buildLiabilityReportText(
     // differences, not a mistuned parameter). See PRECISION_GAP_CLOSURE_
     // PLAN.md Tier 2.4 part 2 for the full investigation.
     if (evalInput.config.ic50_nmda < kReceptorInertThreshold && evalInput.config.nmda_activity_dependent) {
-        out << "- IMPORTANT: NMDA block in this run uses the activity-dependent trapping\n"
-               "  model (ketamine's interneuron-selectivity mechanism), not a flat dose-only\n"
-               "  block -- each neuron's own block strength is meant to depend on how often\n"
-               "  its NMDA channels have been open recently, so higher-firing neurons would\n"
-               "  end up more blocked purely from their own activity. CONFIRMED on real\n"
-               "  hardware that this network does NOT currently produce that selectivity --\n"
-               "  excitatory and inhibitory populations are suppressed almost identically at\n"
-               "  every tested dose, because this network's excitatory/inhibitory neurons\n"
-               "  already fire at nearly equal rates with no drug present, and the one lever\n"
-               "  meant to separate them (adaptationInhibitoryScale) has no power to do so\n"
-               "  even at its most extreme setting -- the network's own recurrent coupling\n"
-               "  overrides it. The mechanism is implemented correctly; this network's\n"
-               "  current design just does not support interneuron-selective effects for any\n"
-               "  drug. Treat this run's liability read as equivalent to a flat NMDA block,\n"
-               "  not as evidence of (or against) real interneuron selectivity\n"
-               "  (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
+        if (evalInput.config.fast_spiking_interneurons) {
+            // UPDATED (2026-08-10): with the fast-spiking profile enabled
+            // (which now produces a real, if partial, baseline E/I rate
+            // separation -- see the fast-spiking disclosure below), this
+            // mechanism DOES finally produce interneuron > pyramidal
+            // suppression asymmetry. Real-hardware confirmed: excitatory
+            // suppression ~41-44%, inhibitory suppression ~50-54%, a gap of
+            // ~9-11 percentage points, consistent (same sign, similar
+            // magnitude) across all 10 nonzero doses tested -- not noise.
+            // Direction is biologically correct: this network's inhibitory
+            // neurons fire faster at baseline under this profile, and higher
+            // baseline activity -> more trapped NMDA channels -> more
+            // suppression, matching real ketamine's actual interneuron-NMDA-
+            // hypofunction mechanism. Still a MODEST effect size relative to
+            // real ketamine's documented interneuron-selective action, and
+            // this run also carries the fast-spiking profile's own "not yet
+            // fully validated, non-default network" caveats below -- do not
+            // read this as a fully validated interneuron-selectivity result,
+            // read it as the first real evidence the mechanism CAN work once
+            // a genuine activity difference exists to key off of.
+            out << "- IMPORTANT: NMDA block in this run uses the activity-dependent trapping\n"
+                   "  model (ketamine's interneuron-selectivity mechanism) COMBINED WITH the\n"
+                   "  fast-spiking interneuron profile. Real-hardware CONFIRMED (2026-08-10):\n"
+                   "  this combination DOES produce interneuron > pyramidal suppression\n"
+                   "  asymmetry -- excitatory suppression ~41-44% vs inhibitory ~50-54% at\n"
+                   "  every tested dose (a consistent ~9-11 percentage-point gap, not noise).\n"
+                   "  This is the first configuration where this mechanism has shown real\n"
+                   "  selectivity. Still a MODEST effect relative to real ketamine's documented\n"
+                   "  interneuron-selective action, and this run also carries the fast-spiking\n"
+                   "  profile's own non-default-network caveats below -- treat as encouraging\n"
+                   "  early evidence, not a fully validated selectivity result\n"
+                   "  (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
+        } else {
+            out << "- IMPORTANT: NMDA block in this run uses the activity-dependent trapping\n"
+                   "  model (ketamine's interneuron-selectivity mechanism), not a flat dose-only\n"
+                   "  block -- each neuron's own block strength is meant to depend on how often\n"
+                   "  its NMDA channels have been open recently, so higher-firing neurons would\n"
+                   "  end up more blocked purely from their own activity. CONFIRMED on real\n"
+                   "  hardware that this network does NOT currently produce that selectivity --\n"
+                   "  excitatory and inhibitory populations are suppressed almost identically at\n"
+                   "  every tested dose, because this network's excitatory/inhibitory neurons\n"
+                   "  already fire at nearly equal rates with no drug present, and the one lever\n"
+                   "  meant to separate them (adaptationInhibitoryScale) has no power to do so\n"
+                   "  even at its most extreme setting -- the network's own recurrent coupling\n"
+                   "  overrides it. An opt-in fast-spiking interneuron profile now exists and\n"
+                   "  has shown real selectivity when combined with this mechanism (see\n"
+                   "  PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2), but it is not enabled in\n"
+                   "  this run. Treat this run's liability read as equivalent to a flat NMDA\n"
+                   "  block, not as evidence of (or against) real interneuron selectivity.\n";
+        }
+    }
+    // Tier 2.4 part 2 follow-up: fast-spiking interneuron profile. Two
+    // distinct report-honesty needs, so two branches: (a) when ENABLED, the
+    // network is running non-default dynamics that no prior validated result
+    // in this project used -- that must be stated, or a reader would compare
+    // this run against the existing drug set as though they were like-for-
+    // like; (b) when DISABLED (the default), the interneuron-selectivity
+    // limitation documented in the ketamine work still applies to this run,
+    // which matters for any mechanism keyed on cell-type differences.
+    if (evalInput.config.fast_spiking_interneurons) {
+        out << "- IMPORTANT: this run used the FAST-SPIKING INTERNEURON PROFILE, which is\n"
+               "  OFF by default and was NOT used by any previously validated result in this\n"
+               "  project -- the inhibitory population here has fast-spiking (PV+) intrinsic\n"
+               "  properties (raised delayed-rectifier K+ conductance, weakened Ca-activated\n"
+               "  AHP, near-zero spike-frequency adaptation) instead of the legacy profile.\n"
+               "  The direction and choice of these levers are literature-grounded (Rudy &\n"
+               "  McBain 2001, Kv3 channels and high-frequency firing), but the specific\n"
+               "  scale VALUES are first-pass estimates, not calibrated against real\n"
+               "  electrophysiology. Results from this run are NOT directly comparable to\n"
+               "  this project's existing validated drug results, which all ran on the\n"
+               "  legacy network (PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2).\n";
+        const bool phiActive = std::fabs(evalInput.config.fs_interneuron_kinetics_phi - 1.0) > 1.0e-6;
+        const bool gkElevated = evalInput.config.fs_interneuron_gk_scale > 1.05;
+        if (phiActive && gkElevated) {
+            out << "- WARNING: this run combines a raised gK scale (fs_interneuron_gk_scale >\n"
+                   "  1.0) with a non-default gating-kinetics speedup (fs_interneuron_kinetics_phi\n"
+                   "  != 1.0). Real-hardware testing (2026-08-10) found this SPECIFIC combination\n"
+                   "  actively fights itself: at the old gk_scale=1.8 default, phi=3.0 moved the\n"
+                   "  E/I rate ratio BACKWARDS and phi=5.0 caused near-total inhibitory collapse\n"
+                   "  (23.7Hz -> 2.9Hz over the dose sweep). Results from this run should be\n"
+                   "  treated as UNRELIABLE until re-checked with gk_scale near 1.0 -- see\n"
+                   "  PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 for the full finding.\n";
+        } else if (phiActive) {
+            out << "- ADDITIONALLY: this run used the gating-kinetics speedup factor\n"
+                   "  (fs_interneuron_kinetics_phi != 1.0, Wang & Buzsaki 1996-style), paired with\n"
+                   "  gK near neutral. Real-hardware validated (2026-08-10): at the default of 3.0\n"
+                   "  this produces a real ~34.5% inhibitory-faster-than-excitatory separation\n"
+                   "  (the first of seven tested levers/combinations to do so), with moderate but\n"
+                   "  not pathological firing irregularity. That is confirmed real progress, NOT a\n"
+                   "  claim that interneuron realism is solved -- it remains well short of real\n"
+                   "  cortex's several-fold FS-vs-pyramidal gap. If fs_interneuron_kinetics_phi\n"
+                   "  differs from 3.0 in this run, note that 5.0 was tested and rejected (bursty,\n"
+                   "  irregular firing despite a larger raw separation) -- see\n"
+                   "  PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 for the full sweep.\n";
+        }
+    } else {
+        out << "- This network's excitatory and inhibitory populations fire at nearly\n"
+               "  identical rates with no drug present, unlike real cortex (where fast-\n"
+               "  spiking interneurons fire markedly faster than pyramidal cells).\n"
+               "  Confirmed structural, not a tuning artifact. Any mechanism whose real\n"
+               "  action depends on interneuron-vs-pyramidal activity differences cannot\n"
+               "  be resolved by this run -- see PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4\n"
+               "  part 2. An opt-in fast-spiking interneuron profile exists but is not\n"
+               "  enabled here.\n";
     }
     if (fragmentedWindow) {
         out << "- The effective/excitatory window fragmented at one or more tested doses --\n"

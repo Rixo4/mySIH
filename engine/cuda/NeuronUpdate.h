@@ -222,6 +222,17 @@ struct BatchedStepLaunchInfo {
     int nmdaActivityBlockEnabled = 0;
     float nmdaActivityBlockTauTrapMs = 300.0f;
     float nmdaActivityBlockTauUntrapMs = 6000.0f;
+
+    // Tier 2.4 part 2, second attempt: Wang-Buzsaki gating-kinetics speedup
+    // -- see SimulationEngine.h's fsInterneuronKineticsPhi comment for the
+    // full literature basis (this is the mechanistically-distinct lever
+    // tried after six magnitude/drive-based levers all failed to move the
+    // E/I rate ratio). No persistent per-neuron state needed -- the kernel
+    // branches per-step on the already-uploaded neuronType buffer (see
+    // BatchedStepDevicePointers::neuronType below), same reasoning as
+    // vesiclePoolEnabled/etc above for using an int instead of bool.
+    int fastSpikingInterneurons = 0;
+    float fsInterneuronKineticsPhi = 1.0f;
 };
 
 struct BatchedStepDevicePointers {

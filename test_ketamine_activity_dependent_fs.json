@@ -1,0 +1,29 @@
+{
+  "_status": "New test (2026-08-10, PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2): combines ketamine's activity-dependent NMDA trapping (test_ketamine_activity_dependent.json's mechanism, unchanged) with the fast-spiking interneuron profile at its real-hardware-validated combo (gk_scale=1.0, kinetics_phi=3.0 -- see SimulationEngine.h's fsInterneuronKineticsPhi comment and PRECISION_GAP_CLOSURE_PLAN.md Tier 2.4 part 2 for the ~34.5% baseline separation this produces with no drug present). This is the actual question the fast-spiking work was trying to answer: with a real (if still partial) E/I firing-rate difference now present at baseline, does ketamine's activity-dependent trapping -- which keys off each neuron's own NMDA drive as an activity proxy -- finally produce interneuron > pyramidal block asymmetry, where the flat-profile version (test_ketamine_activity_dependent.json) produced none at all (excitatory and inhibitory suppression tracked within a few hundredths of a Hz at every dose). Compare this file's celltype_rates.csv against test_ketamine_activity_dependent.json's (same doses, same drug mechanism, only the network's intrinsic profile differs) to isolate the fast-spiking profile's effect on ketamine's selectivity specifically.",
+  "drug_name": "Ketamine (activity-dependent NMDA trapping) + fast-spiking interneuron profile",
+  "channels": {
+    "Na": { "ic50": 1000000.0 },
+    "K":  { "ic50": 1000000.0 },
+    "Ca": { "ic50": 1000000.0 }
+  },
+  "receptors": {
+    "NMDA": {
+      "ec50": 0.5,
+      "hill": 1.0,
+      "activity_dependent": true,
+      "trap_tau_ms": 300.0,
+      "untrap_tau_ms": 6000.0
+    }
+  },
+  "fast_spiking_interneurons": {
+    "enabled": true,
+    "gk_scale": 1.0,
+    "gca_scale": 0.4,
+    "threshold_offset": 0.0,
+    "ext_current_offset": 0.0,
+    "adaptation_scale": 0.05,
+    "kinetics_phi": 3.0
+  },
+  "dose_range": { "min": 0.0, "max": 2.5, "step": 0.25 },
+  "runs": 8
+}
