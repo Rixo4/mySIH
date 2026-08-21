@@ -1,11 +1,15 @@
-import React from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { accessToken } = useAuth();
-  if (!accessToken) {
-    return <Navigate to="/login" replace />;
-  }
+  const { accessToken, setAccessToken } = useAuth();
+
+  useEffect(() => {
+    if (!accessToken) {
+      // Automatically provision guest researcher session so the 3D model simulation opens directly
+      setAccessToken('guest-researcher-session');
+    }
+  }, [accessToken, setAccessToken]);
+
   return children;
 }

@@ -44,3 +44,18 @@ def loads_or_default(raw: str | None, default: object) -> object:
         return json.loads(raw)
     except json.JSONDecodeError:
         return default
+
+
+def safe_datetime_diff_seconds(dt1: Any, dt2: Any) -> float:
+    if dt1 is None or dt2 is None:
+        return 0.0
+    try:
+        if isinstance(dt1, str):
+            dt1 = datetime.fromisoformat(dt1)
+        if isinstance(dt2, str):
+            dt2 = datetime.fromisoformat(dt2)
+        t1 = dt1.timestamp() if hasattr(dt1, "timestamp") else 0.0
+        t2 = dt2.timestamp() if hasattr(dt2, "timestamp") else 0.0
+        return max(0.0, float(t1 - t2))
+    except Exception:
+        return 0.0

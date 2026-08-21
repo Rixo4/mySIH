@@ -9,13 +9,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-three/drei": "^9.56.2",
+    "@react-three/fiber": "^8.13.9",
+    "three": "^0.185.1",
+    "@types/three": "^0.185.4",
     "axios": "^1.7.9",
     "framer-motion": "^12.4.7",
+    "gsap": "^3.15.0",
     "lucide-react": "^0.477.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5",
-    "recharts": "^2.15.1"
+    "recharts": "^2.15.1",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",

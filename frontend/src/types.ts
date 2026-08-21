@@ -79,6 +79,9 @@ export interface RunListItem {
   risk_level: string | null;
   confidence: string | null;
   created_at: string;
+  duration_seconds?: number | null;
+  runtime_seconds?: number | null;
+  nii_score?: number | null;
 }
 
 export interface RunsListResponse {

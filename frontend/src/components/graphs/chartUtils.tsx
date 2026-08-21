@@ -18,9 +18,9 @@ export interface NormalizedDoseResult {
   variance: number;
   response_mode: ResponseMode;
   biological_state: string;
-  ic50_na?: number;
-  ic50_k?: number;
-  ic50_ca?: number;
+  ic50_na?: number | null;
+  ic50_k?: number | null;
+  ic50_ca?: number | null;
   active_zone?: string;
 }
 
@@ -82,6 +82,7 @@ const RESPONSE_MODE_LABELS: Record<ResponseMode, string> = {
   STABILIZING_RESPONSE: 'Stabilization',
   MIXED_RESPONSE: 'Mixed Response',
   NO_SIGNIFICANT_RESPONSE: 'No Significant Response',
+  TOXIC_INSTABILITY: 'Toxic Instability',
   UNSPECIFIED: 'Response'
 };
 
@@ -219,9 +220,9 @@ function getChannelIc50(point: NormalizedDoseResult | null, channel: 'Na' | 'K' 
     return undefined;
   }
 
-  if (channel === 'Na') return point.ic50_na;
-  if (channel === 'K') return point.ic50_k;
-  return point.ic50_ca;
+  if (channel === 'Na') return point.ic50_na ?? undefined;
+  if (channel === 'K') return point.ic50_k ?? undefined;
+  return point.ic50_ca ?? undefined;
 }
 
 export function normalizeDoseResults(raw: unknown): NormalizedDoseResult[] {
@@ -296,7 +297,7 @@ function deriveDominantIc50(mode: ResponseMode, point: NormalizedDoseResult | nu
     return { value, label: `${channel} IC50` };
   }
 
-  const fallbackValue = point?.ic50_na ?? point?.ic50_k ?? point?.ic50_ca;
+  const fallbackValue = (point?.ic50_na ?? point?.ic50_k ?? point?.ic50_ca) ?? undefined;
   return { value: fallbackValue, label: 'IC50' };
 }
 
@@ -374,8 +375,8 @@ export function normalizeVisualizationData(
   const normalizedMarkers: NormalizedMarkers = {
     ic50: dominant.value,
     ic50Label: dominant.label,
-    onsetDose,
-    toxicThreshold,
+    onsetDose: onsetDose ?? undefined,
+    toxicThreshold: toxicThreshold ?? undefined,
     therapeuticMin: hasValidatedTherapeuticWindow ? therapeuticMin ?? undefined : undefined,
     therapeuticMax: hasValidatedTherapeuticWindow ? therapeuticMax ?? undefined : undefined,
     activeZone,
@@ -383,9 +384,9 @@ export function normalizeVisualizationData(
     toxicityObserved,
     lowResponseVisualMode: lowResponse,
     channelIc50s: {
-      Na: firstPoint?.ic50_na,
-      K: firstPoint?.ic50_k,
-      Ca: firstPoint?.ic50_ca
+      Na: firstPoint?.ic50_na ?? undefined,
+      K: firstPoint?.ic50_k ?? undefined,
+      Ca: firstPoint?.ic50_ca ?? undefined
     }
   };
 

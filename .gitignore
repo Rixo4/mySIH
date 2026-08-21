@@ -44,3 +44,14 @@ DEPLOYMENT.md
 vercel.json
 # Generated artifacts
 backend/artifacts/
+
+# Agent and IDE meta
+.agent/
+.agents/
+.codex/
+.cursor/
+.gemini/
+.impeccable/
+.superdesign/
+skills-lock.json
+*.tsbuildinfo

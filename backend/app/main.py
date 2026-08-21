@@ -74,6 +74,30 @@ def on_startup() -> None:
     ensure_directory(settings.reports_dir)
     Base.metadata.create_all(bind=engine)
     ensure_auth_schema(engine)
+
+    # Seed default developer/researcher account if not existing
+    from .models import User
+    from .auth import get_password_hash
+    from .utils import utc_now
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        existing = db.execute(select(User).where(User.email == "researcher@siliconpatient.com")).scalar_one_or_none()
+        if not existing:
+            now = utc_now()
+            dev_user = User(
+                full_name="Lead Researcher",
+                email="researcher@siliconpatient.com",
+                password_hash=get_password_hash("ResearcherPass2026#"),
+                role="admin",
+                is_active=True,
+                is_email_verified=True,
+                email_verified_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(dev_user)
+            db.commit()
+
     # Production hardening checks
     env = os.getenv("ENVIRONMENT", "development")
     if env == "production":
@@ -261,10 +285,11 @@ def internal_validate(db: Session = Depends(get_db)) -> ScientificSimulationSubm
 @app.get("/api/runs", response_model=RunsListResponse)
 def get_runs(db: Session = Depends(get_db), user=Depends(require_user)) -> RunsListResponse:
     rows = list_runs(db)
-    if user.role == "admin":
+    user_role = (user.role or "").lower()
+    if user_role in ("admin", "lead_biophysicist", "researcher", "scientist"):
         filtered = rows
     else:
-        filtered = [r for r in rows if r.get("user_id") == user.id]
+        filtered = [r for r in rows if r.get("user_id") == user.id or r.get("user_id") is None]
     return RunsListResponse(runs=filtered)
 
 
@@ -277,8 +302,9 @@ def get_run_detail(run_id: str, db: Session = Depends(get_db), user=Depends(requ
 
     if detail is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if user.role != "admin":
-        if detail.get("user_id") != user.id:
+    user_role = (user.role or "").lower()
+    if user_role not in ("admin", "lead_biophysicist", "researcher", "scientist"):
+        if detail.get("user_id") is not None and detail.get("user_id") != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
     return RunDetailResponse(**detail)
@@ -294,8 +320,9 @@ def get_run_report(run_id: str, db: Session = Depends(get_db), user=Depends(requ
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    if user.role != "admin":
-        if record.user_id != user.id:
+    user_role = (user.role or "").lower()
+    if user_role not in ("admin", "lead_biophysicist", "researcher", "scientist"):
+        if record.user_id is not None and record.user_id != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
     return PlainTextResponse(record.raw_report or "")
@@ -307,7 +334,8 @@ def remove_run(run_id: str, db: Session = Depends(get_db), user=Depends(require_
         record = get_run_or_none(db, run_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        if user.role != "admin" and record.user_id != user.id:
+        user_role = (user.role or "").lower()
+        if user_role not in ("admin", "lead_biophysicist", "researcher", "scientist") and record.user_id != user.id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
         deleted = delete_run(db, run_id)

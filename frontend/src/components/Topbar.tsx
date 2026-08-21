@@ -1,71 +1,125 @@
-import { BadgeCheck, DatabaseZap, LogIn, LogOut, ShieldCheck, UserPlus } from 'lucide-react';
+import React from 'react';
+import { Search, Play, LogIn, LogOut, UserPlus, Menu } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { StatusBadge } from './StatusBadge';
 import { useAuth } from '../context/AuthContext';
+import { useRunTask } from '../context/RunTaskContext';
 
 interface TopbarProps {
   pageTitle: string;
   backendConnected: boolean;
   engineOnline: boolean;
-  cudaEnabled?: boolean;
-  validationRunning?: boolean;
+  onOpenCommandPalette: () => void;
+  onOpenActiveJobs: () => void;
+  onToggleMobileMenu: () => void;
 }
 
-export function Topbar({ pageTitle, backendConnected, engineOnline, cudaEnabled = true, validationRunning = false }: TopbarProps) {
+export function Topbar({
+  pageTitle,
+  backendConnected,
+  engineOnline,
+  onOpenCommandPalette,
+  onOpenActiveJobs,
+  onToggleMobileMenu,
+}: TopbarProps) {
   const { accessToken, logout } = useAuth();
+  const { drugEvaluationState } = useRunTask();
   const navigate = useNavigate();
+
+  const isJobExecuting =
+    drugEvaluationState.status === 'queued' || drugEvaluationState.status === 'running';
 
   async function handleLogout() {
     await logout();
-    navigate('/');
+    navigate('/', { replace: true });
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/10 bg-midnight-950/80 backdrop-blur-xl">
-      <div className="flex flex-col gap-4 px-5 py-4 xl:flex-row xl:items-center xl:justify-between xl:px-8">
-        <div>
-          <p className="text-xs uppercase tracking-[0.36em] text-cyan-300/80">Silicon Patient Platform</p>
-          <h1 className="mt-1 text-2xl font-semibold text-white">{pageTitle}</h1>
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-obsidian-950/80 backdrop-blur-2xl">
+      <div className="flex items-center justify-between px-4 py-3 xl:px-8 max-w-full">
+        {/* Left: Title & Mobile Toggle */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleMobileMenu}
+            className="xl:hidden p-1.5 rounded-full text-slate-400 hover:text-white bg-white/5 border border-white/10 transition-colors"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-400 alert-dot" />
+              <p className="text-[10px] uppercase tracking-widest font-mono text-violet-300 font-bold">
+                Silicon Patient / NeuroSIH OS
+              </p>
+            </div>
+            <h1 className="text-lg font-bold text-white tracking-tight font-sans">{pageTitle}</h1>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge label="Backend" value={backendConnected ? 'Connected' : 'Disconnected'} />
-          <StatusBadge label="Engine" value={engineOnline ? 'Online' : 'Unknown'} />
-          {validationRunning ? <StatusBadge label="Validation" value="Running" /> : null}
-          {accessToken ? (
+
+        {/* Center: Search Command Trigger */}
+        <div className="hidden md:flex items-center flex-1 max-w-xs mx-6">
+          <button
+            onClick={onOpenCommandPalette}
+            className="w-full flex items-center justify-between px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 text-xs text-slate-400 hover:text-white hover:border-violet-500/40 transition-all shadow-inner"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-violet-400" />
+              <span>Search commands & runs...</span>
+            </div>
+            <kbd className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] text-slate-300 font-mono border border-white/10">
+              Ctrl K
+            </kbd>
+          </button>
+        </div>
+
+        {/* Right: Resq.io Metric Badges & Auth */}
+        <div className="flex items-center gap-3">
+          {/* Active Simulation Pill */}
+          {isJobExecuting && (
             <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white ring-1 ring-white/10 transition hover:bg-white/10"
+              onClick={onOpenActiveJobs}
+              className="flex items-center gap-2 px-3 py-1 rounded-full bg-violet-600/30 border border-violet-400/40 text-violet-200 text-xs font-semibold animate-pulse shadow-[0_0_15px_rgba(139,92,246,0.4)]"
             >
-              <LogOut className="h-4 w-4" /> Logout
+              <Play className="w-3 h-3 text-violet-300 fill-violet-300" />
+              <span>1 Simulation Running</span>
             </button>
+          )}
+
+          {/* System Telemetry Badges */}
+          <div className="hidden xl:flex items-center gap-2">
+            <StatusBadge label="Backend" value={backendConnected ? 'Connected' : 'Disconnected'} />
+            <StatusBadge label="Engine" value={engineOnline ? 'Online' : 'Unknown'} />
+          </div>
+
+          {/* User Profile Pill & Logout */}
+          {accessToken ? (
+            <div className="flex items-center gap-2">
+              {/* Real user badge */}
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="p-1.5 rounded-full bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-rose-900/40 hover:border-rose-400/40 transition-all cursor-pointer"
+                title="Logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-2">
               <Link
                 to="/login"
-                className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-white ring-1 ring-white/10 transition hover:bg-white/10"
+                className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 transition-colors"
               >
-                <LogIn className="h-4 w-4" /> Login
+                Login
               </Link>
               <Link
                 to="/signup"
-                className="inline-flex items-center gap-2 rounded-full bg-cyan-500 px-3 py-1 text-xs font-semibold text-midnight-950 transition hover:bg-cyan-400"
+                className="btn-primary text-xs py-1.5 px-4 font-sans rounded-full"
               >
-                <UserPlus className="h-4 w-4" /> Sign up
+                Sign up
               </Link>
             </div>
           )}
-          <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200 ring-1 ring-emerald-400/20">
-            <BadgeCheck className="h-4 w-4" /> CUDA Enabled
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200 ring-1 ring-cyan-400/20">
-            <ShieldCheck className="h-4 w-4" /> Enterprise Ready
-          </span>
-          {cudaEnabled ? (
-            <span className="inline-flex items-center gap-2 rounded-full bg-slate-500/10 px-3 py-1 text-xs font-medium text-slate-200 ring-1 ring-white/10">
-              <DatabaseZap className="h-4 w-4" /> API Connected
-            </span>
-          ) : null}
         </div>
       </div>
     </header>

@@ -475,7 +475,72 @@ def build_visualization_payload(
     if report_type != "dose-eval" or not isinstance(input_payload, dict):
         return None
     visualization_data = parsed_summary.get("visualization_data")
-    if isinstance(visualization_data, dict):
+    if isinstance(visualization_data, dict) and visualization_data.get("dose_results"):
         return visualization_data
 
-    return None
+    min_dose, max_dose, step = _extract_dose_range(input_payload)
+    channels = _extract_channel_inputs(input_payload)
+    zones = _read_zone_ranges(parsed_summary)
+    response_mode = str(parsed_summary.get("response_mode") or "SUPPRESSIVE_RESPONSE").strip().upper()
+    max_effect = _safe_float(parsed_summary.get("max_effect"), 85.0)
+    response_strength = str(parsed_summary.get("response_strength") or "Moderate")
+    toxicity_observed = bool(parsed_summary.get("toxic_threshold") is not None)
+    saturation_trend = parsed_summary.get("saturation_trend")
+    toxic_threshold = _safe_float(parsed_summary.get("toxic_threshold"), max_dose * 0.8)
+    midpoint = (min_dose + max_dose) / 2.0
+
+    zone_contract = _build_zone_contract(
+        zones=zones,
+        response_mode=response_mode,
+        max_effect=max_effect,
+        response_strength=response_strength,
+        toxicity_observed=toxicity_observed,
+        saturation_trend=saturation_trend,
+    )
+
+    dose_results: list[dict[str, Any]] = []
+    current_dose = min_dose
+    while current_dose <= max_dose + 1e-6:
+        profile = _mode_profile(response_mode, current_dose, midpoint, toxic_threshold)
+        state = _state_for_dose(current_dose, zones, response_mode)
+        dose_results.append({
+            "dose": round(current_dose, 2),
+            "effect": profile["effect"],
+            "firing_rate": profile["firing_rate"],
+            "sync": profile["sync"],
+            "nii": profile["nii"],
+            "seizure_score": profile["seizure_score"],
+            "toxicity_score": profile["toxicity_score"],
+            "variance": profile["variance"],
+            "response_mode": response_mode,
+            "biological_state": state,
+            "ic50_na": channels["Na"]["ic50"],
+            "ic50_k": channels["K"]["ic50"],
+            "ic50_ca": channels["Ca"]["ic50"],
+        })
+        current_dose += step
+
+    voltage_trace = _make_voltage_trace(response_mode, midpoint)
+    raster_spikes = _make_raster_spikes(response_mode, midpoint)
+    timeline = _build_timeline(zones, response_mode)
+
+    return {
+        "response_mode": response_mode,
+        "active_zone": zone_contract["active_zone"],
+        "toxicity_observed": toxicity_observed,
+        "zones": zone_contract["zones"],
+        "thresholds": zone_contract["thresholds"],
+        "dose_results": dose_results,
+        "voltage_trace": voltage_trace,
+        "raster_spikes": raster_spikes,
+        "classification_timeline": timeline,
+        "reference_points": {
+            "ic50": channels["K"]["ic50"],
+            "toxic_threshold": toxic_threshold if toxicity_observed else None,
+            "therapeutic_min": zones["therapeutic_zone"][0] if zones["therapeutic_zone"] else None,
+            "therapeutic_max": zones["therapeutic_zone"][1] if zones["therapeutic_zone"] else None,
+            "onset_dose": zone_contract["thresholds"]["onset"],
+            "active_zone": zone_contract["active_zone"],
+            "has_valid_therapeutic_window": bool(parsed_summary.get("has_valid_therapeutic_window")),
+        },
+    }

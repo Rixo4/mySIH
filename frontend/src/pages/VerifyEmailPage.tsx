@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 type VerifyLocationState = {
   email?: string;
   message?: string;
+  otp?: string;
 };
 
 export function VerifyEmailPage() {
@@ -13,7 +14,7 @@ export function VerifyEmailPage() {
   const auth = useAuth();
   const state = (location.state ?? {}) as VerifyLocationState;
   const [email, setEmail] = useState(state.email ?? '');
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(state.otp ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,66 +1,351 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════
+   DESIGN TOKEN SYSTEM
+   Scientific Instrumentation Aesthetic
+   Inspired by: Bloomberg Terminal, MATLAB, Epic/Cerner, Palantir Foundry
+   ══════════════════════════════════════════════════════════ */
+
 :root {
-  color-scheme: dark;
-  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-  background: #030712;
+  /* Elevation scale — no glow, just brightness steps */
+  --bg-base:    #0B0D10;   /* app shell background */
+  --bg-panel:   #111418;   /* card / panel fill */
+  --bg-raised:  #161A20;   /* input, sub-panel */
+  --bg-hover:   #1C2028;   /* hover state fill */
+
+  /* Borders — thin, single-weight */
+  --border-muted:  #1D2127;
+  --border-subtle: #252B34;
+  --border-active: #3B4049;
+
+  /* Text hierarchy */
+  --text-primary:   #D4D8DE;   /* main labels */
+  --text-secondary: #6B7280;   /* subtitles, units */
+  --text-tertiary:  #424956;   /* placeholder, disabled */
+  --text-inverse:   #FFFFFF;
+
+  /* Accent — one color, steel-blue, for "live / active / selected" only */
+  --accent:       #3B82F6;
+  --accent-muted: rgba(59,130,246,0.14);
+  --accent-border: rgba(59,130,246,0.3);
+
+  /* Semantic status colors — used for data meaning only */
+  --safe:   #22C55E;
+  --warn:   #EAB308;
+  --danger: #EF4444;
+  --safe-bg:   rgba(34,197,94,0.10);
+  --warn-bg:   rgba(234,179,8,0.10);
+  --danger-bg: rgba(239,68,68,0.10);
+  --safe-border:   rgba(34,197,94,0.25);
+  --warn-border:   rgba(234,179,8,0.25);
+  --danger-border: rgba(239,68,68,0.25);
+
+  /* Type scale */
+  --text-xs:  11px;
+  --text-sm:  12px;
+  --text-md:  14px;
+  --text-lg:  16px;
+  --text-xl:  20px;
+  --text-2xl: 28px;
+
+  /* Shared card geometry */
+  --card-radius: 6px;
+  --card-padding: 12px;
 }
 
-html,
-body,
-#root {
-  min-height: 100%;
-}
+@layer base {
+  * { box-sizing: border-box; }
 
-body {
-  margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(56, 189, 248, 0.08), transparent 24%),
-    linear-gradient(180deg, #030712 0%, #07111f 100%);
-  color: #e2e8f0;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
 
-* {
-  box-sizing: border-box;
-}
-
-::selection {
-  background: rgba(56, 189, 248, 0.24);
-  color: #ffffff;
+  /* Minimal scrollbar — functional, not decorative */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
 }
 
 @layer components {
-  .glass-card {
-    @apply rounded-3xl border border-white/10 bg-[rgba(7,17,31,0.72)] shadow-panel backdrop-blur-xl;
+  /* ── Unified Card — the ONLY card style ── */
+  .card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--card-radius);
+    overflow: hidden;
+  }
+  .card-interactive {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--card-radius);
+    overflow: hidden;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .card-interactive:hover {
+    border-color: var(--border-subtle);
+    background: var(--bg-raised);
   }
 
-  .page-title {
-    @apply text-3xl font-semibold text-white md:text-4xl;
+  /* ── Card section header ── */
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px var(--card-padding) 6px;
+    border-bottom: 1px solid var(--border-muted);
+  }
+  .card-title {
+    font-family: 'Inter', sans-serif;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: #fff;
+    background: var(--accent);
+    border: 1px solid rgba(59,130,246,0.5);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.14s;
+  }
+  .btn-primary:hover { background: #2563EB; }
+  .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.14s, border-color 0.14s;
+  }
+  .btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-active);
+  }
+
+  /* ── Status chips — semantic color only ── */
+  .chip-safe {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--safe);
+    background: var(--safe-bg);
+    border: 1px solid var(--safe-border);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .chip-warn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--warn);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .chip-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--danger);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .chip-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-muted);
+    border: 1px solid var(--accent-border);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .chip-neutral {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    background: rgba(107,114,128,0.10);
+    border: 1px solid rgba(107,114,128,0.20);
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  /* ── Status badges ── */
+  .status-badge-safe    { color: var(--safe);   background: var(--safe-bg);   border: 1px solid var(--safe-border); }
+  .status-badge-warning { color: var(--warn);   background: var(--warn-bg);   border: 1px solid var(--warn-border); }
+  .status-badge-danger  { color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger-border); }
+  .status-badge-neutral { color: var(--text-secondary); background: rgba(107,114,128,0.08); border: 1px solid rgba(107,114,128,0.18); }
+
+  /* ── Section label ── */
+  .section-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  /* ── Mono data value ── */
+  .data-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  /* ── Instrumentation tabs (subsystem selector) ── */
+  .tab-3d-active {
+    background: var(--accent-muted);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .tab-3d-inactive {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    transition: color 0.14s, background 0.14s;
+  }
+  .tab-3d-inactive:hover {
+    color: var(--text-primary);
+    background: var(--bg-raised);
+  }
+
+  /* ── Live-data indicator dot (encodes real running state) ── */
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--safe);
+    animation: live-pulse 2.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  /* ── observatory-bg (referenced from AppLayout) ── */
+  .observatory-bg {
+    background-color: var(--bg-base);
   }
 }
 
-pre,
-code,
-.font-mono {
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+/* ══════════════════════════════════════════════════════════
+   ELEVATION HELPERS
+   ══════════════════════════════════════════════════════════ */
+.elevation-0 { background-color: var(--bg-base); }
+.elevation-1 { background-color: var(--bg-panel);  border: 1px solid var(--border-muted); }
+.elevation-2 { background-color: var(--bg-raised); border: 1px solid var(--border-subtle); }
+.elevation-3 { background-color: var(--bg-hover);  border: 1px solid var(--border-active); }
+
+/* ══════════════════════════════════════════════════════════
+   ANIMATIONS
+   Only kept where they encode real state (not decoration)
+   ══════════════════════════════════════════════════════════ */
+
+/* Live-data dot pulse — encodes "actively running" */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+/* Alert dot — legacy compat (BottomStatusStrip uses this class) */
+@keyframes alert-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
 }
+.alert-dot { animation: alert-dot 2.4s ease-in-out infinite; }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.32);
-  border-radius: 999px;
+/* Flow dash — for SVG stroke animations on charts */
+@keyframes flow-dash {
+  from { stroke-dashoffset: 60; }
+  to   { stroke-dashoffset: 0; }
 }
+.animate-flow-dash { animation: flow-dash 2s linear infinite; }
 
-::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.9);
+/* Fade in — page transitions */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fadeInUp 0.3s ease forwards; }
+
+/* Spin — loading indicators only */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.animate-spin-slow { animation: spin-slow 8s linear infinite; }
+
+/* ══════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

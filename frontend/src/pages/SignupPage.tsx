@@ -40,7 +40,7 @@ export function SignupPage() {
     setError(null);
     try {
       const result = await auth.signup(fullName, email, password, company || undefined);
-      nav('/verify-email', { state: { email, message: result.detail } });
+      nav('/verify-email', { state: { email, message: result.detail, otp: result.otp } });
     } catch (err) {
       setError('Unable to create account');
     } finally {

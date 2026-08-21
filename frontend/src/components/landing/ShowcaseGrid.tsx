@@ -1,0 +1,214 @@
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Shield, Sparkles, TrendingDown, TrendingUp, Layers, Zap, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
+const BENCHMARKS = [
+  {
+    name: 'Ketamine Benchmark Profile',
+    target: 'NMDA Receptor Antagonist',
+    risk: 'LOW RISK',
+    riskColor: 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40',
+    signal: 'Stabilizing ↑',
+    signalColor: 'text-emerald-400 bg-emerald-950/60',
+    mode: 'STABILIZING_RESPONSE',
+    maxEffect: '84.2%',
+    r2: '0.982',
+    provenance: 'Internal Benchmark Suite',
+    status: 'SAFE TO ADVANCE',
+    desc: 'High therapeutic index with suppressed pro-convulsant burst discharge across cortical pyramidals.',
+  },
+  {
+    name: 'Diazepam Benchmark Profile',
+    target: 'GABA-A Allosteric Modulator',
+    risk: 'MODERATE RISK',
+    riskColor: 'bg-amber-950/80 text-amber-400 border-amber-500/40',
+    signal: 'Suppressive ~',
+    signalColor: 'text-amber-400 bg-amber-950/60',
+    mode: 'SUPPRESSIVE_RESPONSE',
+    maxEffect: '91.6%',
+    r2: '0.965',
+    provenance: 'Internal Benchmark Suite',
+    status: 'MONITOR IN VIVO',
+    desc: 'Strong network hyperpolarization with dampening of spontaneous action potential firing.',
+  },
+  {
+    name: 'Selective K+ Channel Blocker',
+    target: 'Kv1.2 / Delayed Rectifier Inhibitor',
+    risk: 'HIGH RISK',
+    riskColor: 'bg-rose-950/80 text-rose-400 border-rose-500/40',
+    signal: 'Excitatory ⚡',
+    signalColor: 'text-rose-400 bg-rose-950/60',
+    mode: 'EXCITATORY_RESPONSE',
+    maxEffect: '100.0%',
+    r2: '0.850',
+    provenance: 'Pro-Convulsant Screen',
+    status: 'TOXIC / REJECTED',
+    desc: 'Severe repolarization delay leading to paroxysmal depolarizing shifts and epileptiform bursts.',
+  },
+  {
+    name: 'Na+ Channel Modulator',
+    target: 'Nav1.6 Subtype Blocker',
+    risk: 'LOW RISK',
+    riskColor: 'bg-emerald-950/80 text-emerald-400 border-emerald-500/40',
+    signal: 'Stabilizing ↑',
+    signalColor: 'text-emerald-400 bg-emerald-950/60',
+    mode: 'STABILIZING_RESPONSE',
+    maxEffect: '78.4%',
+    r2: '0.991',
+    provenance: 'In-Silico Sweep',
+    status: 'PROMISING CANDIDATE',
+    desc: 'Targeted reduction in peak sodium conductance without suppressing baseline pacemaker activity.',
+  },
+];
+
+export function ShowcaseGrid() {
+  const [activeTab, setActiveTab] = useState<'all' | 'low' | 'high'>('all');
+
+  const filteredBenchmarks = BENCHMARKS.filter((b) => {
+    if (activeTab === 'low') return b.risk === 'LOW RISK';
+    if (activeTab === 'high') return b.risk === 'HIGH RISK' || b.risk === 'MODERATE RISK';
+    return true;
+  });
+
+  return (
+    <section id="showcase" className="py-24 relative bg-obsidian-950 overflow-hidden">
+      {/* Ambient glow */}
+      <div className="absolute top-1/3 left-1/4 w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-16">
+        {/* Header with Industrial-Grade Typography & Smooth Entrance Motion */}
+        <div className="text-center max-w-4xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: -15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-950/60 border border-blue-500/30 text-xs font-mono text-blue-200 mb-6 backdrop-blur-xl shadow-[0_0_20px_rgba(59,130,246,0.25)]"
+          >
+            <span className="w-2 h-2 rounded-full bg-blue-400 alert-dot shadow-[0_0_8px_#60a5fa]" />
+            <span className="text-blue-300 font-bold">Benchmark Validation Suite</span>
+            <span className="text-slate-600">—</span>
+            <span className="text-slate-300 font-medium">Native C++/CUDA Reference Library</span>
+          </motion.div>
+
+          <motion.h1
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="text-4xl sm:text-6xl lg:text-7xl font-extrabold text-white tracking-tight leading-[1.12] max-w-4xl font-sans mx-auto"
+          >
+            Validated Benchmark Library <br />
+            <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-violet-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(99,102,241,0.45)]">
+              With Proven Provenance.
+            </span>
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="mt-6 text-base sm:text-lg text-slate-300 max-w-2xl font-normal leading-relaxed mx-auto"
+          >
+            Inspect real validation outputs generated by the native C++/CUDA ODE engine across known reference profiles.
+          </motion.p>
+        </div>
+
+        {/* Filter Controls Row */}
+        <div className="flex justify-center">
+          <div className="inline-flex items-center p-1.5 rounded-full bg-slate-950 border border-white/10 font-mono text-xs shadow-inner">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`px-5 py-2 rounded-full font-bold transition-all cursor-pointer ${
+                activeTab === 'all'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All Benchmarks ({BENCHMARKS.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('low')}
+              className={`px-5 py-2 rounded-full font-bold transition-all cursor-pointer ${
+                activeTab === 'low'
+                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Low Risk (Safe)
+            </button>
+            <button
+              onClick={() => setActiveTab('high')}
+              className={`px-5 py-2 rounded-full font-bold transition-all cursor-pointer ${
+                activeTab === 'high'
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              High / Moderate Risk
+            </button>
+          </div>
+        </div>
+
+        {/* Dense 2x2 Showcase Card Grid filling full page width without empty voids */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {filteredBenchmarks.map((item, idx) => (
+            <motion.div
+              key={item.name}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: idx * 0.08 }}
+              className="p-7 rounded-3xl bg-slate-950/85 border border-white/10 hover:border-blue-500/40 backdrop-blur-xl shadow-2xl space-y-5 group transition-all duration-300 hover:-translate-y-1"
+            >
+              <div className="flex items-start justify-between gap-4 pb-4 border-b border-white/[0.08]">
+                <div>
+                  <h3 className="text-xl font-bold text-white group-hover:text-blue-300 transition-colors font-sans">
+                    {item.name}
+                  </h3>
+                  <div className="text-xs text-blue-400 font-mono mt-0.5">{item.target}</div>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold border ${item.riskColor}`}>
+                  {item.risk}
+                </span>
+              </div>
+
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-sans">
+                {item.desc}
+              </p>
+
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <div className="text-[9px] font-mono text-slate-400 uppercase">Response Mode</div>
+                  <div className="text-xs font-bold text-white font-mono truncate">{item.mode}</div>
+                </div>
+                <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <div className="text-[9px] font-mono text-slate-400 uppercase">Max Efficacy</div>
+                  <div className="text-xs font-bold text-blue-400 font-mono">{item.maxEffect}</div>
+                </div>
+                <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <div className="text-[9px] font-mono text-slate-400 uppercase">R² Confidence</div>
+                  <div className="text-xs font-bold text-emerald-400 font-mono">{item.r2}</div>
+                </div>
+              </div>
+
+              {/* Action Trigger */}
+              <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between">
+                <span className="text-xs font-mono font-bold text-slate-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  {item.status}
+                </span>
+                <Link
+                  to="/app/dose-eval"
+                  className="text-xs font-mono font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 group-hover:translate-x-1 transition-transform"
+                >
+                  <span>Simulate in Dose Lab</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}

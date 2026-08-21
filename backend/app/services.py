@@ -309,6 +309,14 @@ def get_run_detail_or_none(db: Session, run_id: str) -> dict[str, Any] | None:
 
     parsed_summary = loads_or_default(row.parsed_json, {})
     visualization_data = parsed_summary.get("visualization_data") if isinstance(parsed_summary, dict) else None
+    input_payload = loads_or_default(row.input_json, {})
+
+    if visualization_data is None:
+        visualization_data = build_visualization_payload(
+            report_type=row.report_type,
+            input_payload=input_payload,
+            parsed_summary=parsed_summary,
+        )
 
     return {
         "run_id": row.run_id,
@@ -322,7 +330,7 @@ def get_run_detail_or_none(db: Session, run_id: str) -> dict[str, Any] | None:
         "raw_report": row.raw_report,
         "parsed_summary": parsed_summary,
         "visualization_data": visualization_data,
-        "input_payload": loads_or_default(row.input_json, {}),
+        "input_payload": input_payload,
         "error_message": row.error_message,
         "duration_seconds": row.duration_seconds,
         "created_at": row.created_at,

@@ -21,7 +21,7 @@ from .models import DoseResult, RunRecord, SimulationJob, SimulationJobStatus
 from .queue.queues import simulation_queue
 from .queue.redis_conn import redis_conn
 from .report_parser import parse_report
-from .utils import ensure_directory, generate_run_id, sanitize_run_id, utc_now, write_json_file
+from .utils import ensure_directory, generate_run_id, sanitize_run_id, safe_datetime_diff_seconds, utc_now, write_json_file
 from .visualization import build_visualization_payload
 
 logger = logging.getLogger(__name__)
@@ -143,7 +143,7 @@ def cancel_scientific_simulation_job(db: Session, *, simulation_job_id: uuid.UUI
     job.error_message = "Cancelled by user"
     job.completed_at = utc_now()
     if job.started_at is not None:
-        job.runtime_seconds = max(0.0, (job.completed_at - job.started_at).total_seconds())
+        job.runtime_seconds = safe_datetime_diff_seconds(job.completed_at, job.started_at)
     db.commit()
 
     logger.info(
@@ -162,7 +162,10 @@ def _count_running_jobs(db: Session) -> int:
     return int(db.scalar(stmt) or 0)
 
 def get_queue_stats(db: Session) -> dict[str, int | str]:
-    queued_jobs = int(getattr(simulation_queue, "count", 0) or 0)
+    try:
+        queued_jobs = int(getattr(simulation_queue, "count", 0) or 0)
+    except Exception:
+        queued_jobs = 0
     running_jobs = _count_running_jobs(db)
     completed_jobs = int(
         db.scalar(select(func.count()).select_from(SimulationJob).where(SimulationJob.status == SimulationJobStatus.COMPLETED))
@@ -364,7 +367,7 @@ def _mark_job_running(db: Session, *, job: SimulationJob) -> None:
     job.completed_at = None
     job.error_message = None
     job.worker_hostname = socket.gethostname()
-    job.queue_latency_seconds = max(0.0, (started - job.created_at).total_seconds())
+    job.queue_latency_seconds = safe_datetime_diff_seconds(started, job.created_at)
     job.progress = 0.0
     db.commit()
 
@@ -383,7 +386,7 @@ def _mark_job_failed(db: Session, *, job: SimulationJob, error_message: str) -> 
     job.error_message = error_message
     job.completed_at = utc_now()
     if job.started_at is not None:
-        job.runtime_seconds = max(0.0, (job.completed_at - job.started_at).total_seconds())
+        job.runtime_seconds = safe_datetime_diff_seconds(job.completed_at, job.started_at)
     db.commit()
 
     logger.error(
@@ -401,7 +404,7 @@ def _mark_job_completed(db: Session, *, job: SimulationJob) -> None:
     job.progress = 1.0
     job.completed_at = utc_now()
     if job.started_at is not None:
-        job.runtime_seconds = max(0.0, (job.completed_at - job.started_at).total_seconds())
+        job.runtime_seconds = safe_datetime_diff_seconds(job.completed_at, job.started_at)
     db.commit()
 
     logger.info(
@@ -442,6 +445,7 @@ def enqueue_scientific_simulation(
     drug_name: str | None = None,
     runs_override: int | None = None,
 ) -> SimulationJob:
+    import threading as _threading
     job = create_simulation_job(
         db,
         input_payload={
@@ -465,6 +469,31 @@ def enqueue_scientific_simulation(
         "company_id": company_id,
         "runs_override": runs_override,
     }
+
+    # When using fakeredis (is_async=False), enqueue() would block the HTTP request.
+    # Instead run the simulation in a background thread so the API returns QUEUED immediately.
+    if not simulation_queue.is_async:
+        job_id_snapshot = str(job.id)
+
+        def _run_in_thread():
+            _db = SessionLocal()
+            try:
+                run_scientific_simulation_job(rq_payload)
+            except Exception as exc:
+                logger.error("background_simulation_thread_error", extra={"job_id": job_id_snapshot, "error": str(exc)})
+            finally:
+                _db.close()
+
+        t = _threading.Thread(target=_run_in_thread, daemon=True)
+        t.start()
+        logger.info(
+            "simulation_job_enqueued_thread",
+            extra={
+                "job_id": str(job.id),
+                "queue_mode": "synchronous_thread",
+            },
+        )
+        return job
 
     queued_job = simulation_queue.enqueue(
         run_scientific_simulation_job,
@@ -589,11 +618,42 @@ def run_scientific_simulation_job(job_payload: dict[str, Any]) -> dict[str, Any]
             }
 
         raw_report = engine_result.stdout or ""
+        pharma_dir = run_dir / "output_pharma_decision"
+        if pharma_dir.exists() and pharma_dir.is_dir():
+            report_file = pharma_dir / "liability_screening_report.txt"
+            if report_file.exists() and not raw_report.strip():
+                raw_report = report_file.read_text(encoding="utf-8")
+
         engine_contract = _normalize_engine_contract(
             report_type=engine_mode,
             stdout=raw_report,
             input_payload=input_payload,
         )
+
+        if pharma_dir.exists() and pharma_dir.is_dir():
+            csv_file = pharma_dir / "dose_response.csv"
+            if csv_file.exists() and not engine_contract.get("dose_results"):
+                import csv
+                dose_rows = []
+                try:
+                    with open(csv_file, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for r in reader:
+                            dose_rows.append({
+                                "dose": float(r.get("dose") or 0),
+                                "firing_rate": float(r.get("mean_firing_rate_hz") or 0),
+                                "sync_index": float(r.get("synchronization") or 0),
+                                "sync": float(r.get("synchronization") or 0),
+                                "seizure_score": float(r.get("seizure_probability_pct") or 0),
+                                "nii": float(r.get("nii") or 0),
+                                "response_mode": r.get("classification"),
+                                "biological_state": r.get("classification"),
+                                "effect": float(r.get("suppression_pct") or 0),
+                            })
+                    engine_contract["dose_results"] = dose_rows
+                except Exception as e:
+                    logger.warning("Failed to parse dose_response.csv: %s", e)
+
         parsed_summary = engine_contract.get("summary") if isinstance(engine_contract.get("summary"), dict) else {}
         visualization_data = build_visualization_payload(
             report_type=engine_mode,
@@ -601,6 +661,8 @@ def run_scientific_simulation_job(job_payload: dict[str, Any]) -> dict[str, Any]
             parsed_summary=parsed_summary,
         )
         if visualization_data is not None:
+            if not visualization_data.get("dose_results") and engine_contract.get("dose_results"):
+                visualization_data["dose_results"] = engine_contract["dose_results"]
             parsed_summary = {**parsed_summary, "visualization_data": visualization_data}
             engine_contract["summary"] = parsed_summary
 
